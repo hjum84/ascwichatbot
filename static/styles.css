@@ -1,0 +1,128 @@
+/* Base styling for the body */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+/* Container for the entire chat interface */
+.chat-container {
+    width: 400px;
+    max-width: 100%;
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Chat box where messages are displayed */
+.chat-box {
+    flex-grow: 1;
+    padding: 10px;
+    overflow-y: auto;
+    border-bottom: 1px solid #ddd;
+    height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Styling for individual messages */
+.message {
+    margin: 10px 0;
+    max-width: 75%;
+    padding: 10px;
+    border-radius: 10px;
+    position: relative;
+}
+
+.message p {
+    margin: 0;
+}
+
+/* Bot messages aligned to the left */
+.bot {
+    background-color: #e5e5ea;
+    color: #000;
+    align-self: flex-start;
+    border-bottom-left-radius: 0;
+}
+
+/* User messages aligned to the right */
+.user {
+    background-color: #0084ff;
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 0;
+}
+
+
+/* Input container: using flex to align the textarea and button horizontally */
+.input-container {
+    display: flex;
+    align-items: center;  /* Center vertically */
+    padding: 10px;
+    border-top: 1px solid #ddd;
+    background-color: #fff;
+}
+
+/* Auto-resizing textarea for message input */
+textarea#userInput {
+    flex-grow: 1;  /* Takes available horizontal space */
+    padding: 10px;
+    font-family: Arial, sans-serif;  /* Explicitly set font family */ 
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    overflow: hidden;  /* Hide scrollbars */
+    resize: none;      /* Disable manual resizing */
+    box-sizing: border-box;
+    letter-spacing: 0;    /* Set letter spacing to default */
+    word-spacing: normal; /* Set word spacing to normal */
+}
+
+/* Send button: remains fixed to the right of the textarea */
+.send-btn {
+    flex-shrink: 0;    /* Do not let the button shrink */
+    margin-left: 10px;  /* Space between textarea and button */
+    width: 50px;
+    height: 35px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    background-color: #0084ff;
+    text-align: center;  /* Center text horizontally */
+    color: white;
+    border-radius: 5px;
+}
+
+/* Hover effect for send button */
+.send-btn:hover {
+    background-color: #006bbd;
+}
+
+/* Optional generic button styling */
+button {
+    cursor: pointer;
+}
+/* Adjust layout for screens 480px wide or less */
+@media (max-width: 480px) {
+    .send-btn {
+      width: 50px;
+      height: 35px;
+      font-size: 14px;
+      margin-left: 10px;
+      display: flex;              /* Use flexbox for centering */
+      justify-content: center;    /* Center horizontally */
+      align-items: center;        /* Center vertically */
+    }
+    textarea#userInput {
+      width: calc(100% - 55px);
+    }
+  }
+  

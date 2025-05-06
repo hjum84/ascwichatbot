@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ program_display_name }} Chatbot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <!-- Optional: Include marked.js if you are using Markdown formatting -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .program-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 20px;
+      background-color: #f8f8f8;
+      border-bottom: 1px solid #ddd;
+      margin-bottom: 10px;
+    }
+    
+    .program-title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #0073b1;
+    }
+    
+    .switch-program-btn {
+      background-color: #0073b1;
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .switch-program-btn:hover {
+      background-color: #005f87;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <div class="program-header">
+      <div class="program-title">{{ program_display_name }} Chatbot</div>
+      <a href="{{ url_for('switch_program') }}" class="switch-program-btn">Switch Program</a>
+    </div>
+    <div id="chat-box" class="chat-box"></div>
+    <div class="input-container">
+      <!-- Use a textarea for multi-line input -->
+      <textarea id="userInput" placeholder="Type your message here..." rows="1"></textarea>
+      <!-- Add a class "send-btn" to the button for fixed positioning -->
+      <button id="sendBtn" class="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // Auto-resize the textarea as the user types.
+    var textarea = document.getElementById('userInput');
+    textarea.addEventListener('input', function() {
+      this.style.height = 'auto';                 // Reset height
+      this.style.height = this.scrollHeight + 'px'; // Adjust height to content
+    });
+
+    // Allow sending the message when pressing Enter (unless Shift+Enter is used)
+    document.getElementById('userInput').addEventListener("keydown", function(event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();  // Prevent newline insertion
+        sendMessage();
+      }
+    });
+
+    // Function to send the message to the backend
+    function sendMessage() {
+      const userInput = document.getElementById('userInput');
+      const message = userInput.value;
+      if (message.trim() === '') return; // Do nothing if the textarea is empty
+
+      // Display the user's message in the chat
+      addMessage(message, 'user');
+      userInput.value = '';  // Clear the textarea
+      userInput.style.height = 'auto';  // Reset height after clearing
+
+      // Send the message to the backend
+      fetch('/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: message }),
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.reply) {
+          addMessage(data.reply, 'bot');
+        } else {
+          addMessage("Error: " + data.error, 'bot');
+        }
+      })
+      .catch(error => {
+        addMessage("Network error: " + error, 'bot');
+      });
+    }
+
+    // Function to add a message to the chat box
+    function addMessage(message, sender) {
+      const chatBox = document.getElementById('chat-box');
+      const messageDiv = document.createElement('div');
+      messageDiv.classList.add('message', sender);
+      
+      // Process the message for Markdown formatting and newline conversion
+      const formattedMessage = marked.parseInline ? marked.parseInline(message).replace(/\n/g, '<br>') : message.replace(/\n/g, '<br>');
+      messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
+      
+      chatBox.appendChild(messageDiv);
+      chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+    }
+
+    // Display welcome message when the page loads
+    window.onload = function() {
+      const programName = "{{ program_display_name }}";
+      addMessage(`Hi, I'm the ${programName} chatbot. I can answer up to 3 questions related to ${programName.toLowerCase()} per day!`, 'bot');
+    }
+  </script>
+</body>
+</html>

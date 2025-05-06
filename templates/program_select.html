@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select a Learning Program</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .program-container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 500px;
+            margin: 50px auto;
+            text-align: center;
+        }
+
+        .program-container h2 {
+            margin-bottom: 20px;
+            font-size: 24px;
+            color: #333;
+        }
+
+        .program-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin: 30px 0;
+        }
+
+        .program-item {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: left;
+        }
+
+        .program-item:hover {
+            background-color: #e8f4f8;
+            border-color: #0073b1;
+        }
+
+        .program-item h3 {
+            margin: 0 0 5px 0;
+            color: #0073b1;
+        }
+
+        .program-item p {
+            margin: 0;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .program-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .program-item.disabled:hover {
+            background-color: #f8f8f8;
+            border-color: #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="program-container">
+        <h2>Select a Learning Program</h2>
+        <p>Choose which program's chatbot you would like to access:</p>
+        
+        <div class="program-list">
+            <a href="{{ url_for('set_program', program='BCC') }}" class="program-item">
+                <h3>Building Coaching Competency (BCC)</h3>
+                <p>Learn about coaching skills, mindset, and processes for child welfare and juvenile justice administrators.</p>
+            </a>
+            
+            <a href="{{ url_for('set_program', program='MI') }}" class="program-item">
+                <h3>Motivational Interviewing (MI)</h3>
+                <p>Learn about motivational interviewing techniques and approaches for effective client engagement.</p>
+            </a>
+            
+            <a href="{{ url_for('set_program', program='Safety') }}" class="program-item">
+                <h3>Safety and Risk</h3>
+                <p>Learn about safety planning, risk assessment, and management in child welfare cases.</p>
+            </a>
+        </div>
+    </div>
+</body>
+</html> 

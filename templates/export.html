@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Export Users</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    /* Custom styling for the Export page */
+    body {
+      background-color: #f0f0f0; /* Light background matching the chat page */
+      font-family: Arial, sans-serif;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .export-container {
+      background-color: #fff;
+      padding: 40px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      max-width: 400px;
+      width: 100%;
+    }
+    .export-container h2 {
+      margin-bottom: 20px;
+      color: #333;
+      font-size: 24px;
+    }
+    .export-container p {
+      margin-bottom: 30px;
+      color: #555;
+      font-size: 16px;
+    }
+    .export-button {
+      display: inline-block;
+      background-color: #0084ff;
+      color: #fff;
+      padding: 12px 25px;
+      border-radius: 5px;
+      text-decoration: none;
+      font-size: 16px;
+      transition: background-color 0.3s ease;
+    }
+    .export-button:hover {
+      background-color: #006bbd;
+    }
+  </style>
+</head>
+<body>
+  <div class="export-container">
+    <h2>Export User Data</h2>
+    <p>Click the button below to download the CSV file of all registered users.</p>
+    <a href="{{ url_for('export_users') }}" class="export-button">Download CSV</a>
+  </div>
+</body>
+</html>

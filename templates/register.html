@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register for Learning Program Chatbots</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .register-container {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 350px;
+            margin: auto;
+            text-align: center;
+        }
+
+        .register-container h2 {
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .register-container input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+
+        .register-container button {
+            width: 100%;
+            padding: 10px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .register-container button:hover {
+            background-color: #005f87;
+        }
+
+        .login-link {
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        
+        .login-link a {
+            color: #0073b1;
+            text-decoration: none;
+        }
+        
+        .programs-list {
+            margin-top: 20px;
+            text-align: left;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .programs-list h3 {
+            font-size: 16px;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .programs-list ul {
+            padding-left: 20px;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="register-container">
+        <h2>Register for Chatbots</h2>
+        <form action="/register" method="POST">
+            <input type="text" id="last_name" name="last_name" placeholder="Last Name" required>
+            <input type="email" id="email" name="email" placeholder="Email" required>
+            <button type="submit">Register</button>
+        </form>
+        <div class="login-link">
+            <p>Already registered? <a href="{{ url_for('login') }}">Sign-In</a></p>
+        </div>
+        
+        <div class="programs-list">
+            <h3>Available Learning Programs:</h3>
+            <ul>
+                <li>Building Coaching Competency (BCC)</li>
+                <li>Motivational Interviewing (MI)</li>
+                <li>Safety and Risk Assessment</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

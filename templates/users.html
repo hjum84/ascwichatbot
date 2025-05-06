@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registered Users</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .users-table th, .users-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .users-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        
+        .users-table tr:hover {
+            background-color: #f9f9f9;
+        }
+        
+        .action-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 15px;
+            background-color: #0073b1;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            background-color: #005f87;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Registered Users</h1>
+        
+        <table class="users-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Last Name</th>
+                    <th>Email</th>
+                    <th>Visit Count</th>
+                    <th>Program</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.last_name }}</td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ user.visit_count }}</td>
+                    <td>{{ user.current_program or 'None' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <div class="action-buttons">
+            <a href="{{ url_for('export_users') }}" class="btn">Export Users (CSV)</a>
+            <a href="{{ url_for('export_page') }}" class="btn">Back to Admin</a>
+        </div>
+    </div>
+</body>
+</html> 

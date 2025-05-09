@@ -144,8 +144,12 @@
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-center">
                                         <h5 class="card-title mb-0">{{ chatbot.display_name }}</h5>
-                                        <button type="button" class="btn btn-success btn-sm restore-btn"
-                                                data-chatbot-name="{{ chatbot.name }}">Restore</button>
+                                        <div>
+                                            <button type="button" class="btn btn-success btn-sm restore-btn me-2"
+                                                    data-chatbot-name="{{ chatbot.name }}">Restore</button>
+                                            <button type="button" class="btn btn-danger btn-sm permanent-delete-btn"
+                                                    data-chatbot-name="{{ chatbot.name }}">Permanent Delete</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -311,6 +315,30 @@
                     };
                     
                     xhr.send(formData);
+                });
+            });
+            
+            // Permanent delete chatbot
+            document.querySelectorAll('.permanent-delete-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const chatbotName = this.getAttribute('data-chatbot-name');
+                    if (confirm('WARNING: This will permanently delete the chatbot and cannot be undone. Are you sure?')) {
+                        const formData = new FormData();
+                        formData.append('chatbot_name', chatbotName);
+                        
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('POST', "{{ url_for('admin_permanent_delete_chatbot') }}", true);
+                        
+                        xhr.onload = function() {
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                window.location.href = "{{ url_for('admin', message='The chatbot has been permanently deleted', message_type='success') }}";
+                            } else {
+                                alert('Error: Could not permanently delete chatbot');
+                            }
+                        };
+                        
+                        xhr.send(formData);
+                    }
                 });
             });
         });

@@ -974,6 +974,47 @@ def admin_restore_chatbot():
                                 message=f'An error occurred: {str(e)}', 
                                 message_type='danger'))
 
+# Permanent delete chatbot route
+@app.route('/admin_permanent_delete_chatbot', methods=['POST'])
+@requires_auth
+def admin_permanent_delete_chatbot():
+    try:
+        chatbot_name = request.form.get('chatbot_name')
+        if not chatbot_name:
+            return redirect(url_for('admin', 
+                                    message='Chatbot name was not provided', 
+                                    message_type='danger'))
+        
+        # Permanently delete from database
+        chatbot_name_upper = chatbot_name.upper()
+        db = get_db()
+        try:
+            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
+            if not chatbot:
+                return redirect(url_for('admin', 
+                                        message=f'Could not find {chatbot_name} chatbot in database', 
+                                        message_type='danger'))
+            
+            # Get display name before deletion for the success message
+            display_name = chatbot.name
+            
+            # Permanently delete from database
+            db.delete(chatbot)
+            db.commit()
+            
+            # Reload program content
+            load_program_content()
+            
+            return redirect(url_for('admin', 
+                                    message=f'The {display_name} chatbot has been permanently deleted', 
+                                    message_type='success'))
+        finally:
+            close_db(db)
+    except Exception as e:
+        return redirect(url_for('admin', 
+                                message=f'An error occurred: {str(e)}', 
+                                message_type='danger'))
+
 if __name__ == '__main__':
     # Migrate existing content to database when the app starts
     migrate_content_to_db()

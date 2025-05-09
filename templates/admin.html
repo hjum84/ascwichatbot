@@ -130,8 +130,12 @@
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-center mb-2">
                                             <h5 class="card-title mb-0">{{ chatbot.display_name }}</h5>
-                                            <button type="button" class="btn btn-danger btn-sm delete-btn" 
-                                                    data-chatbot-name="{{ chatbot.name }}">Delete</button>
+                                            <div>
+                                                <button type="button" class="btn btn-info btn-sm view-content-btn me-2"
+                                                        data-chatbot-name="{{ chatbot.name }}">View Content</button>
+                                                <button type="button" class="btn btn-danger btn-sm delete-btn" 
+                                                        data-chatbot-name="{{ chatbot.name }}">Delete</button>
+                                            </div>
                                         </div>
                                         <div class="text-muted small mb-2">File: content_summary_{{ chatbot.name|lower }}.txt</div>
                                         <div class="mb-3">
@@ -179,6 +183,24 @@
                             <a href="{{ url_for('home') }}" class="btn btn-secondary">Return to Home</a>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Viewing Content -->
+    <div class="modal fade" id="viewContentModal" tabindex="-1" aria-labelledby="viewContentModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="viewContentModalLabel">Chatbot Content</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <pre id="chatbotContentDisplay" style="white-space: pre-wrap; word-wrap: break-word;"></pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>
@@ -360,6 +382,50 @@
                         
                         xhr.send(formData);
                     }
+                });
+            });
+
+            // View Content button handler
+            document.querySelectorAll('.view-content-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const chatbotName = this.getAttribute('data-chatbot-name');
+                    const modalTitle = document.getElementById('viewContentModalLabel');
+                    const modalBody = document.getElementById('chatbotContentDisplay');
+                    const viewContentModal = new bootstrap.Modal(document.getElementById('viewContentModal'));
+
+                    // Set title and show loading state
+                    modalTitle.textContent = 'Content for ' + chatbotName;
+                    modalBody.textContent = 'Loading content...';
+                    viewContentModal.show();
+
+                    // Fetch content from server
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', `{{ url_for('admin_get_chatbot_content', chatbot_code='TEMP_CODE') }}`.replace('TEMP_CODE', chatbotName), true);
+                    
+                    xhr.onload = function() {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                if (response.success) {
+                                    modalBody.textContent = response.content;
+                                    modalTitle.textContent = 'Content for ' + response.display_name;
+                                } else {
+                                    modalBody.textContent = 'Error: ' + response.error;
+                                }
+                            } catch (e) {
+                                modalBody.textContent = 'Error parsing server response.';
+                                console.error('Parse error:', e);
+                            }
+                        } else {
+                            modalBody.textContent = 'Error fetching content: ' + xhr.statusText;
+                        }
+                    };
+
+                    xhr.onerror = function() {
+                        modalBody.textContent = 'Network error. Please try again.';
+                    };
+
+                    xhr.send();
                 });
             });
         });

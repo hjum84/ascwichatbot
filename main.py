@@ -1015,6 +1015,30 @@ def admin_permanent_delete_chatbot():
                                 message=f'An error occurred: {str(e)}', 
                                 message_type='danger'))
 
+# Route to get chatbot content
+@app.route('/admin_get_chatbot_content/<chatbot_code>')
+@requires_auth
+def admin_get_chatbot_content(chatbot_code):
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+        if chatbot and chatbot.is_active:
+            return jsonify({
+                "success": True, 
+                "content": chatbot.content,
+                "display_name": chatbot.name,
+                "code": chatbot.code
+            })
+        elif chatbot and not chatbot.is_active:
+            return jsonify({"success": False, "error": "Chatbot is currently deleted (inactive). Restore it to view content."}), 404
+        else:
+            return jsonify({"success": False, "error": "Chatbot not found."}), 404
+    except Exception as e:
+        logger.error(f"Error fetching chatbot content for {chatbot_code}: {str(e)}")
+        return jsonify({"success": False, "error": "Server error occurred."}), 500
+    finally:
+        close_db(db)
+
 if __name__ == '__main__':
     # Migrate existing content to database when the app starts
     migrate_content_to_db()

@@ -1039,6 +1039,49 @@ def admin_get_chatbot_content(chatbot_code):
     finally:
         close_db(db)
 
+# Route to update chatbot content
+@app.route('/admin_update_chatbot_content', methods=['POST'])
+@requires_auth
+def admin_update_chatbot_content():
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code')
+        new_content = request.form.get('content')
+
+        if not chatbot_code or new_content is None: # new_content can be empty string
+            return jsonify({"success": False, "error": "Chatbot code and content are required."}), 400
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+        if not chatbot:
+            return jsonify({"success": False, "error": "Chatbot not found."}), 404
+        
+        if not chatbot.is_active:
+            return jsonify({"success": False, "error": "Cannot update content of an inactive (deleted) chatbot. Please restore it first."}), 400
+
+        chatbot.content = new_content
+        # Optionally, you might want to update a 'last_modified' timestamp here
+        # chatbot.last_modified = datetime.datetime.utcnow()
+        db.commit()
+        
+        # Reload content into memory
+        load_program_content() # Make sure this function correctly reloads the updated content
+        
+        logger.info(f"Content for chatbot {chatbot.name} (Code: {chatbot_code}) updated successfully.")
+        return jsonify({
+            "success": True, 
+            "message": f"Content for {chatbot.name} updated successfully.",
+            "display_name": chatbot.name 
+            }), 200
+
+    except Exception as e:
+        if db: # db might not be defined if error is very early
+            db.rollback()
+        logger.error(f"Error updating chatbot content for {request.form.get('chatbot_code')}: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "error": "Server error occurred during content update."}), 500
+    finally:
+        if db:
+            close_db(db)
+
 if __name__ == '__main__':
     # Migrate existing content to database when the app starts
     migrate_content_to_db()

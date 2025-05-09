@@ -131,8 +131,8 @@
                                         <div class="d-flex justify-content-between align-items-center mb-2">
                                             <h5 class="card-title mb-0">{{ chatbot.display_name }}</h5>
                                             <div>
-                                                <button type="button" class="btn btn-info btn-sm view-content-btn me-2"
-                                                        data-chatbot-name="{{ chatbot.name }}">View Content</button>
+                                                <button type="button" class="btn btn-info btn-sm edit-content-btn me-2"
+                                                        data-chatbot-name="{{ chatbot.name }}" data-chatbot-display-name="{{ chatbot.display_name }}">Edit Content</button>
                                                 <button type="button" class="btn btn-danger btn-sm delete-btn" 
                                                         data-chatbot-name="{{ chatbot.name }}">Delete</button>
                                             </div>
@@ -188,19 +188,21 @@
         </div>
     </div>
 
-    <!-- Modal for Viewing Content -->
-    <div class="modal fade" id="viewContentModal" tabindex="-1" aria-labelledby="viewContentModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <!-- Modal for Editing Content -->
+    <div class="modal fade" id="editContentModal" tabindex="-1" aria-labelledby="editContentModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="viewContentModalLabel">Chatbot Content</h5>
+                    <h5 class="modal-title" id="editContentModalLabel">Edit Chatbot Content</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <pre id="chatbotContentDisplay" style="white-space: pre-wrap; word-wrap: break-word;"></pre>
+                    <input type="hidden" id="editChatbotNameInput">
+                    <textarea id="chatbotContentTextarea" class="form-control" rows="20" style="white-space: pre-wrap; word-wrap: break-word;"></textarea>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="saveContentChangesBtn">Save Changes</button>
                 </div>
             </div>
         </div>
@@ -385,48 +387,105 @@
                 });
             });
 
-            // View Content button handler
-            document.querySelectorAll('.view-content-btn').forEach(function(btn) {
+            // Edit Content button handler
+            document.querySelectorAll('.edit-content-btn').forEach(function(btn) {
                 btn.addEventListener('click', function() {
-                    const chatbotName = this.getAttribute('data-chatbot-name');
-                    const modalTitle = document.getElementById('viewContentModalLabel');
-                    const modalBody = document.getElementById('chatbotContentDisplay');
-                    const viewContentModal = new bootstrap.Modal(document.getElementById('viewContentModal'));
+                    const chatbotCode = this.getAttribute('data-chatbot-name'); // This is the unique code
+                    const chatbotDisplayName = this.getAttribute('data-chatbot-display-name');
+                    
+                    const modalTitle = document.getElementById('editContentModalLabel');
+                    const contentTextarea = document.getElementById('chatbotContentTextarea');
+                    const hiddenChatbotNameInput = document.getElementById('editChatbotNameInput');
+                    const editContentModal = new bootstrap.Modal(document.getElementById('editContentModal'));
 
-                    // Set title and show loading state
-                    modalTitle.textContent = 'Content for ' + chatbotName;
-                    modalBody.textContent = 'Loading content...';
-                    viewContentModal.show();
+                    modalTitle.textContent = 'Edit Content for ' + chatbotDisplayName;
+                    contentTextarea.value = 'Loading content...'; // Show loading state in textarea
+                    hiddenChatbotNameInput.value = chatbotCode; // Store the code for saving
+                    editContentModal.show();
 
-                    // Fetch content from server
                     const xhr = new XMLHttpRequest();
-                    xhr.open('GET', `{{ url_for('admin_get_chatbot_content', chatbot_code='TEMP_CODE') }}`.replace('TEMP_CODE', chatbotName), true);
+                    // Use chatbotCode (which is unique) for fetching
+                    xhr.open('GET', `{{ url_for('admin_get_chatbot_content', chatbot_code='TEMP_CODE') }}`.replace('TEMP_CODE', chatbotCode), true);
                     
                     xhr.onload = function() {
                         if (xhr.status >= 200 && xhr.status < 300) {
                             try {
                                 const response = JSON.parse(xhr.responseText);
                                 if (response.success) {
-                                    modalBody.textContent = response.content;
-                                    modalTitle.textContent = 'Content for ' + response.display_name;
+                                    contentTextarea.value = response.content; // Populate textarea
                                 } else {
-                                    modalBody.textContent = 'Error: ' + response.error;
+                                    contentTextarea.value = 'Error: ' + response.error;
                                 }
                             } catch (e) {
-                                modalBody.textContent = 'Error parsing server response.';
+                                contentTextarea.value = 'Error parsing server response.';
                                 console.error('Parse error:', e);
                             }
                         } else {
-                            modalBody.textContent = 'Error fetching content: ' + xhr.statusText;
+                            contentTextarea.value = 'Error fetching content: ' + xhr.statusText;
                         }
                     };
-
                     xhr.onerror = function() {
-                        modalBody.textContent = 'Network error. Please try again.';
+                        contentTextarea.value = 'Network error. Please try again.';
                     };
-
                     xhr.send();
                 });
+            });
+            
+            // Save Content button handler
+            document.getElementById('saveContentChangesBtn').addEventListener('click', function() {
+                const chatbotCode = document.getElementById('editChatbotNameInput').value;
+                const newContent = document.getElementById('chatbotContentTextarea').value;
+                const saveButton = this;
+                
+                const formData = new FormData();
+                formData.append('chatbot_code', chatbotCode); // Send unique code
+                formData.append('content', newContent);
+                
+                saveButton.disabled = true;
+                saveButton.textContent = 'Saving...';
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', "{{ url_for('admin_update_chatbot_content') }}", true);
+                
+                xhr.onload = function() {
+                    saveButton.disabled = false;
+                    saveButton.textContent = 'Save Changes';
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            const serverResponse = JSON.parse(xhr.responseText); // Renamed to avoid conflict
+                            if(serverResponse.success){
+                                const editContentModalElement = document.getElementById('editContentModal');
+                                const editContentModal = bootstrap.Modal.getInstance(editContentModalElement);
+                                if(editContentModal) {
+                                    editContentModal.hide();
+                                }
+                                
+                                // Construct the redirect URL dynamically using JavaScript variables
+                                let message = 'Content has been updated successfully!';
+                                if (serverResponse.display_name) {
+                                    message = 'Content for ' + serverResponse.display_name + ' has been updated.';
+                                }
+                                const redirectUrl = `{{ url_for('admin') }}?message=${encodeURIComponent(message)}&message_type=success`;
+                                window.location.href = redirectUrl;
+
+                            } else {
+                                alert('Error: ' + (serverResponse.error || 'Could not update content.'));
+                            }
+                        } catch(e) {
+                             alert('Error parsing server response while saving.');
+                             console.error("Parse error on save:", e, xhr.responseText);
+                        }
+                    } else {
+                        alert('Error: Could not update content. Status: ' + xhr.statusText);
+                    }
+                };
+                xhr.onerror = function () {
+                    saveButton.disabled = false;
+                    saveButton.textContent = 'Save Changes';
+                    alert('Network error. Please try again.');
+                };
+                
+                xhr.send(formData);
             });
         });
     </script>

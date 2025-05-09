@@ -115,3 +115,8 @@ Werkzeug==3.0.4
 yarl==1.15.5
 SQLAlchemy
 psycopg2-binary
+# File processing packages
+PyPDF2==3.0.1
+python-pptx==0.6.21
+python-docx==0.8.11
+textract==1.6.5

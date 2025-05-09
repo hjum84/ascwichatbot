@@ -7,10 +7,39 @@ import io
 import threading
 import logging
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session
+from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash
 from functools import wraps
 import re
-from models import User, get_db, close_db
+from models import User, ChatbotContent, get_db, close_db
+import werkzeug
+import glob
+import shutil
+from werkzeug.utils import secure_filename
+
+# For file content extraction - try to import, but don't fail if not available
+try:
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
+
+try:
+    import textract
+    TEXTRACT_AVAILABLE = True
+except ImportError:
+    TEXTRACT_AVAILABLE = False
+
+try:
+    from pptx import Presentation
+    PPTX_AVAILABLE = True
+except ImportError:
+    PPTX_AVAILABLE = False
+
+try:
+    import docx
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -24,36 +53,92 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
 
-# Program content dictionaries
+# Program content dictionaries (in-memory cache)
 program_content = {}
-program_names = {
-    "BCC": "Building Coaching Competency",
-    "MI": "Motivational Interviewing",
-    "Safety": "Safety and Risk Assessment"
-}
+program_names = {}
+program_descriptions = {}
+deleted_programs = set()  # Keep track of deleted programs temporarily
 
-# Load content summaries for each program
+# Load content summaries for each program from database
 def load_program_content():
-    # BCC content
-    try:
-        with open("content_summary_bcc.txt", "r", encoding="utf-8") as f:
-            program_content["BCC"] = f.read()
-    except FileNotFoundError:
-        program_content["BCC"] = "BCC content not available"
+    # Clear existing content
+    program_content.clear()
+    program_names.clear()
+    program_descriptions.clear()
     
-    # MI content
+    # Get all active chatbot contents from database
+    db = get_db()
     try:
-        with open("content_summary_mi.txt", "r", encoding="utf-8") as f:
-            program_content["MI"] = f.read()
-    except FileNotFoundError:
-        program_content["MI"] = "MI content not available"
-    
-    # Safety content
+        chatbots = ChatbotContent.get_all_active(db)
+        
+        # Load content into memory
+        for chatbot in chatbots:
+            program_content[chatbot.code] = chatbot.content
+            program_names[chatbot.code] = chatbot.name
+            program_descriptions[chatbot.code] = chatbot.description or ""
+        
+        # Make sure default programs are defined with proper names even if not in DB
+        default_programs = {
+            "BCC": "Building Coaching Competency",
+            "MI": "Motivational Interviewing",
+            "Safety": "Safety and Risk Assessment"
+        }
+        
+        for code, name in default_programs.items():
+            if code not in program_names:
+                program_names[code] = name
+        
+        logger.info(f"Loaded {len(program_content)} program content entries from database")
+        logger.debug(f"Available programs: {', '.join(program_content.keys())}")
+    finally:
+        close_db(db)
+
+# Function to migrate existing file-based content to database
+def migrate_content_to_db():
+    db = get_db()
     try:
-        with open("content_summary_safety.txt", "r", encoding="utf-8") as f:
-            program_content["Safety"] = f.read()
-    except FileNotFoundError:
-        program_content["Safety"] = "Safety content not available"
+        # Find all content summary files
+        summary_files = glob.glob("content_summary_*.txt")
+        migrated_count = 0
+        
+        for file_path in summary_files:
+            # Extract program name from filename
+            program_code = file_path.replace("content_summary_", "").replace(".txt", "").upper()
+            
+            # Skip if already in database
+            existing = ChatbotContent.get_by_code(db, program_code)
+            if existing:
+                logger.debug(f"Program {program_code} already in database, skipping")
+                continue
+                
+            # Read content
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                
+                # Get description from memory or use default
+                display_name = program_names.get(program_code, program_code)
+                description = program_descriptions.get(program_code, "")
+                
+                # Create database entry
+                ChatbotContent.create_or_update(
+                    db, 
+                    code=program_code, 
+                    name=display_name,
+                    content=content, 
+                    description=description
+                )
+                migrated_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error migrating program {program_code}: {str(e)}")
+        
+        # Commit changes
+        if migrated_count > 0:
+            db.commit()
+            logger.info(f"Migrated {migrated_count} program content files to database")
+    finally:
+        close_db(db)
 
 # Initialize program content
 load_program_content()
@@ -219,34 +304,53 @@ def program_select():
     if 'user_id' not in session:
         logger.warning("User not in session, redirecting to login")
         return redirect(url_for('login'))
-        
-    # Enable all programs - previously these were conditionally enabled
-    mi_enabled = True
-    safety_enabled = True
     
-    logger.debug("Program select page for user: %s", session.get('user_id'))
-    return render_template('program_select.html', 
-                         mi_enabled=mi_enabled,
-                         safety_enabled=safety_enabled)
+    # Get all available programs from database
+    db = get_db()
+    try:
+        chatbots = ChatbotContent.get_all_active(db)
+        
+        # Prepare data for template
+        available_programs = []
+        for chatbot in chatbots:
+            program_info = {
+                "code": chatbot.code,
+                "name": chatbot.name,
+                "description": chatbot.description or f"Learn about the {chatbot.name} program content."
+            }
+            available_programs.append(program_info)
+        
+        # Sort programs alphabetically
+        available_programs.sort(key=lambda x: x["name"])
+        
+        logger.debug(f"Program select page for user: {session.get('user_id')}, showing {len(available_programs)} programs")
+        return render_template('program_select.html', 
+                                available_programs=available_programs)
+    finally:
+        close_db(db)
 
 # Set program route
 @app.route('/set_program/<program>')
 def set_program(program):
-    # Verify valid program
-    if program not in ["BCC", "MI", "Safety"]:
-        return redirect(url_for('program_select'))
-    
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not in session, redirecting to login")
-        return redirect(url_for('login'))
-        
-    user_id = session['user_id']
-    logger.debug("Setting program %s for user %s", program, user_id)
-    
-    # Get DB session
+    # Verify if content exists for this program in the database
+    program_upper = program.upper()
     db = get_db()
     try:
+        chatbot = ChatbotContent.get_by_code(db, program_upper)
+        if not chatbot or not chatbot.is_active:
+            logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('program_select'))
+            
+        # Verify user is logged in
+        if 'user_id' not in session:
+            logger.warning("User not in session, redirecting to login")
+            close_db(db)
+            return redirect(url_for('login'))
+            
+        user_id = session['user_id']
+        logger.debug("Setting program %s for user %s", program, user_id)
+        
         # Get user by ID
         user = User.get_by_id(db, user_id)
         
@@ -258,30 +362,66 @@ def set_program(program):
             return redirect(url_for('login'))
             
         # Update program
-        user.current_program = program
+        user.current_program = program_upper
         db.commit()
         
         # Set in session
-        session['current_program'] = program
+        session['current_program'] = program_upper
         
         # Cleanup
         close_db(db)
         
         # Redirect to the appropriate program page
-        if program == "BCC":
+        if program_upper == "BCC":
             return redirect(url_for('index_bcc'))
-        elif program == "MI":
+        elif program_upper == "MI":
             return redirect(url_for('index_mi'))
-        elif program == "Safety":
+        elif program_upper == "SAFETY":
             return redirect(url_for('index_safety'))
         else:
-            return redirect(url_for('program_select'))
+            # For custom programs, use the generic index route
+            return redirect(url_for('index_generic', program=program))
         
     except Exception as e:
         # Rollback on error
         db.rollback()
         close_db(db)
         logger.error("Error setting program: %s", str(e))
+        return redirect(url_for('program_select'))
+
+# Generic chatbot interface for custom programs
+@app.route('/index_generic/<program>')
+def index_generic(program):
+    # Verify user is logged in
+    if 'user_id' not in session:
+        logger.warning("User not logged in, redirecting to login")
+        return redirect(url_for('login'))
+    
+    # Verify program exists in database
+    program_upper = program.upper()
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, program_upper)
+        if not chatbot or not chatbot.is_active:
+            logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('program_select'))
+            
+        # Set current program
+        session['current_program'] = program_upper
+        
+        # Get display name and description
+        program_display_name = chatbot.name
+        
+        logger.debug(f"Loading generic chatbot interface for {program}")
+        close_db(db)
+        return render_template('index.html',
+                            program=program_upper,
+                            program_display_name=program_display_name)
+    except Exception as e:
+        if 'db' in locals():
+            close_db(db)
+        logger.error(f"Error loading generic chatbot: {str(e)}")
         return redirect(url_for('program_select'))
 
 # BCC Chatbot interface
@@ -520,8 +660,326 @@ def show_users():
 @app.route('/export')
 @requires_auth
 def export_page():
-    return render_template('export.html')
+    # Add admin page to the routes available from export page
+    return render_template('export.html', show_admin_link=True)
+
+# Admin page route
+@app.route('/admin')
+@requires_auth
+def admin():
+    # Get list of available and deleted chatbots from database
+    db = get_db()
+    try:
+        # Get active chatbots
+        active_chatbots = ChatbotContent.get_all_active(db)
+        available_chatbots = []
+        for chatbot in active_chatbots:
+            available_chatbots.append({
+                "name": chatbot.code,
+                "display_name": chatbot.name,
+                "description": chatbot.description or ""
+            })
+        
+        # Get inactive (deleted) chatbots
+        deleted_chatbots = []
+        deleted_bots = db.query(ChatbotContent).filter(ChatbotContent.is_active == False).all()
+        for chatbot in deleted_bots:
+            deleted_chatbots.append({
+                "name": chatbot.code,
+                "display_name": chatbot.name
+            })
+        
+        return render_template('admin.html', 
+                              available_chatbots=available_chatbots,
+                              deleted_chatbots=deleted_chatbots,
+                              message=request.args.get('message'),
+                              message_type=request.args.get('message_type', 'info'))
+    finally:
+        close_db(db)
+
+# File upload and chatbot update route
+@app.route('/admin_upload', methods=['POST'])
+@requires_auth
+def admin_upload():
+    try:
+        logger.info("Admin upload route called")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Content type: {request.content_type}")
+        logger.info(f"Form data: {request.form}")
+        logger.info(f"Files: {request.files}")
+        
+        # Get course name
+        course_name = request.form.get('course_name')
+        logger.info(f"Course name received: {course_name}")
+        
+        if not course_name:
+            logger.warning("No course name provided")
+            return jsonify({"error": "Please enter a course name"}), 400
+        
+        # Get display name (optional)
+        display_name = request.form.get('display_name')
+        logger.info(f"Display name received: {display_name}")
+        
+        if not display_name:
+            display_name = course_name  # Default to course name if not provided
+            logger.info(f"Using course name as display name: {display_name}")
+        
+        # Get description (optional)
+        description = request.form.get('description', '')
+        logger.info(f"Description received: {description[:30]}..." if description else "No description")
+        
+        # Check if file was uploaded
+        logger.info(f"Request files: {list(request.files.keys())}")
+        
+        if 'file' not in request.files:
+            logger.warning("No file part in the request")
+            return jsonify({"error": "Please upload a file"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            logger.warning("No file selected")
+            return jsonify({"error": "Please select a file"}), 400
+        
+        logger.info(f"File received: {file.filename}")
+        
+        # Save file temporarily
+        filename = secure_filename(file.filename)
+        temp_path = os.path.join('temp', filename)
+        os.makedirs('temp', exist_ok=True)
+        file.save(temp_path)
+        logger.info(f"File saved temporarily at: {temp_path}")
+        
+        # Extract content based on file type
+        file_ext = os.path.splitext(filename)[1].lower()
+        content = ""
+        
+        try:
+            if file_ext == '.txt':
+                # If it's a text file, just read the content
+                with open(temp_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                logger.info(f"Text file content extracted, length: {len(content)}")
+            elif file_ext in ['.pdf'] and PYPDF2_AVAILABLE:
+                # Extract text from PDF
+                with open(temp_path, 'rb') as f:
+                    pdf_reader = PyPDF2.PdfReader(f)
+                    for page_num in range(len(pdf_reader.pages)):
+                        page = pdf_reader.pages[page_num]
+                        content += page.extract_text() + "\n"
+                logger.info(f"PDF content extracted, length: {len(content)}")
+            elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
+                # Extract text from PowerPoint
+                presentation = Presentation(temp_path)
+                for slide in presentation.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            content += shape.text + "\n"
+                logger.info(f"PowerPoint content extracted, length: {len(content)}")
+            elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
+                # Extract text from Word
+                doc = docx.Document(temp_path)
+                for para in doc.paragraphs:
+                    content += para.text + "\n"
+                logger.info(f"Word content extracted, length: {len(content)}")
+            elif TEXTRACT_AVAILABLE:
+                # Try with textract for other formats
+                content = textract.process(temp_path).decode('utf-8')
+                logger.info(f"Textract content extracted, length: {len(content)}")
+            else:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                logger.warning(f"No library available to process {file_ext} files")
+                return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Only text files (.txt) are supported."}), 400
+        except Exception as e:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            logger.error(f"Error extracting content: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Error extracting content from file: {str(e)}"}), 500
+        
+        # Clean up temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        logger.info("Temporary file cleaned up")
+        
+        if not content.strip():
+            logger.warning("Extracted content is empty")
+            return jsonify({"error": "The extracted content is empty"}), 400
+        
+        # Store content in database
+        course_name_upper = course_name.upper()
+        logger.info(f"Storing content for {course_name_upper} in database")
+        
+        try:
+            # Get DB connection
+            db = get_db()
+            
+            # Save to database
+            logger.info("Creating or updating chatbot content in database")
+            ChatbotContent.create_or_update(
+                db,
+                code=course_name_upper,
+                name=display_name,
+                content=content,
+                description=description
+            )
+            
+            # If it was previously marked as inactive, reactivate it
+            logger.info("Checking if chatbot was previously marked inactive")
+            chatbot = ChatbotContent.get_by_code(db, course_name_upper)
+            if chatbot and not chatbot.is_active:
+                logger.info(f"Reactivating chatbot {course_name_upper}")
+                chatbot.is_active = True
+            
+            db.commit()
+            logger.info("Database changes committed")
+            close_db(db)
+            
+            # Reload content to memory
+            logger.info("Reloading program content")
+            load_program_content()
+            
+            logger.info("Upload completed successfully")
+            return jsonify({"success": True, "message": f"The {display_name} chatbot has been successfully updated"}), 200
+            
+        except Exception as e:
+            if 'db' in locals():
+                db.rollback()
+                close_db(db)
+            logger.error(f"Database error: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Database error: {str(e)}"}), 500
+        
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+# Update description route
+@app.route('/admin_update_description', methods=['POST'])
+@requires_auth
+def admin_update_description():
+    try:
+        chatbot_name = request.form.get('chatbot_name')
+        description = request.form.get('description', '')
+        
+        if not chatbot_name:
+            return redirect(url_for('admin', 
+                                    message='Chatbot name was not provided', 
+                                    message_type='danger'))
+        
+        # Update description in the database
+        chatbot_name_upper = chatbot_name.upper()
+        db = get_db()
+        try:
+            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
+            if not chatbot:
+                return redirect(url_for('admin', 
+                                        message=f'Chatbot {chatbot_name} not found in database', 
+                                        message_type='danger'))
+            
+            chatbot.description = description
+            db.commit()
+            
+            # Update memory cache
+            program_descriptions[chatbot_name_upper] = description
+            
+            return redirect(url_for('admin', 
+                                    message=f'Description for {chatbot.name} has been updated', 
+                                    message_type='success'))
+        finally:
+            close_db(db)
+    except Exception as e:
+        return redirect(url_for('admin', 
+                                message=f'An error occurred: {str(e)}', 
+                                message_type='danger'))
+
+# Delete chatbot route
+@app.route('/admin_delete_chatbot', methods=['POST'])
+@requires_auth
+def admin_delete_chatbot():
+    try:
+        chatbot_name = request.form.get('chatbot_name')
+        if not chatbot_name:
+            return redirect(url_for('admin', 
+                                    message='Chatbot name was not provided', 
+                                    message_type='danger'))
+        
+        # Mark as inactive in database instead of deleting the file
+        chatbot_name_upper = chatbot_name.upper()
+        db = get_db()
+        try:
+            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
+            if not chatbot:
+                return redirect(url_for('admin', 
+                                        message=f'Could not find {chatbot_name} chatbot in database', 
+                                        message_type='danger'))
+            
+            # Mark as inactive
+            chatbot.is_active = False
+            db.commit()
+            
+            # Remove from program_content dictionary
+            if chatbot_name_upper in program_content:
+                del program_content[chatbot_name_upper]
+            
+            # Reload program content
+            load_program_content()
+            
+            return redirect(url_for('admin', 
+                                    message=f'The {chatbot.name} chatbot has been successfully deleted', 
+                                    message_type='success'))
+        finally:
+            close_db(db)
+        
+    except Exception as e:
+        return redirect(url_for('admin', 
+                                message=f'An error occurred: {str(e)}', 
+                                message_type='danger'))
+
+# Restore chatbot route
+@app.route('/admin_restore_chatbot', methods=['POST'])
+@requires_auth
+def admin_restore_chatbot():
+    try:
+        chatbot_name = request.form.get('chatbot_name')
+        if not chatbot_name:
+            return redirect(url_for('admin', 
+                                    message='Chatbot name was not provided', 
+                                    message_type='danger'))
+        
+        # Reactivate in database
+        chatbot_name_upper = chatbot_name.upper()
+        db = get_db()
+        try:
+            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
+            if not chatbot:
+                return redirect(url_for('admin', 
+                                        message=f'Could not find {chatbot_name} chatbot in database', 
+                                        message_type='danger'))
+            
+            # Mark as active
+            chatbot.is_active = True
+            db.commit()
+            
+            # Reload program content
+            load_program_content()
+            
+            return redirect(url_for('admin', 
+                                    message=f'The {chatbot.name} chatbot has been successfully restored', 
+                                    message_type='success'))
+        finally:
+            close_db(db)
+    except Exception as e:
+        return redirect(url_for('admin', 
+                                message=f'An error occurred: {str(e)}', 
+                                message_type='danger'))
 
 if __name__ == '__main__':
+    # Migrate existing content to database when the app starts
+    migrate_content_to_db()
+    
+    # Then load the content from database
+    load_program_content()
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

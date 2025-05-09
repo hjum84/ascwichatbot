@@ -55,15 +55,19 @@
             font-size: 14px;
             color: #666;
         }
-
-        .program-item.disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        
+        .program-badge {
+            display: inline-block;
+            margin-left: 8px;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            vertical-align: middle;
         }
-
-        .program-item.disabled:hover {
-            background-color: #f8f8f8;
-            border-color: #ddd;
+        
+        .badge-new {
+            background-color: #28a745;
+            color: white;
         }
     </style>
 </head>
@@ -73,20 +77,21 @@
         <p>Choose which program's chatbot you would like to access:</p>
         
         <div class="program-list">
-            <a href="{{ url_for('set_program', program='BCC') }}" class="program-item">
-                <h3>Building Coaching Competency (BCC)</h3>
-                <p>Learn about coaching skills, mindset, and processes for child welfare and juvenile justice administrators.</p>
-            </a>
+            {% for program in available_programs %}
+                <a href="{{ url_for('set_program', program=program.code) }}" class="program-item">
+                    <h3>
+                        {{ program.name }}
+                        {% if program.code not in ['BCC', 'MI', 'Safety'] %}
+                            <span class="program-badge badge-new">NEW</span>
+                        {% endif %}
+                    </h3>
+                    <p>{{ program.description }}</p>
+                </a>
+            {% endfor %}
             
-            <a href="{{ url_for('set_program', program='MI') }}" class="program-item">
-                <h3>Motivational Interviewing (MI)</h3>
-                <p>Learn about motivational interviewing techniques and approaches for effective client engagement.</p>
-            </a>
-            
-            <a href="{{ url_for('set_program', program='Safety') }}" class="program-item">
-                <h3>Safety and Risk</h3>
-                <p>Learn about safety planning, risk assessment, and management in child welfare cases.</p>
-            </a>
+            {% if available_programs|length == 0 %}
+                <div class="alert alert-info">No chatbot programs are currently available.</div>
+            {% endif %}
         </div>
     </div>
 </body>

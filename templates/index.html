@@ -24,6 +24,16 @@
       color: #0073b1;
     }
     
+    .program-badge {
+      margin-left: 10px;
+      background-color: #0073b1;
+      color: white;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: normal;
+    }
+    
     .switch-program-btn {
       background-color: #0073b1;
       color: white;
@@ -42,7 +52,12 @@
 <body>
   <div class="chat-container">
     <div class="program-header">
-      <div class="program-title">{{ program_display_name }} Chatbot</div>
+      <div class="program-title">
+        {{ program_display_name }} Chatbot
+        {% if program not in ['BCC', 'MI', 'Safety'] %}
+        <span class="program-badge">CUSTOM</span>
+        {% endif %}
+      </div>
       <a href="{{ url_for('switch_program') }}" class="switch-program-btn">Switch Program</a>
     </div>
     <div id="chat-box" class="chat-box"></div>
@@ -119,7 +134,8 @@
     // Display welcome message when the page loads
     window.onload = function() {
       const programName = "{{ program_display_name }}";
-      addMessage(`Hi, I'm the ${programName} chatbot. I can answer up to 3 questions related to ${programName.toLowerCase()} per day!`, 'bot');
+      const programCode = "{{ program }}";
+      addMessage(`Welcome to the ${programName} chatbot! I can answer up to 3 questions related to this program.`, 'bot');
     }
   </script>
 </body>

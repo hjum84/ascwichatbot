@@ -1,6 +1,7 @@
 # models.py
 import os
-from sqlalchemy import create_engine, Column, Integer, String
+import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from dotenv import load_dotenv
@@ -58,6 +59,63 @@ class User(Base):
             "email": self.email,
             "visit_count": self.visit_count,
             "current_program": self.current_program
+        }
+
+# Chatbot content model
+class ChatbotContent(Base):
+    __tablename__ = 'chatbot_contents'
+    
+    id = Column(Integer, primary_key=True)
+    code = Column(String, unique=True, nullable=False)  # 예: "BCC", "MI"
+    name = Column(String, nullable=False)  # 표시 이름
+    description = Column(Text, nullable=True)  # 프로그램 설명
+    content = Column(Text, nullable=False)  # 콘텐츠 요약 전체 내용
+    is_active = Column(Boolean, default=True)  # 활성화 상태
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    
+    @classmethod
+    def get_by_code(cls, db, code):
+        """Get chatbot content by code"""
+        return db.query(cls).filter(cls.code == code).first()
+    
+    @classmethod
+    def get_all_active(cls, db):
+        """Get all active chatbot contents"""
+        return db.query(cls).filter(cls.is_active == True).all()
+    
+    @classmethod
+    def create_or_update(cls, db, code, name, content, description=None):
+        """Create or update chatbot content"""
+        existing = cls.get_by_code(db, code)
+        if existing:
+            existing.name = name
+            existing.content = content
+            if description is not None:
+                existing.description = description
+            existing.updated_at = datetime.datetime.utcnow()
+            return existing
+        else:
+            new_content = cls(
+                code=code,
+                name=name,
+                description=description,
+                content=content
+            )
+            db.add(new_content)
+            return new_content
+    
+    def to_dict(self):
+        """Convert chatbot content to dictionary"""
+        return {
+            "id": self.id,
+            "code": self.code,
+            "name": self.name,
+            "description": self.description,
+            "content": self.content,
+            "is_active": self.is_active,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
         }
 
 # Create database tables

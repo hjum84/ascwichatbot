@@ -81,7 +81,7 @@
                 <a href="{{ url_for('set_program', program=program.code) }}" class="program-item">
                     <h3>
                         {{ program.name }}
-                        {% if program.code not in ['BCC', 'MI', 'Safety'] %}
+                        {% if program.show_new_badge %}
                             <span class="program-badge badge-new">NEW</span>
                         {% endif %}
                     </h3>

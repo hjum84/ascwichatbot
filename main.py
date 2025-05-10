@@ -310,17 +310,27 @@ def program_select():
     try:
         chatbots = ChatbotContent.get_all_active(db)
         
-        # Prepare data for template
         available_programs = []
         for chatbot in chatbots:
+            # Determine if NEW badge should be shown
+            show_new = False
+            if chatbot.created_at:
+                # Show NEW if created within the last 7 days
+                if (datetime.datetime.utcnow() - chatbot.created_at).days < 7:
+                    show_new = True
+            
+            # Ensure predefined programs BCC, MI, Safety do not show 'NEW' badge
+            if chatbot.code in ['BCC', 'MI', 'SAFETY']:
+                show_new = False
+
             program_info = {
                 "code": chatbot.code,
                 "name": chatbot.name,
-                "description": chatbot.description or f"Learn about the {chatbot.name} program content."
+                "description": chatbot.description or f"Learn about the {chatbot.name} program content.",
+                "show_new_badge": show_new 
             }
             available_programs.append(program_info)
         
-        # Sort programs alphabetically
         available_programs.sort(key=lambda x: x["name"])
         
         logger.debug(f"Program select page for user: {session.get('user_id')}, showing {len(available_programs)} programs")

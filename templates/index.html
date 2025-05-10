@@ -50,12 +50,30 @@
   </style>
 </head>
 <body>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+          <div style="padding: 10px; margin-bottom: 10px; border-radius: 5px; text-align: center; max-width: 800px; margin-left:auto; margin-right:auto;">
+          {% for category, message in messages %}
+              <div class="alert alert-{{ category if category else 'info' }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem; margin-bottom: 5px;">{{ message }}</div>
+          {% endfor %}
+          </div>
+      {% endif %}
+  {% endwith %}
+
   <div class="chat-container">
     <div class="program-header">
-      <div class="program-title">
-        {{ program_display_name }} Chatbot
-        {% if program not in ['BCC', 'MI', 'Safety'] %}
-        <span class="program-badge">CUSTOM</span>
+      <div> <!-- Grouping div for left content -->
+        <div class="program-title">
+          {{ program_display_name }} Chatbot
+          {% if program not in ['BCC', 'MI', 'Safety'] %}
+          <span class="program-badge">CUSTOM</span>
+          {% endif %}
+        </div>
+        {% if session.user_email %}
+        <div class="user-status" style="font-size: 0.85em; color: #333; margin-top: 5px;">
+            Logged in as: <strong>{{ session.user_email }}</strong> | 
+            <a href="{{ url_for('logout') }}" style="color: #007bff; text-decoration: none;">Logout</a>
+        </div>
         {% endif %}
       </div>
       <a href="{{ url_for('switch_program') }}" class="switch-program-btn">Switch Program</a>

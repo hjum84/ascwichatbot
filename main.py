@@ -168,6 +168,16 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
+# Decorator to require login for general user routes
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # --- Smartsheet Integration Setup ---
 SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN")
 SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID")
@@ -218,6 +228,8 @@ def record_in_smartsheet(user_question, chatbot_reply):
 # Home route: redirect to login page
 @app.route('/')
 def home():
+    if 'user_id' in session:  # Check if a regular user session exists
+        return redirect(url_for('program_select'))
     return redirect(url_for('login'))
 
 # Registration route
@@ -299,12 +311,9 @@ def login():
 
 # Program selection route
 @app.route('/program_select')
+@login_required
 def program_select():
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not in session, redirecting to login")
-        return redirect(url_for('login'))
-    
+    # Verify user is logged in (handled by decorator)
     # Get all available programs from database
     db = get_db()
     try:
@@ -341,6 +350,7 @@ def program_select():
 
 # Set program route
 @app.route('/set_program/<program>')
+@login_required
 def set_program(program):
     # Verify if content exists for this program in the database
     program_upper = program.upper()
@@ -401,12 +411,9 @@ def set_program(program):
 
 # Generic chatbot interface for custom programs
 @app.route('/index_generic/<program>')
+@login_required
 def index_generic(program):
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not logged in, redirecting to login")
-        return redirect(url_for('login'))
-    
+    # Verify user is logged in (handled by decorator)
     # Verify program exists in database
     program_upper = program.upper()
     db = get_db()
@@ -436,12 +443,9 @@ def index_generic(program):
 
 # BCC Chatbot interface
 @app.route('/index_bcc')
+@login_required
 def index_bcc():
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not logged in, redirecting to login")
-        return redirect(url_for('login'))
-        
+    # Verify user is logged in (handled by decorator)
     # Set current program to BCC
     session['current_program'] = 'BCC'
     
@@ -452,12 +456,9 @@ def index_bcc():
 
 # MI Chatbot interface
 @app.route('/index_mi')
+@login_required
 def index_mi():
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not logged in, redirecting to login")
-        return redirect(url_for('login'))
-        
+    # Verify user is logged in (handled by decorator)
     # Set current program to MI
     session['current_program'] = 'MI'
     
@@ -468,12 +469,9 @@ def index_mi():
 
 # Safety Chatbot interface
 @app.route('/index_safety')
+@login_required
 def index_safety():
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not logged in, redirecting to login")
-        return redirect(url_for('login'))
-        
+    # Verify user is logged in (handled by decorator)
     # Set current program to Safety
     session['current_program'] = 'Safety'
     
@@ -491,12 +489,9 @@ def index():
 
 # Chat endpoint for processing user messages
 @app.route('/chat', methods=['POST'])
+@login_required
 def chat():
-    # Verify user is logged in
-    if 'user_id' not in session:
-        logger.warning("User not logged in, redirecting to login")
-        return jsonify({"reply": "Session expired. Please log in again."}), 401
-
+    # Verify user is logged in (handled by decorator)
     user_message = request.json.get("message")
     if not user_message:
         return jsonify({"error": "A question is required."}), 400
@@ -570,8 +565,20 @@ def chat():
 
 # Program switch route
 @app.route('/switch_program')
+@login_required
 def switch_program():
     return redirect(url_for('program_select'))
+
+# Logout route
+@app.route('/logout')
+def logout():
+    session.pop('user_id', None)
+    session.pop('user_email', None)
+    session.pop('last_name', None)
+    session.pop('current_program', None)
+    # session.clear() # Alternatively, clear the entire session
+    flash('You have been successfully logged out.', 'success')
+    return redirect(url_for('login'))
 
 # Delete Registration Route
 @app.route('/delete_registration', methods=['GET', 'POST'])

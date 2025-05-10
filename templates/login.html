@@ -77,6 +77,16 @@
 </head>
 <body>
     <div class="login-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div style="width: 100%; text-align: center; margin-bottom: 15px;">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category | default('info') }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem; border-radius: 5px; margin-bottom: 5px;">{{ message }}</div>
+                {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <h2>Login to Chatbots</h2>
         <form action="/login" method="POST">
             <input type="text" id="last_name" name="last_name" placeholder="Last Name" required>
@@ -87,14 +97,6 @@
             <p>Not registered yet? <a href="{{ url_for('register') }}">Sign-Up</a></p>
         </div>
         
-        <div class="programs-list">
-            <h3>Available Learning Programs:</h3>
-            <ul>
-                <li>Building Coaching Competency (BCC)</li>
-                <li>Motivational Interviewing (MI)</li>
-                <li>Safety and Risk Assessment</li>
-            </ul>
-        </div>
     </div>
 </body>
 </html>

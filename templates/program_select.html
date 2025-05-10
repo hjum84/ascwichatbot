@@ -73,6 +73,23 @@
 </head>
 <body>
     <div class="program-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div style="padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center;">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category if category else 'info' }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem;">{{ message }}</div>
+                {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% if session.user_email %}
+            <div style="text-align: right; margin-bottom: 15px; font-size: 0.9em;">
+                Logged in as: <strong>{{ session.user_email }}</strong> | 
+                <a href="{{ url_for('logout') }}" style="color: #007bff;">Logout</a>
+            </div>
+        {% endif %}
+
         <h2>Select a Learning Program</h2>
         <p>Choose which program's chatbot you would like to access:</p>
         

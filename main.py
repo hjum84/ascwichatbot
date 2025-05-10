@@ -274,7 +274,8 @@ def login():
             if not user:
                 logger.debug("User not found")
                 close_db(db)
-                return "User not found. Please register first.", 400
+                flash("User not found. Please register first.", "danger")
+                return redirect(url_for('login'))
                 
             # Update visit count
             logger.debug("User found with ID: %s", user.id)

@@ -128,6 +128,7 @@ class ChatHistory(Base):
     message = Column(Text, nullable=False)
     sender = Column(String, nullable=False)  # 'user' or 'bot'
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    is_visible = Column(Boolean, nullable=False, default=True)  # New: for UI hiding
 
 # Create database tables
 Base.metadata.create_all(bind=engine)

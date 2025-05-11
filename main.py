@@ -417,7 +417,8 @@ def get_chat_history(user_id, program_code, limit=50):
     try:
         history = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
-            ChatHistory.program_code == program_code
+            ChatHistory.program_code == program_code,
+            ChatHistory.is_visible == True
         ).order_by(ChatHistory.timestamp.asc()).limit(limit).all()
         return [
             {
@@ -1225,10 +1226,17 @@ def clear_chat_history():
     program_code = session.get('current_program', 'BCC')
     db = get_db()
     try:
+        # Hide all today's messages (set is_visible=False)
+        today = datetime.datetime.utcnow().date()
+        today_start = datetime.datetime.combine(today, datetime.time.min)
+        today_end = datetime.datetime.combine(today, datetime.time.max)
         db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
-            ChatHistory.program_code == program_code
-        ).delete()
+            ChatHistory.program_code == program_code,
+            ChatHistory.timestamp >= today_start,
+            ChatHistory.timestamp <= today_end,
+            ChatHistory.is_visible == True
+        ).update({ChatHistory.is_visible: False}, synchronize_session=False)
         db.commit()
         return jsonify({'success': True})
     except Exception as e:

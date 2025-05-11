@@ -73,6 +73,7 @@ class ChatbotContent(Base):
     is_active = Column(Boolean, default=True)  # 활성화 상태
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    quota = Column(Integer, nullable=False, default=3)  # Max questions quota
     
     @classmethod
     def get_by_code(cls, db, code):

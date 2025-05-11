@@ -82,6 +82,13 @@
       <button id="clear-history-btn" class="btn btn-sm btn-danger" style="font-size:13px;">Delete Conversation</button>
     </div>
     <div id="chat-box" class="chat-box">
+      <div class="message bot system-welcome-message">
+        <p>
+          Hi, I am the <strong>{{ program_display_name }}</strong> chatbot. 
+          I can answer up to <strong>{{ quota }}</strong> question(s) related to this program.
+        </p>
+      </div>
+      {# Placeholder for chat history messages - will be populated by JS #}
       {% if chat_history %}
         {% for chat in chat_history %}
           <div class="message {{ chat.sender }}" data-sender="{{ chat.sender }}" data-raw='{{ chat.message|tojson|safe }}'></div>
@@ -159,8 +166,10 @@
     // 페이지 로드 시, 서버에서 전달된 chat_history를 JS로 마크다운 파싱해서 렌더링
     window.onload = function() {
       const chatBox = document.getElementById('chat-box');
-      const historyDivs = chatBox.querySelectorAll('.message');
-      const temp = [];
+      const welcomeMessageDiv = chatBox.querySelector('.system-welcome-message'); // Get the welcome message div
+      const historyDivs = chatBox.querySelectorAll('.message:not(.system-welcome-message)'); // Get only history messages
+      
+      const renderedHistoryMessages = [];
       historyDivs.forEach(function(div) {
         const sender = div.getAttribute('data-sender');
         const raw = JSON.parse(div.getAttribute('data-raw'));
@@ -168,10 +177,12 @@
         messageDiv.classList.add('message', sender);
         const formattedMessage = marked.parseInline ? marked.parseInline(raw).replace(/\n/g, '<br>') : raw.replace(/\n/g, '<br>');
         messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
-        temp.push(messageDiv);
+        renderedHistoryMessages.push(messageDiv);
+        div.remove(); // Remove the raw data div
       });
-      chatBox.innerHTML = '';
-      temp.forEach(div => chatBox.appendChild(div));
+
+      // Append rendered history messages after the welcome message
+      renderedHistoryMessages.forEach(div => chatBox.appendChild(div));
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
@@ -182,7 +193,11 @@
         .then(res => res.json())
         .then(data => {
           if(data.success) {
-            document.getElementById('chat-box').innerHTML = '';
+            // Clear only messages, not the welcome message
+            const chatBox = document.getElementById('chat-box');
+            const messagesToClear = chatBox.querySelectorAll('.message:not(.system-welcome-message)');
+            messagesToClear.forEach(msg => msg.remove());
+            // Optionally, you might want to add a message like "History cleared" or leave it empty
           } else {
             alert('Failed to delete conversation: ' + (data.error || 'Unknown error'));
           }

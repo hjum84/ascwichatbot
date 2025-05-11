@@ -150,6 +150,14 @@
                                             </div>
                                             <button type="button" class="btn btn-sm btn-primary update-desc-btn">Update Description</button>
                                         </div>
+                                        <div class="update-quota-form mt-3">
+                                            <input type="hidden" class="chatbot-name" value="{{ chatbot.name }}">
+                                            <div class="mb-2">
+                                                <label for="quota_{{ chatbot.name }}" class="form-label">Update Quota (default: 3):</label>
+                                                <input type="number" class="form-control form-control-sm quota-field" id="quota_{{ chatbot.name }}" value="{{ chatbot.quota | default(3) }}" min="1" style="width: 100px;">
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-secondary update-quota-btn">Update Quota</button>
+                                        </div>
                                     </div>
                                 </div>
                                 {% endfor %}
@@ -486,6 +494,50 @@
                 };
                 
                 xhr.send(formData);
+            });
+
+            // Update quota
+            document.querySelectorAll('.update-quota-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const parentForm = this.closest('.update-quota-form');
+                    const chatbotName = parentForm.querySelector('.chatbot-name').value;
+                    const quota = parentForm.querySelector('.quota-field').value;
+
+                    if (!quota || parseInt(quota) < 1) {
+                        alert('Please enter a valid quota (must be 1 or greater).');
+                        return;
+                    }
+
+                    const formData = new FormData();
+                    formData.append('chatbot_name', chatbotName);
+                    formData.append('quota', quota);
+
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', "{{ url_for('admin_update_chatbot_quota') }}", true);
+
+                    xhr.onload = function() {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                if (response.success) {
+                                    // 수정된 부분: JS에서 동적으로 URL 생성
+                                    const redirectUrl = "{{ url_for('admin') }}?message=" + encodeURIComponent('Quota has been updated for ' + response.display_name) + "&message_type=success";
+                                    window.location.href = redirectUrl;
+                                } else {
+                                    alert('Error: ' + (response.error || 'Could not update quota.'));
+                                }
+                            } catch (e) {
+                                alert('Error parsing server response while updating quota.');
+                            }
+                        } else {
+                            alert('Error: Could not update quota. Status: ' + xhr.statusText);
+                        }
+                    };
+                    xhr.onerror = function () {
+                        alert('Network error while updating quota. Please try again.');
+                    };
+                    xhr.send(formData);
+                });
             });
         });
     </script>

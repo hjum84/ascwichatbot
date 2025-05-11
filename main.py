@@ -436,10 +436,18 @@ def index_bcc():
     session['current_program'] = 'BCC'
     user_id = session['user_id']
     chat_history = get_chat_history(user_id, 'BCC')
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, 'BCC')
+        quota = chatbot.quota if chatbot else 3
+        program_display_name = chatbot.name if chatbot else "Building Coaching Competency"
+    finally:
+        close_db(db)
     return render_template('index.html',
                          program='BCC',
-                         program_display_name=program_names.get('BCC', "Building Coaching Competency"),
-                         chat_history=chat_history)
+                         program_display_name=program_display_name,
+                         chat_history=chat_history,
+                         quota=quota)
 
 # MI Chatbot interface
 @app.route('/index_mi')
@@ -448,10 +456,18 @@ def index_mi():
     session['current_program'] = 'MI'
     user_id = session['user_id']
     chat_history = get_chat_history(user_id, 'MI')
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, 'MI')
+        quota = chatbot.quota if chatbot else 3
+        program_display_name = chatbot.name if chatbot else "Motivational Interviewing"
+    finally:
+        close_db(db)
     return render_template('index.html',
                          program='MI',
-                         program_display_name=program_names.get('MI', "Motivational Interviewing"),
-                         chat_history=chat_history)
+                         program_display_name=program_display_name,
+                         chat_history=chat_history,
+                         quota=quota)
 
 # Safety Chatbot interface
 @app.route('/index_safety')
@@ -460,10 +476,18 @@ def index_safety():
     session['current_program'] = 'Safety'
     user_id = session['user_id']
     chat_history = get_chat_history(user_id, 'Safety')
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, 'Safety')
+        quota = chatbot.quota if chatbot else 3
+        program_display_name = chatbot.name if chatbot else "Safety and Risk Assessment"
+    finally:
+        close_db(db)
     return render_template('index.html',
                          program='Safety',
-                         program_display_name=program_names.get('Safety', "Safety and Risk Assessment"),
-                         chat_history=chat_history)
+                         program_display_name=program_display_name,
+                         chat_history=chat_history,
+                         quota=quota)
 
 # Generic chatbot interface for custom programs
 @app.route('/index_generic/<program>')
@@ -479,13 +503,15 @@ def index_generic(program):
             return redirect(url_for('program_select'))
         session['current_program'] = program_upper
         program_display_name = chatbot.name
+        quota = chatbot.quota
         user_id = session['user_id']
         chat_history = get_chat_history(user_id, program_upper)
         close_db(db)
         return render_template('index.html',
                             program=program_upper,
                             program_display_name=program_display_name,
-                            chat_history=chat_history)
+                            chat_history=chat_history,
+                            quota=quota)
     except Exception as e:
         if 'db' in locals():
             close_db(db)
@@ -511,6 +537,30 @@ def chat():
     user_id = session['user_id']
     db = get_db()
     try:
+        # Get the chatbot's quota from database
+        chatbot = ChatbotContent.get_by_code(db, current_program)
+        if not chatbot:
+            return jsonify({"error": "Program not found."}), 404
+        
+        quota = chatbot.quota
+
+        # Count today's messages for this user and program
+        today = datetime.datetime.utcnow().date()
+        today_start = datetime.datetime.combine(today, datetime.time.min)
+        today_end = datetime.datetime.combine(today, datetime.time.max)
+        
+        message_count = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == current_program,
+            ChatHistory.sender == 'user',
+            ChatHistory.timestamp >= today_start,
+            ChatHistory.timestamp <= today_end
+        ).count()
+
+        # Check if quota exceeded
+        if message_count >= quota:
+            return jsonify({"reply": f"You have reached your daily quota of {quota} questions for the {chatbot.name} program. Please try again tomorrow."}), 200
+
         # Save user message to chat history
         user_history = ChatHistory(
             user_id=user_id,
@@ -520,56 +570,39 @@ def chat():
         )
         db.add(user_history)
         db.commit()
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error saving user message to chat history: {str(e)}")
-    finally:
-        close_db(db)
 
-    # Get content for the selected program
-    content = program_content.get(current_program, "Content not available for this program")
+        # Get content for the selected program
+        content = program_content.get(current_program, "Content not available for this program")
 
-    # Check quota using cookie
-    quota = request.cookies.get('chat_quota')
-    if quota:
-        quota = int(quota)
-    else:
-        quota = 0
-
-    if quota >= 300:
-        return jsonify({"reply": "You have used all your quota for today."}), 200
-
-    try:
-        # Create a system message specific to the current program
-        system_message = f"You are an assistant that only answers questions based on the following content for the {program_names.get(current_program, 'selected')} program: {content}"
-        logger.debug(f"Using content for program: {current_program}")
-        
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=500
-        )
-        
-        chatbot_reply = response['choices'][0]['message']['content'].strip()
-
-        # Truncate response to 300 words if necessary
-        words = chatbot_reply.split()
-        if len(words) > 500:
-            truncated_text = ' '.join(words[:300])
-            end_index = chatbot_reply.find(truncated_text) + len(truncated_text)
-            rest_text = chatbot_reply[end_index:]
-            sentence_end = re.search(r'[.?!]', rest_text)
-            if sentence_end:
-                chatbot_reply = chatbot_reply[:end_index + sentence_end.end()]
-            else:
-                chatbot_reply = truncated_text
-
-        # Save bot reply to chat history
-        db = get_db()
         try:
+            # Create a system message specific to the current program
+            system_message = f"You are an assistant that only answers questions based on the following content for the {program_names.get(current_program, 'selected')} program: {content}"
+            logger.debug(f"Using content for program: {current_program}")
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_message}
+                ],
+                max_tokens=500
+            )
+            
+            chatbot_reply = response['choices'][0]['message']['content'].strip()
+
+            # Truncate response to 300 words if necessary
+            words = chatbot_reply.split()
+            if len(words) > 500:
+                truncated_text = ' '.join(words[:300])
+                end_index = chatbot_reply.find(truncated_text) + len(truncated_text)
+                rest_text = chatbot_reply[end_index:]
+                sentence_end = re.search(r'[.?!]', rest_text)
+                if sentence_end:
+                    chatbot_reply = chatbot_reply[:end_index + sentence_end.end()]
+                else:
+                    chatbot_reply = truncated_text
+
+            # Save bot reply to chat history
             bot_history = ChatHistory(
                 user_id=user_id,
                 program_code=current_program,
@@ -578,32 +611,30 @@ def chat():
             )
             db.add(bot_history)
             db.commit()
+
+            # Record conversation in Smartsheet asynchronously
+            def record_smartsheet_async(user_question, chatbot_reply, program):
+                try:
+                    record_in_smartsheet(f"[{program}] {user_question}", chatbot_reply)
+                except Exception as smex:
+                    logger.error("Error recording in Smartsheet: %s", str(smex))
+
+            threading.Thread(target=record_smartsheet_async, args=(user_message, chatbot_reply, current_program)).start()
+
+            return jsonify({"reply": chatbot_reply})
+
         except Exception as e:
             db.rollback()
-            logger.error(f"Error saving bot reply to chat history: {str(e)}")
-        finally:
-            close_db(db)
-
-        # Record conversation in Smartsheet asynchronously
-        def record_smartsheet_async(user_question, chatbot_reply, program):
-            try:
-                record_in_smartsheet(f"[{program}] {user_question}", chatbot_reply)
-            except Exception as smex:
-                logger.error("Error recording in Smartsheet: %s", str(smex))
-
-        threading.Thread(target=record_smartsheet_async, args=(user_message, chatbot_reply, current_program)).start()
-
-        # Create the response object and update the chat quota cookie
-        response_obj = make_response(jsonify({"reply": chatbot_reply}))
-        quota += 1
-        expires = datetime.datetime.now() + datetime.timedelta(days=1)
-        response_obj.set_cookie('chat_quota', str(quota), expires=expires)
-
-        return response_obj
+            logger.error("Chat error: %s", str(e))
+            return jsonify({"error": str(e)}), 500
 
     except Exception as e:
-        logger.error("Chat error: %s", str(e))
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        close_db(db)
 
 # Program switch route
 @app.route('/switch_program')
@@ -736,7 +767,8 @@ def admin():
             available_chatbots.append({
                 "name": chatbot.code,
                 "display_name": chatbot.name,
-                "description": chatbot.description or ""
+                "description": chatbot.description or "",
+                "quota": chatbot.quota  # Add quota here
             })
         
         # Get inactive (deleted) chatbots
@@ -1137,6 +1169,51 @@ def admin_update_chatbot_content():
             db.rollback()
         logger.error(f"Error updating chatbot content for {request.form.get('chatbot_code')}: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error": "Server error occurred during content update."}), 500
+    finally:
+        if db:
+            close_db(db)
+
+# Route to update chatbot quota
+@app.route('/admin_update_chatbot_quota', methods=['POST'])
+@requires_auth
+def admin_update_chatbot_quota():
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_name') # Sent as 'chatbot_name' from admin.html
+        quota_str = request.form.get('quota')
+
+        if not chatbot_code or not quota_str:
+            return jsonify({"success": False, "error": "Chatbot code and quota are required."}), 400
+        
+        try:
+            quota = int(quota_str)
+            if quota < 1:
+                raise ValueError("Quota must be at least 1.")
+        except ValueError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+        if not chatbot:
+            return jsonify({"success": False, "error": "Chatbot not found."}), 404
+        
+        chatbot.quota = quota
+        db.commit()
+        
+        # Reload program content to update in-memory quota if you have such a cache
+        # load_program_content() # Assuming this function would also update quotas in memory
+
+        logger.info(f"Quota for chatbot {chatbot.name} (Code: {chatbot_code}) updated to {quota}.")
+        return jsonify({
+            "success": True, 
+            "message": f"Quota for {chatbot.name} updated to {quota}.",
+            "display_name": chatbot.name 
+            }), 200
+
+    except Exception as e:
+        if db:
+            db.rollback()
+        logger.error(f"Error updating chatbot quota for {request.form.get('chatbot_name')}: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "error": "Server error occurred during quota update."}), 500
     finally:
         if db:
             close_db(db)

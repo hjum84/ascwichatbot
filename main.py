@@ -259,6 +259,9 @@ def register():
 # Login route
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # If already logged in, redirect to program_select
+    if 'user_id' in session:
+        return redirect(url_for('program_select'))
     if request.method == 'POST':
         last_name = request.form.get('last_name')
         email = request.form.get('email')

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash
 from functools import wraps
 import re
-from models import User, ChatbotContent, get_db, close_db
+from models import User, ChatbotContent, get_db, close_db, ChatHistory
 import werkzeug
 import glob
 import shutil
@@ -410,12 +410,65 @@ def set_program(program):
         logger.error("Error setting program: %s", str(e))
         return redirect(url_for('program_select'))
 
+# Helper: fetch chat history for a user and program
+
+def get_chat_history(user_id, program_code, limit=50):
+    db = get_db()
+    try:
+        history = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code
+        ).order_by(ChatHistory.timestamp.asc()).limit(limit).all()
+        return [
+            {
+                'message': h.message,
+                'sender': h.sender,
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
+            } for h in history
+        ]
+    finally:
+        close_db(db)
+
+# BCC Chatbot interface
+@app.route('/index_bcc')
+@login_required
+def index_bcc():
+    session['current_program'] = 'BCC'
+    user_id = session['user_id']
+    chat_history = get_chat_history(user_id, 'BCC')
+    return render_template('index.html',
+                         program='BCC',
+                         program_display_name=program_names.get('BCC', "Building Coaching Competency"),
+                         chat_history=chat_history)
+
+# MI Chatbot interface
+@app.route('/index_mi')
+@login_required
+def index_mi():
+    session['current_program'] = 'MI'
+    user_id = session['user_id']
+    chat_history = get_chat_history(user_id, 'MI')
+    return render_template('index.html',
+                         program='MI',
+                         program_display_name=program_names.get('MI', "Motivational Interviewing"),
+                         chat_history=chat_history)
+
+# Safety Chatbot interface
+@app.route('/index_safety')
+@login_required
+def index_safety():
+    session['current_program'] = 'Safety'
+    user_id = session['user_id']
+    chat_history = get_chat_history(user_id, 'Safety')
+    return render_template('index.html',
+                         program='Safety',
+                         program_display_name=program_names.get('Safety', "Safety and Risk Assessment"),
+                         chat_history=chat_history)
+
 # Generic chatbot interface for custom programs
 @app.route('/index_generic/<program>')
 @login_required
 def index_generic(program):
-    # Verify user is logged in (handled by decorator)
-    # Verify program exists in database
     program_upper = program.upper()
     db = get_db()
     try:
@@ -424,62 +477,20 @@ def index_generic(program):
             logger.warning(f"Attempt to access non-existent program: {program}")
             close_db(db)
             return redirect(url_for('program_select'))
-            
-        # Set current program
         session['current_program'] = program_upper
-        
-        # Get display name and description
         program_display_name = chatbot.name
-        
-        logger.debug(f"Loading generic chatbot interface for {program}")
+        user_id = session['user_id']
+        chat_history = get_chat_history(user_id, program_upper)
         close_db(db)
         return render_template('index.html',
                             program=program_upper,
-                            program_display_name=program_display_name)
+                            program_display_name=program_display_name,
+                            chat_history=chat_history)
     except Exception as e:
         if 'db' in locals():
             close_db(db)
         logger.error(f"Error loading generic chatbot: {str(e)}")
         return redirect(url_for('program_select'))
-
-# BCC Chatbot interface
-@app.route('/index_bcc')
-@login_required
-def index_bcc():
-    # Verify user is logged in (handled by decorator)
-    # Set current program to BCC
-    session['current_program'] = 'BCC'
-    
-    logger.debug("Loading BCC chatbot interface")
-    return render_template('index.html',
-                         program='BCC',
-                         program_display_name=program_names.get('BCC', "Building Coaching Competency"))
-
-# MI Chatbot interface
-@app.route('/index_mi')
-@login_required
-def index_mi():
-    # Verify user is logged in (handled by decorator)
-    # Set current program to MI
-    session['current_program'] = 'MI'
-    
-    logger.debug("Loading MI chatbot interface")
-    return render_template('index.html',
-                         program='MI',
-                         program_display_name=program_names.get('MI', "Motivational Interviewing"))
-
-# Safety Chatbot interface
-@app.route('/index_safety')
-@login_required
-def index_safety():
-    # Verify user is logged in (handled by decorator)
-    # Set current program to Safety
-    session['current_program'] = 'Safety'
-    
-    logger.debug("Loading Safety chatbot interface")
-    return render_template('index.html',
-                         program='Safety',
-                         program_display_name=program_names.get('Safety', "Safety and Risk Assessment"))
 
 # Legacy index route - redirect to program selection
 @app.route('/index')
@@ -492,15 +503,29 @@ def index():
 @app.route('/chat', methods=['POST'])
 @login_required
 def chat():
-    # Verify user is logged in (handled by decorator)
     user_message = request.json.get("message")
     if not user_message:
         return jsonify({"error": "A question is required."}), 400
 
-    # Get the current program from session
     current_program = session.get('current_program', 'BCC')
-    logger.debug(f"Processing chat for program: {current_program}")
-    
+    user_id = session['user_id']
+    db = get_db()
+    try:
+        # Save user message to chat history
+        user_history = ChatHistory(
+            user_id=user_id,
+            program_code=current_program,
+            message=user_message,
+            sender='user'
+        )
+        db.add(user_history)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error saving user message to chat history: {str(e)}")
+    finally:
+        close_db(db)
+
     # Get content for the selected program
     content = program_content.get(current_program, "Content not available for this program")
 
@@ -542,10 +567,26 @@ def chat():
             else:
                 chatbot_reply = truncated_text
 
+        # Save bot reply to chat history
+        db = get_db()
+        try:
+            bot_history = ChatHistory(
+                user_id=user_id,
+                program_code=current_program,
+                message=chatbot_reply,
+                sender='bot'
+            )
+            db.add(bot_history)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error saving bot reply to chat history: {str(e)}")
+        finally:
+            close_db(db)
+
         # Record conversation in Smartsheet asynchronously
         def record_smartsheet_async(user_question, chatbot_reply, program):
             try:
-                # Also record which program was being used
                 record_in_smartsheet(f"[{program}] {user_question}", chatbot_reply)
             except Exception as smex:
                 logger.error("Error recording in Smartsheet: %s", str(smex))
@@ -1099,6 +1140,26 @@ def admin_update_chatbot_content():
     finally:
         if db:
             close_db(db)
+
+@app.route('/clear_chat_history', methods=['POST'])
+@login_required
+def clear_chat_history():
+    user_id = session['user_id']
+    program_code = session.get('current_program', 'BCC')
+    db = get_db()
+    try:
+        db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code
+        ).delete()
+        db.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error clearing chat history: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        close_db(db)
 
 if __name__ == '__main__':
     # Migrate existing content to database when the app starts

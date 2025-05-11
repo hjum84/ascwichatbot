@@ -118,6 +118,16 @@ class ChatbotContent(Base):
             "updated_at": self.updated_at
         }
 
+# Chat history model
+class ChatHistory(Base):
+    __tablename__ = 'chat_history'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    program_code = Column(String, nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    sender = Column(String, nullable=False)  # 'user' or 'bot'
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
 # Create database tables
 Base.metadata.create_all(bind=engine)
 

@@ -78,7 +78,16 @@
       </div>
       <a href="{{ url_for('switch_program') }}" class="switch-program-btn">Switch Program</a>
     </div>
-    <div id="chat-box" class="chat-box"></div>
+    <div style="text-align:right; margin: 5px 10px 0 0;">
+      <button id="clear-history-btn" class="btn btn-sm btn-danger" style="font-size:13px;">Delete Conversation</button>
+    </div>
+    <div id="chat-box" class="chat-box">
+      {% if chat_history %}
+        {% for chat in chat_history %}
+          <div class="message {{ chat.sender }}" data-sender="{{ chat.sender }}" data-raw='{{ chat.message|tojson|safe }}'></div>
+        {% endfor %}
+      {% endif %}
+    </div>
     <div class="input-container">
       <!-- Use a textarea for multi-line input -->
       <textarea id="userInput" placeholder="Type your message here..." rows="1"></textarea>
@@ -140,21 +149,48 @@
       const chatBox = document.getElementById('chat-box');
       const messageDiv = document.createElement('div');
       messageDiv.classList.add('message', sender);
-      
       // Process the message for Markdown formatting and newline conversion
       const formattedMessage = marked.parseInline ? marked.parseInline(message).replace(/\n/g, '<br>') : message.replace(/\n/g, '<br>');
       messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
-      
       chatBox.appendChild(messageDiv);
       chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
     }
 
-    // Display welcome message when the page loads
+    // 페이지 로드 시, 서버에서 전달된 chat_history를 JS로 마크다운 파싱해서 렌더링
     window.onload = function() {
-      const programName = "{{ program_display_name }}";
-      const programCode = "{{ program }}";
-      addMessage(`Welcome to the ${programName} chatbot! I can answer up to 3 questions related to this program.`, 'bot');
+      const chatBox = document.getElementById('chat-box');
+      const historyDivs = chatBox.querySelectorAll('.message');
+      const temp = [];
+      historyDivs.forEach(function(div) {
+        const sender = div.getAttribute('data-sender');
+        const raw = JSON.parse(div.getAttribute('data-raw'));
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', sender);
+        const formattedMessage = marked.parseInline ? marked.parseInline(raw).replace(/\n/g, '<br>') : raw.replace(/\n/g, '<br>');
+        messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
+        temp.push(messageDiv);
+      });
+      chatBox.innerHTML = '';
+      temp.forEach(div => chatBox.appendChild(div));
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
+
+    // 대화 내용 지우기 버튼 이벤트
+    document.getElementById('clear-history-btn').onclick = function() {
+      if (!confirm('Are you sure you want to delete all conversation history?')) return;
+      fetch('/clear_chat_history', {method: 'POST'})
+        .then(res => res.json())
+        .then(data => {
+          if(data.success) {
+            document.getElementById('chat-box').innerHTML = '';
+          } else {
+            alert('Failed to delete conversation: ' + (data.error || 'Unknown error'));
+          }
+        })
+        .catch(() => alert('Deletion failed due to a network error.'));
+    }
+
+    // (서버에서 렌더링된 이력 사용. 별도 welcome 메시지 없음)
   </script>
 </body>
 </html>

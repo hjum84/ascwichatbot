@@ -85,13 +85,14 @@
                         {% endif %}
                         
                         <div class="alert alert-info">
-                            <strong>Note:</strong> Currently only text files (.txt) are supported. PDF, PowerPoint, and Word documents cannot be processed without additional libraries.
+                            <strong>Note:</strong> You can upload multiple files. Supported file types: <strong>.txt, .pdf, .ppt, .pptx, .docx</strong>.<br>
+                            The text will be extracted from each file and combined for the chatbot content.
                         </div>
                         
                         <!-- Use an AJAX form submission with manual handling -->
                         <form id="upload-form" enctype="multipart/form-data">
                             <div class="mb-3">
-                                <label for="course_name" class="form-label">Course Name</label>
+                                <label for="course_name" class="form-label">Course Name Initial</label>
                                 <input type="text" class="form-control" id="course_name" name="course_name" required>
                                 <div class="form-text">Enter in English (e.g.: BCC, MI, Safety)</div>
                             </div>
@@ -109,9 +110,9 @@
                             </div>
                             
                             <div class="mb-3">
-                                <label for="file" class="form-label">Upload File</label>
-                                <input type="file" class="form-control" id="file" name="file" accept=".txt" required>
-                                <div class="form-text">Only text files (.txt) are currently supported.</div>
+                                <label for="file" class="form-label">Upload Files</label>
+                                <input type="file" class="form-control" id="file" name="file" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple required>
+                                <div class="form-text">You can upload multiple files. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
                             </div>
                             
                             <button type="button" id="submit-btn" class="btn btn-primary">Upload and Update Chatbot</button>
@@ -238,64 +239,33 @@
             
             // Upload form submission
             document.getElementById('submit-btn').addEventListener('click', function() {
-                debugLog('Upload button clicked');
-                
                 const form = document.getElementById('upload-form');
                 const formData = new FormData(form);
-                
-                // Validate form
-                const courseName = formData.get('course_name');
                 const fileInput = document.getElementById('file');
-                
-                if (!courseName) {
-                    alert('Please enter a course name');
+                if (!fileInput.files.length) {
+                    alert('Please select at least one file');
                     return;
                 }
-                
-                if (!fileInput.files[0]) {
-                    alert('Please select a file');
-                    return;
+                for (let i = 0; i < fileInput.files.length; i++) {
+                    formData.append('files', fileInput.files[i]);
                 }
-                
-                debugLog('Form data:');
-                for (let pair of formData.entries()) {
-                    if (pair[0] !== 'file') {
-                        debugLog(pair[0] + ': ' + pair[1]);
-                    } else {
-                        debugLog('file: ' + pair[1].name + ' (' + pair[1].size + ' bytes)');
-                    }
-                }
-                
-                // Show loading message
-                const statusElem = document.getElementById('upload-status');
-                statusElem.innerHTML = '<div class="alert alert-info">Uploading and processing file... Please wait.</div>';
-                
-                // Send AJAX request
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', "{{ url_for('admin_upload') }}", true);
-                
-                xhr.onload = function() {
-                    debugLog('XHR response status: ' + xhr.status);
-                    
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        debugLog('Upload successful');
-                        
-                        // Redirect to the admin page to show success message
+                // Remove the single 'file' field to avoid duplication
+                formData.delete('file');
+                fetch("{{ url_for('admin_upload') }}", {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
                         window.location.href = "{{ url_for('admin', message='The chatbot has been successfully updated', message_type='success') }}";
                     } else {
-                        debugLog('Upload failed');
-                        statusElem.innerHTML = '<div class="alert alert-danger">Error: ' + xhr.statusText + '</div>';
+                        alert('Error: ' + (data.error || 'Could not upload files.'));
                     }
-                };
-                
-                xhr.onerror = function() {
-                    debugLog('XHR request failed');
-                    statusElem.innerHTML = '<div class="alert alert-danger">Network error. Please try again.</div>';
-                };
-                
-                // Send the form data
-                xhr.send(formData);
-                debugLog('XHR request sent');
+                })
+                .catch(error => {
+                    alert('Network error: ' + error);
+                });
             });
             
             // Delete chatbot

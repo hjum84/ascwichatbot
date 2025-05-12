@@ -15,6 +15,8 @@ import werkzeug
 import glob
 import shutil
 from werkzeug.utils import secure_filename
+import sys
+import site
 
 # For file content extraction - try to import, but don't fail if not available
 try:
@@ -823,128 +825,85 @@ def admin_upload():
         description = request.form.get('description', '')
         logger.info(f"Description received: {description[:30]}..." if description else "No description")
         
-        # Check if file was uploaded
-        logger.info(f"Request files: {list(request.files.keys())}")
+        # Check if files were uploaded
+        files = request.files.getlist('files')
+        if not files or not files[0]:
+            logger.warning("No files part in the request")
+            return jsonify({"error": "Please upload at least one file"}), 400
         
-        if 'file' not in request.files:
-            logger.warning("No file part in the request")
-            return jsonify({"error": "Please upload a file"}), 400
+        logger.info(f"Files received: {[f.filename for f in files]}")
         
-        file = request.files['file']
-        if file.filename == '':
-            logger.warning("No file selected")
-            return jsonify({"error": "Please select a file"}), 400
-        
-        logger.info(f"File received: {file.filename}")
-        
-        # Save file temporarily
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join('temp', filename)
-        os.makedirs('temp', exist_ok=True)
-        file.save(temp_path)
-        logger.info(f"File saved temporarily at: {temp_path}")
-        
-        # Extract content based on file type
-        file_ext = os.path.splitext(filename)[1].lower()
-        content = ""
-        
-        try:
-            if file_ext == '.txt':
-                # If it's a text file, just read the content
-                with open(temp_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                logger.info(f"Text file content extracted, length: {len(content)}")
-            elif file_ext in ['.pdf'] and PYPDF2_AVAILABLE:
-                # Extract text from PDF
-                with open(temp_path, 'rb') as f:
-                    pdf_reader = PyPDF2.PdfReader(f)
-                    for page_num in range(len(pdf_reader.pages)):
-                        page = pdf_reader.pages[page_num]
-                        content += page.extract_text() + "\n"
-                logger.info(f"PDF content extracted, length: {len(content)}")
-            elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
-                # Extract text from PowerPoint
-                presentation = Presentation(temp_path)
-                for slide in presentation.slides:
-                    for shape in slide.shapes:
-                        if hasattr(shape, "text"):
-                            content += shape.text + "\n"
-                logger.info(f"PowerPoint content extracted, length: {len(content)}")
-            elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
-                # Extract text from Word
-                doc = docx.Document(temp_path)
-                for para in doc.paragraphs:
-                    content += para.text + "\n"
-                logger.info(f"Word content extracted, length: {len(content)}")
-            elif TEXTRACT_AVAILABLE:
-                # Try with textract for other formats
-                content = textract.process(temp_path).decode('utf-8')
-                logger.info(f"Textract content extracted, length: {len(content)}")
-            else:
-                # Clean up temp file
+        # Save and extract text from each file
+        combined_content = ""
+        for file in files:
+            filename = secure_filename(file.filename)
+            file_ext = os.path.splitext(filename)[1].lower()
+            temp_path = os.path.join('temp', filename)
+            os.makedirs('temp', exist_ok=True)
+            file.save(temp_path)
+            logger.info(f"File saved temporarily at: {temp_path}")
+            try:
+                if file_ext == '.txt':
+                    with open(temp_path, 'r', encoding='utf-8') as f:
+                        combined_content += f.read() + "\n"
+                elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
+                    with open(temp_path, 'rb') as f:
+                        pdf_reader = PyPDF2.PdfReader(f)
+                        for page_num in range(len(pdf_reader.pages)):
+                            page = pdf_reader.pages[page_num]
+                            combined_content += (page.extract_text() or "") + "\n"
+                elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
+                    presentation = Presentation(temp_path)
+                    for slide in presentation.slides:
+                        for shape in slide.shapes:
+                            if hasattr(shape, "text"):
+                                combined_content += shape.text + "\n"
+                elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
+                    doc = docx.Document(temp_path)
+                    for para in doc.paragraphs:
+                        combined_content += para.text + "\n"
+                elif TEXTRACT_AVAILABLE:
+                    combined_content += textract.process(temp_path).decode('utf-8') + "\n"
+                else:
+                    logger.warning(f"No library available to process {file_ext} files")
+                    return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
+            except Exception as e:
+                logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
+                return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
+            finally:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
-                logger.warning(f"No library available to process {file_ext} files")
-                return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Only text files (.txt) are supported."}), 400
-        except Exception as e:
-            # Clean up temp file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            logger.error(f"Error extracting content: {str(e)}", exc_info=True)
-            return jsonify({"error": f"Error extracting content from file: {str(e)}"}), 500
         
-        # Clean up temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        logger.info("Temporary file cleaned up")
-        
-        if not content.strip():
+        if not combined_content.strip():
             logger.warning("Extracted content is empty")
             return jsonify({"error": "The extracted content is empty"}), 400
         
         # Store content in database
         course_name_upper = course_name.upper()
         logger.info(f"Storing content for {course_name_upper} in database")
-        
         try:
-            # Get DB connection
             db = get_db()
-            
-            # Save to database
-            logger.info("Creating or updating chatbot content in database")
             ChatbotContent.create_or_update(
                 db,
                 code=course_name_upper,
                 name=display_name,
-                content=content,
+                content=combined_content,
                 description=description
             )
-            
-            # If it was previously marked as inactive, reactivate it
-            logger.info("Checking if chatbot was previously marked inactive")
             chatbot = ChatbotContent.get_by_code(db, course_name_upper)
             if chatbot and not chatbot.is_active:
-                logger.info(f"Reactivating chatbot {course_name_upper}")
                 chatbot.is_active = True
-            
             db.commit()
-            logger.info("Database changes committed")
             close_db(db)
-            
-            # Reload content to memory
-            logger.info("Reloading program content")
             load_program_content()
-            
             logger.info("Upload completed successfully")
             return jsonify({"success": True, "message": f"The {display_name} chatbot has been successfully updated"}), 200
-            
         except Exception as e:
             if 'db' in locals():
                 db.rollback()
                 close_db(db)
             logger.error(f"Database error: {str(e)}", exc_info=True)
             return jsonify({"error": f"Database error: {str(e)}"}), 500
-        
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
@@ -1255,6 +1214,9 @@ if __name__ == '__main__':
     
     # Then load the content from database
     load_program_content()
+    
+    # Add user site-packages to sys.path
+    sys.path.append(site.getusersitepackages())
     
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

@@ -3,8 +3,8 @@
 A chatbot application for NYC Child Welfare and Juvenile Justice staff that provides assistance with different learning programs:
 
 1. **Building Coaching Competency (BCC)** - Learn about coaching skills, mindset, and processes
-2. **Motivational Interviewing (MI)** - Learn about motivational interviewing techniques and approaches (coming soon)
-3. **Safety and Risk Assessment** - Learn about safety planning and risk assessment in child welfare (coming soon)
+2. **Motivational Interviewing (MI)** - Learn about motivational interviewing techniques and approaches
+3. **Safety and Risk Assessment** - Learn about safety planning and risk assessment in child welfare
 
 ## Features
 

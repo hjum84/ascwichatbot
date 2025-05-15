@@ -110,6 +110,12 @@
                             </div>
                             
                             <div class="mb-3">
+                                <label for="char_limit" class="form-label">Character Limit</label>
+                                <input type="number" class="form-control" id="char_limit" name="char_limit" min="50000" max="100000" value="50000">
+                                <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+                            </div>
+                            
+                            <div class="mb-3">
                                 <label for="file" class="form-label">Upload Files</label>
                                 <input type="file" class="form-control" id="file" name="file" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple required>
                                 <div class="form-text">You can upload multiple files. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
@@ -207,11 +213,60 @@
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="editChatbotNameInput">
-                    <textarea id="chatbotContentTextarea" class="form-control" rows="20" style="white-space: pre-wrap; word-wrap: break-word;"></textarea>
+                    
+                    <div class="mb-3">
+                        <label for="editCharLimit" class="form-label">Character Limit</label>
+                        <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="100000" value="50000">
+                        <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editFiles" class="form-label">Upload New Files (Optional)</label>
+                        <input type="file" class="form-control" id="editFiles" name="files" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple>
+                        <div class="form-text">Upload new files to replace or add to the current content. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="chatbotContentTextarea" class="form-label">Content</label>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted">Current character count: <span id="currentCharCount">0</span></span>
+                            <span class="text-muted">Character limit: <span id="charLimitDisplay">50,000</span></span>
+                        </div>
+                        <textarea id="chatbotContentTextarea" class="form-control" rows="20" style="white-space: pre-wrap; word-wrap: break-word;"></textarea>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="button" class="btn btn-primary" id="saveContentChangesBtn">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Warning Modal for Edit -->
+    <div class="modal fade" id="editWarningModal" tabindex="-1" aria-labelledby="editWarningModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editWarningModalLabel">Content Length Warning</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <p id="edit-warning-message"></p>
+                        <p>Total content length: <strong id="edit-warning-content-length"></strong> characters</p>
+                        <p>Character limit: <strong id="edit-warning-char-limit"></strong> characters</p>
+                    </div>
+                    <p>Would you like to:</p>
+                    <ul>
+                        <li>Reduce the content size by removing unnecessary text</li>
+                        <li>Increase the character limit (this will increase API costs as the entire content is sent with each conversation)</li>
+                        <li>Cancel the changes</li>
+                    </ul>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-warning" id="edit-increase-limit-btn">Increase Limit</button>
                 </div>
             </div>
         </div>
@@ -368,7 +423,7 @@
             // Edit Content button handler
             document.querySelectorAll('.edit-content-btn').forEach(function(btn) {
                 btn.addEventListener('click', function() {
-                    const chatbotCode = this.getAttribute('data-chatbot-name'); // This is the unique code
+                    const chatbotCode = this.getAttribute('data-chatbot-name');
                     const chatbotDisplayName = this.getAttribute('data-chatbot-display-name');
                     
                     const modalTitle = document.getElementById('editContentModalLabel');
@@ -377,12 +432,11 @@
                     const editContentModal = new bootstrap.Modal(document.getElementById('editContentModal'));
 
                     modalTitle.textContent = 'Edit Content for ' + chatbotDisplayName;
-                    contentTextarea.value = 'Loading content...'; // Show loading state in textarea
-                    hiddenChatbotNameInput.value = chatbotCode; // Store the code for saving
+                    contentTextarea.value = 'Loading content...';
+                    hiddenChatbotNameInput.value = chatbotCode;
                     editContentModal.show();
 
                     const xhr = new XMLHttpRequest();
-                    // Use chatbotCode (which is unique) for fetching
                     xhr.open('GET', `{{ url_for('admin_get_chatbot_content', chatbot_code='TEMP_CODE') }}`.replace('TEMP_CODE', chatbotCode), true);
                     
                     xhr.onload = function() {
@@ -390,7 +444,10 @@
                             try {
                                 const response = JSON.parse(xhr.responseText);
                                 if (response.success) {
-                                    contentTextarea.value = response.content; // Populate textarea
+                                    contentTextarea.value = response.content;
+                                    document.getElementById('editCharLimit').value = response.char_limit;
+                                    document.getElementById('charLimitDisplay').textContent = response.char_limit.toLocaleString();
+                                    updateCharCount();
                                 } else {
                                     contentTextarea.value = 'Error: ' + response.error;
                                 }
@@ -409,15 +466,35 @@
                 });
             });
             
+            // Update character count
+            function updateCharCount() {
+                const content = document.getElementById('chatbotContentTextarea').value;
+                const count = content.length;
+                document.getElementById('currentCharCount').textContent = count.toLocaleString();
+            }
+
+            // Add character count update on input
+            document.getElementById('chatbotContentTextarea').addEventListener('input', updateCharCount);
+
             // Save Content button handler
             document.getElementById('saveContentChangesBtn').addEventListener('click', function() {
                 const chatbotCode = document.getElementById('editChatbotNameInput').value;
                 const newContent = document.getElementById('chatbotContentTextarea').value;
+                const charLimit = document.getElementById('editCharLimit').value;
                 const saveButton = this;
                 
                 const formData = new FormData();
-                formData.append('chatbot_code', chatbotCode); // Send unique code
+                formData.append('chatbot_code', chatbotCode);
                 formData.append('content', newContent);
+                formData.append('char_limit', charLimit);
+
+                // Add files if any are selected
+                const fileInput = document.getElementById('editFiles');
+                if (fileInput.files.length > 0) {
+                    for (let i = 0; i < fileInput.files.length; i++) {
+                        formData.append('files', fileInput.files[i]);
+                    }
+                }
                 
                 saveButton.disabled = true;
                 saveButton.textContent = 'Saving...';
@@ -430,40 +507,49 @@
                     saveButton.textContent = 'Save Changes';
                     if (xhr.status >= 200 && xhr.status < 300) {
                         try {
-                            const serverResponse = JSON.parse(xhr.responseText); // Renamed to avoid conflict
-                            if(serverResponse.success){
+                            const response = JSON.parse(xhr.responseText);
+                            if (response.success) {
                                 const editContentModalElement = document.getElementById('editContentModal');
                                 const editContentModal = bootstrap.Modal.getInstance(editContentModalElement);
-                                if(editContentModal) {
+                                if (editContentModal) {
                                     editContentModal.hide();
                                 }
-                                
-                                // Construct the redirect URL dynamically using JavaScript variables
-                                let message = 'Content has been updated successfully!';
-                                if (serverResponse.display_name) {
-                                    message = 'Content for ' + serverResponse.display_name + ' has been updated.';
-                                }
-                                const redirectUrl = `{{ url_for('admin') }}?message=${encodeURIComponent(message)}&message_type=success`;
-                                window.location.href = redirectUrl;
-
+                                window.location.href = "{{ url_for('admin') }}?message=" + encodeURIComponent('Content has been updated successfully!') + "&message_type=success";
+                            } else if (response.error === "Content too long") {
+                                // Show warning modal
+                                document.getElementById('edit-warning-message').textContent = response.warning;
+                                document.getElementById('edit-warning-content-length').textContent = response.content_length.toLocaleString();
+                                document.getElementById('edit-warning-char-limit').textContent = response.char_limit.toLocaleString();
+                                const editWarningModal = new bootstrap.Modal(document.getElementById('editWarningModal'));
+                                editWarningModal.show();
                             } else {
-                                alert('Error: ' + (serverResponse.error || 'Could not update content.'));
+                                alert('Error: ' + (response.error || 'Could not update content.'));
                             }
-                        } catch(e) {
-                             alert('Error parsing server response while saving.');
-                             console.error("Parse error on save:", e, xhr.responseText);
+                        } catch (e) {
+                            alert('Error parsing server response while saving.');
+                            console.error("Parse error on save:", e, xhr.responseText);
                         }
                     } else {
                         alert('Error: Could not update content. Status: ' + xhr.statusText);
                     }
                 };
-                xhr.onerror = function () {
+                xhr.onerror = function() {
                     saveButton.disabled = false;
                     saveButton.textContent = 'Save Changes';
                     alert('Network error. Please try again.');
                 };
                 
                 xhr.send(formData);
+            });
+
+            // Add event listener for the edit increase limit button
+            document.getElementById('edit-increase-limit-btn').addEventListener('click', function() {
+                const currentLimit = parseInt(document.getElementById('editCharLimit').value);
+                const newLimit = Math.min(currentLimit + 10000, 100000);
+                document.getElementById('editCharLimit').value = newLimit;
+                document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
+                bootstrap.Modal.getInstance(document.getElementById('editWarningModal')).hide();
+                document.getElementById('saveContentChangesBtn').click();
             });
 
             // Update quota

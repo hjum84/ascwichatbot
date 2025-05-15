@@ -67,6 +67,7 @@ def load_program_content():
     program_content.clear()
     program_names.clear()
     program_descriptions.clear()
+    deleted_programs.clear()  # Clear deleted programs set
     
     # Get all active chatbot contents from database
     db = get_db()
@@ -794,7 +795,32 @@ def admin():
     finally:
         close_db(db)
 
-# File upload and chatbot update route
+def clean_text(text):
+    """Clean and normalize text content by removing unnecessary elements."""
+    # Remove multiple newlines
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    
+    # Remove page numbers (e.g., "Page 1 of 10")
+    text = re.sub(r'Page\s+\d+\s+of\s+\d+', '', text)
+    
+    # Remove headers and footers (common patterns)
+    text = re.sub(r'^.*?©.*?$', '', text, flags=re.MULTILINE)  # Copyright notices
+    text = re.sub(r'^.*?Confidential.*?$', '', text, flags=re.MULTILINE)  # Confidential notices
+    
+    # Remove repeated headers (e.g., "Chapter 1" appearing multiple times)
+    text = re.sub(r'(^.*?$)\n\1', r'\1', text, flags=re.MULTILINE)
+    
+    # Remove empty lines at the beginning and end
+    text = text.strip()
+    
+    # Remove multiple spaces
+    text = re.sub(r' +', ' ', text)
+    
+    # Remove special characters that might be artifacts from PDF/PPT conversion
+    text = re.sub(r'[^\S\n]+', ' ', text)  # Keep newlines but remove other whitespace
+    
+    return text
+
 @app.route('/admin_upload', methods=['POST'])
 @requires_auth
 def admin_upload():
@@ -825,6 +851,16 @@ def admin_upload():
         description = request.form.get('description', '')
         logger.info(f"Description received: {description[:30]}..." if description else "No description")
         
+        # Get character limit (optional, default 50,000)
+        try:
+            char_limit = int(request.form.get('char_limit', 50000))
+            if char_limit < 50000:
+                char_limit = 50000
+            elif char_limit > 100000:
+                char_limit = 100000
+        except ValueError:
+            char_limit = 50000
+        
         # Check if files were uploaded
         files = request.files.getlist('files')
         if not files or not files[0]:
@@ -843,30 +879,36 @@ def admin_upload():
             file.save(temp_path)
             logger.info(f"File saved temporarily at: {temp_path}")
             try:
+                file_content = ""
                 if file_ext == '.txt':
                     with open(temp_path, 'r', encoding='utf-8') as f:
-                        combined_content += f.read() + "\n"
+                        file_content = f.read()
                 elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
                     with open(temp_path, 'rb') as f:
                         pdf_reader = PyPDF2.PdfReader(f)
                         for page_num in range(len(pdf_reader.pages)):
                             page = pdf_reader.pages[page_num]
-                            combined_content += (page.extract_text() or "") + "\n"
+                            file_content += (page.extract_text() or "") + "\n"
                 elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
                     presentation = Presentation(temp_path)
                     for slide in presentation.slides:
                         for shape in slide.shapes:
                             if hasattr(shape, "text"):
-                                combined_content += shape.text + "\n"
+                                file_content += shape.text + "\n"
                 elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
                     doc = docx.Document(temp_path)
                     for para in doc.paragraphs:
-                        combined_content += para.text + "\n"
+                        file_content += para.text + "\n"
                 elif TEXTRACT_AVAILABLE:
-                    combined_content += textract.process(temp_path).decode('utf-8') + "\n"
+                    file_content = textract.process(temp_path).decode('utf-8')
                 else:
                     logger.warning(f"No library available to process {file_ext} files")
                     return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
+                
+                # Clean the extracted content
+                cleaned_content = clean_text(file_content)
+                combined_content += cleaned_content + "\n\n"
+                
             except Exception as e:
                 logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
                 return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
@@ -877,6 +919,18 @@ def admin_upload():
         if not combined_content.strip():
             logger.warning("Extracted content is empty")
             return jsonify({"error": "The extracted content is empty"}), 400
+        
+        # Check character limit
+        content_length = len(combined_content)
+        if content_length > char_limit:
+            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {content_length//4:,} tokens, costing about ${(content_length/4000)*0.001:.3f} per conversation."
+            logger.warning(warning_message)
+            return jsonify({
+                "error": "Content too long",
+                "warning": warning_message,
+                "content_length": content_length,
+                "char_limit": char_limit
+            }), 400
         
         # Store content in database
         course_name_upper = course_name.upper()
@@ -1081,7 +1135,8 @@ def admin_get_chatbot_content(chatbot_code):
                 "success": True, 
                 "content": chatbot.content,
                 "display_name": chatbot.name,
-                "code": chatbot.code
+                "code": chatbot.code,
+                "char_limit": chatbot.char_limit or 50000  # Add character limit
             })
         elif chatbot and not chatbot.is_active:
             return jsonify({"success": False, "error": "Chatbot is currently deleted (inactive). Restore it to view content."}), 404
@@ -1101,9 +1156,16 @@ def admin_update_chatbot_content():
     try:
         chatbot_code = request.form.get('chatbot_code')
         new_content = request.form.get('content')
+        char_limit = int(request.form.get('char_limit', 50000))
 
         if not chatbot_code or new_content is None: # new_content can be empty string
             return jsonify({"success": False, "error": "Chatbot code and content are required."}), 400
+
+        # Validate character limit
+        if char_limit < 50000:
+            char_limit = 50000
+        elif char_limit > 100000:
+            char_limit = 100000
 
         chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
         if not chatbot:
@@ -1112,23 +1174,84 @@ def admin_update_chatbot_content():
         if not chatbot.is_active:
             return jsonify({"success": False, "error": "Cannot update content of an inactive (deleted) chatbot. Please restore it first."}), 400
 
+        # Check if files were uploaded
+        files = request.files.getlist('files')
+        if files and files[0]:
+            combined_content = ""
+            for file in files:
+                filename = secure_filename(file.filename)
+                file_ext = os.path.splitext(filename)[1].lower()
+                temp_path = os.path.join('temp', filename)
+                os.makedirs('temp', exist_ok=True)
+                file.save(temp_path)
+                try:
+                    file_content = ""
+                    if file_ext == '.txt':
+                        with open(temp_path, 'r', encoding='utf-8') as f:
+                            file_content = f.read()
+                    elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
+                        with open(temp_path, 'rb') as f:
+                            pdf_reader = PyPDF2.PdfReader(f)
+                            for page_num in range(len(pdf_reader.pages)):
+                                page = pdf_reader.pages[page_num]
+                                file_content += (page.extract_text() or "") + "\n"
+                    elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
+                        presentation = Presentation(temp_path)
+                        for slide in presentation.slides:
+                            for shape in slide.shapes:
+                                if hasattr(shape, "text"):
+                                    file_content += shape.text + "\n"
+                    elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
+                        doc = docx.Document(temp_path)
+                        for para in doc.paragraphs:
+                            file_content += para.text + "\n"
+                    elif TEXTRACT_AVAILABLE:
+                        file_content = textract.process(temp_path).decode('utf-8')
+                    else:
+                        return jsonify({"success": False, "error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
+                    
+                    # Clean the extracted content
+                    cleaned_content = clean_text(file_content)
+                    combined_content += cleaned_content + "\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
+                    return jsonify({"success": False, "error": f"Error extracting content from {filename}: {str(e)}"}), 500
+                finally:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+            
+            if combined_content:
+                new_content = combined_content
+
+        # Check character limit
+        content_length = len(new_content)
+        if content_length > char_limit:
+            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {content_length//4:,} tokens, costing about ${(content_length/4000)*0.001:.3f} per conversation."
+            return jsonify({
+                "success": False,
+                "error": "Content too long",
+                "warning": warning_message,
+                "content_length": content_length,
+                "char_limit": char_limit
+            }), 400
+
         chatbot.content = new_content
-        # Optionally, you might want to update a 'last_modified' timestamp here
-        # chatbot.last_modified = datetime.datetime.utcnow()
+        chatbot.char_limit = char_limit  # Update character limit
         db.commit()
         
         # Reload content into memory
-        load_program_content() # Make sure this function correctly reloads the updated content
+        load_program_content()
         
         logger.info(f"Content for chatbot {chatbot.name} (Code: {chatbot_code}) updated successfully.")
         return jsonify({
             "success": True, 
             "message": f"Content for {chatbot.name} updated successfully.",
             "display_name": chatbot.name 
-            }), 200
+        }), 200
 
     except Exception as e:
-        if db: # db might not be defined if error is very early
+        if db:
             db.rollback()
         logger.error(f"Error updating chatbot content for {request.form.get('chatbot_code')}: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error": "Server error occurred during content update."}), 500

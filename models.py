@@ -66,11 +66,12 @@ class ChatbotContent(Base):
     __tablename__ = 'chatbot_contents'
     
     id = Column(Integer, primary_key=True)
-    code = Column(String, unique=True, nullable=False)  # 예: "BCC", "MI"
-    name = Column(String, nullable=False)  # 표시 이름
+    code = Column(String(50), unique=True, nullable=False)  # 예: "BCC", "MI"
+    name = Column(String(100), nullable=False)  # 표시 이름
     description = Column(Text, nullable=True)  # 프로그램 설명
     content = Column(Text, nullable=False)  # 콘텐츠 요약 전체 내용
     is_active = Column(Boolean, default=True)  # 활성화 상태
+    char_limit = Column(Integer, default=50000)  # Add character limit field
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     quota = Column(Integer, nullable=False, default=3)  # Max questions quota

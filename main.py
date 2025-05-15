@@ -72,7 +72,8 @@ def load_program_content():
     # Get all active chatbot contents from database
     db = get_db()
     try:
-        chatbots = ChatbotContent.get_all_active(db)
+        # Get only active chatbots
+        chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
         
         # Load content into memory
         for chatbot in chatbots:
@@ -1332,8 +1333,13 @@ def clear_chat_history():
         close_db(db)
 
 if __name__ == '__main__':
-    # Migrate existing content to database when the app starts
-    migrate_content_to_db()
+    # Only migrate content if database is empty
+    db = get_db()
+    try:
+        if db.query(ChatbotContent).count() == 0:
+            migrate_content_to_db()
+    finally:
+        close_db(db)
     
     # Then load the content from database
     load_program_content()

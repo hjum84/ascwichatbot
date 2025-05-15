@@ -19,10 +19,6 @@ import sys
 import site
 import hashlib
 from functools import lru_cache
-import numpy as np
-from threading import Lock
-from sklearn.metrics.pairwise import cosine_similarity
-import time
 
 # For file content extraction - try to import, but don't fail if not available
 try:
@@ -70,118 +66,9 @@ deleted_programs = set()  # Keep track of deleted programs temporarily
 # Add after other global variables
 content_hashes = {}  # Store content hashes for each chatbot
 
-# Embedding caching system
-embedding_cache = {}  # Cache for question -> embedding vector
-similar_questions_cache = {}  # Cache for question -> similar question mapping
-embedding_lock = Lock()  # Lock for thread safety
-SIMILARITY_THRESHOLD = 0.85  # Similarity threshold (consider similar if > 0.85)
-
 def get_content_hash(content):
     """Generate a hash for the content to use for caching"""
     return hashlib.md5(content.encode()).hexdigest()
-
-def get_embedding(text):
-    """
-    Generate OpenAI embedding for the text.
-    Results are cached to prevent duplicate API calls for the same text.
-    """
-    # Basic preprocessing: lowercase, normalize whitespace
-    normalized_text = re.sub(r'\s+', ' ', text.lower()).strip()
-    
-    # Check if embedding already exists in cache
-    if normalized_text in embedding_cache:
-        logger.debug(f"Embedding cache hit for: {normalized_text[:30]}...")
-        return embedding_cache[normalized_text]
-    
-    try:
-        # Call OpenAI embedding API
-        response = openai.Embedding.create(
-            model="text-embedding-3-small",
-            input=normalized_text
-        )
-        embedding = response['data'][0]['embedding']
-        
-        # Store in cache
-        with embedding_lock:
-            embedding_cache[normalized_text] = embedding
-            
-            # Limit cache size (optional)
-            if len(embedding_cache) > 10000:
-                # Remove oldest entry
-                oldest_key = next(iter(embedding_cache))
-                embedding_cache.pop(oldest_key)
-        
-        logger.debug(f"Generated embedding for: {normalized_text[:30]}...")
-        return embedding
-    
-    except Exception as e:
-        logger.error(f"Error generating embedding: {str(e)}")
-        return None
-
-def find_similar_question(user_message, content_hash):
-    """
-    Find a question similar to the given user_message.
-    Returns a cached question within the content_hash that has similarity above threshold.
-    """
-    # Basic preprocessing: lowercase, normalize whitespace
-    normalized_question = re.sub(r'\s+', ' ', user_message.lower()).strip()
-    
-    # Create cache key
-    cache_key = f"{content_hash}:{normalized_question}"
-    
-    # Check if we already found similar questions in cache
-    if cache_key in similar_questions_cache:
-        logger.debug(f"Similar question cache hit for: {normalized_question[:30]}...")
-        return similar_questions_cache[cache_key]
-    
-    # Generate embedding for new question
-    new_embedding = get_embedding(normalized_question)
-    if new_embedding is None:
-        return None
-    
-    # Construct a list to hold questions from cache keys
-    content_questions = []
-    
-    # Get cache info
-    cache_info = get_cached_response.cache_info()
-    # Extract the cache dictionary
-    if hasattr(cache_info, '_cache'):
-        cache_dict = cache_info._cache
-    else:
-        # For some Python versions, it might be just .cache
-        cache_dict = get_cached_response.cache
-    
-    # Find existing questions for this content_hash
-    for key in cache_dict:
-        if key[0] == content_hash:  # Only consider entries with matching content_hash
-            content_questions.append(key[1])  # Extract question part
-    
-    # Find similar questions
-    best_similarity = 0
-    best_question = None
-    
-    for question in content_questions:
-        question_embedding = get_embedding(question)
-        if question_embedding is None:
-            continue
-        
-        # Calculate cosine similarity
-        similarity = cosine_similarity(
-            np.array([new_embedding]), 
-            np.array([question_embedding])
-        )[0][0]
-        
-        # If similarity exceeds threshold and is better than previous best, update
-        if similarity >= SIMILARITY_THRESHOLD and similarity > best_similarity:
-            best_similarity = similarity
-            best_question = question
-            logger.debug(f"Found similar question: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
-    
-    # Store in similar questions cache
-    similar_questions_cache[cache_key] = best_question
-    
-    # If we found a similar question, return it
-    return best_question
 
 @lru_cache(maxsize=1000)
 def get_cached_response(content_hash, user_message):
@@ -189,24 +76,11 @@ def get_cached_response(content_hash, user_message):
     This function is decorated with lru_cache which will cache the results,
     reducing API costs by using cached inputs (50% cost reduction).
     """
-    # Find program code based on content hash
-    program_code = None
-    for code, hash_value in content_hashes.items():
-        if hash_value == content_hash:
-            program_code = code
-            break
-    
-    if not program_code or program_code not in program_content:
-        logger.error(f"Program content not found for hash: {content_hash}")
-        return None
-    
     try:
-        # Get actual content to use in system message
-        content = program_content[program_code]
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are an assistant that only answers questions based on the following content for the {program_names.get(program_code, 'selected')} program: {content}"},
+                {"role": "system", "content": content_hash},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=500
@@ -746,25 +620,11 @@ def chat():
             content_hashes[current_program] = content_hash
             logger.debug(f"Generated new content hash for {current_program}")
 
-        # Track cache performance
-        start_time = time.time()
-        cache_result = "exact_match"
-        
-        # Try to get cached response first (exact match)
+        # Try to get cached response first
         chatbot_reply = get_cached_response(content_hash, user_message)
         
-        # If no exact match, try to find semantically similar question
         if not chatbot_reply:
-            cache_result = "semantic_match"
-            similar_question = find_similar_question(user_message, content_hash)
-            if similar_question:
-                logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
-                chatbot_reply = get_cached_response(content_hash, similar_question)
-                logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
-        
-        # If no cached response at all, get new response
-        if not chatbot_reply:
-            cache_result = "cache_miss"
+            # If no cached response, get new response
             try:
                 logger.debug(f"Cache miss for {current_program}, getting new response")
                 response = openai.ChatCompletion.create(
@@ -779,10 +639,6 @@ def chat():
             except Exception as e:
                 logger.error(f"Error getting new response: {str(e)}")
                 return jsonify({"error": str(e)}), 500
-        
-        # Log cache performance
-        total_time = time.time() - start_time
-        logger.info(f"Cache performance: {cache_result} in {total_time:.3f} seconds")
 
         # Truncate response to 300 words if necessary
         words = chatbot_reply.split()

@@ -8,6 +8,8 @@ psycopg2-binary
 waitress
 pillow
 requests
+numpy
+scikit-learn
 
 # File processing packages - optional
 PyPDF2

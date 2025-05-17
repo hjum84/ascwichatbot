@@ -1043,60 +1043,68 @@ def admin_upload():
         except ValueError:
             char_limit = 50000
         
-        # Check if files were uploaded
-        files = request.files.getlist('files')
-        if not files or not files[0]:
-            logger.warning("No files part in the request")
-            return jsonify({"error": "Please upload at least one file"}), 400
-        
-        logger.info(f"Files received: {[f.filename for f in files]}")
-        
-        # Save and extract text from each file
+        # Check if we're using edited content from preview
+        use_edited_content = request.form.get('use_edited_content', 'false').lower() == 'true'
         combined_content = ""
-        for file in files:
-            filename = secure_filename(file.filename)
-            file_ext = os.path.splitext(filename)[1].lower()
-            temp_path = os.path.join('temp', filename)
-            os.makedirs('temp', exist_ok=True)
-            file.save(temp_path)
-            logger.info(f"File saved temporarily at: {temp_path}")
-            try:
-                file_content = ""
-                if file_ext == '.txt':
-                    with open(temp_path, 'r', encoding='utf-8') as f:
-                        file_content = f.read()
-                elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
-                    with open(temp_path, 'rb') as f:
-                        pdf_reader = PyPDF2.PdfReader(f)
-                        for page_num in range(len(pdf_reader.pages)):
-                            page = pdf_reader.pages[page_num]
-                            file_content += (page.extract_text() or "") + "\n"
-                elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
-                    presentation = Presentation(temp_path)
-                    for slide in presentation.slides:
-                        for shape in slide.shapes:
-                            if hasattr(shape, "text"):
-                                file_content += shape.text + "\n"
-                elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
-                    doc = docx.Document(temp_path)
-                    for para in doc.paragraphs:
-                        file_content += para.text + "\n"
-                elif TEXTRACT_AVAILABLE:
-                    file_content = textract.process(temp_path).decode('utf-8')
-                else:
-                    logger.warning(f"No library available to process {file_ext} files")
-                    return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
-                
-                # Clean the extracted content
-                cleaned_content = clean_text(file_content)
-                combined_content += cleaned_content + "\n\n"
-                
-            except Exception as e:
-                logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
-                return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
-            finally:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+        
+        if use_edited_content and 'combined_content' in request.form:
+            # Use the edited content directly
+            combined_content = request.form.get('combined_content', '')
+            logger.info("Using edited content from preview")
+        else:
+            # Check if files were uploaded
+            files = request.files.getlist('files')
+            if not files or not files[0]:
+                logger.warning("No files part in the request")
+                return jsonify({"error": "Please upload at least one file"}), 400
+            
+            logger.info(f"Files received: {[f.filename for f in files]}")
+            
+            # Save and extract text from each file
+            for file in files:
+                filename = secure_filename(file.filename)
+                file_ext = os.path.splitext(filename)[1].lower()
+                temp_path = os.path.join('temp', filename)
+                os.makedirs('temp', exist_ok=True)
+                file.save(temp_path)
+                logger.info(f"File saved temporarily at: {temp_path}")
+                try:
+                    file_content = ""
+                    if file_ext == '.txt':
+                        with open(temp_path, 'r', encoding='utf-8') as f:
+                            file_content = f.read()
+                    elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
+                        with open(temp_path, 'rb') as f:
+                            pdf_reader = PyPDF2.PdfReader(f)
+                            for page_num in range(len(pdf_reader.pages)):
+                                page = pdf_reader.pages[page_num]
+                                file_content += (page.extract_text() or "") + "\n"
+                    elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
+                        presentation = Presentation(temp_path)
+                        for slide in presentation.slides:
+                            for shape in slide.shapes:
+                                if hasattr(shape, "text"):
+                                    file_content += shape.text + "\n"
+                    elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
+                        doc = docx.Document(temp_path)
+                        for para in doc.paragraphs:
+                            file_content += para.text + "\n"
+                    elif TEXTRACT_AVAILABLE:
+                        file_content = textract.process(temp_path).decode('utf-8')
+                    else:
+                        logger.warning(f"No library available to process {file_ext} files")
+                        return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
+                    
+                    # Clean the extracted content
+                    cleaned_content = clean_text(file_content)
+                    combined_content += cleaned_content + "\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
+                    return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
+                finally:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
         
         if not combined_content.strip():
             logger.warning("Extracted content is empty")
@@ -1105,13 +1113,21 @@ def admin_upload():
         # Check character limit
         content_length = len(combined_content)
         if content_length > char_limit:
-            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {content_length//4:,} tokens, costing about ${(content_length/4000)*0.001:.3f} per conversation."
+            # Calculate costs using GPT-4o-mini pricing
+            estimated_tokens = content_length // 4  # Rough estimate of tokens
+            input_cost = (estimated_tokens * 0.0000005)  # $0.0005 per 1K tokens for input
+            output_cost = 100 * 0.0000015  # Assuming ~100 output tokens, $0.0015 per 1K tokens
+            total_cost = input_cost + output_cost
+            
+            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {estimated_tokens:,} input tokens, costing about ${total_cost:.5f} per conversation based on GPT-4o-mini pricing."
             logger.warning(warning_message)
             return jsonify({
                 "error": "Content too long",
                 "warning": warning_message,
                 "content_length": content_length,
-                "char_limit": char_limit
+                "char_limit": char_limit,
+                "exceeds_by": content_length - char_limit,
+                "exceeds_by_percent": round((content_length / char_limit - 1) * 100, 1)
             }), 400
         
         # Store content in database
@@ -1339,6 +1355,8 @@ def admin_update_chatbot_content():
         chatbot_code = request.form.get('chatbot_code')
         new_content = request.form.get('content')
         char_limit = int(request.form.get('char_limit', 50000))
+        should_append = request.form.get('append_content', 'false').lower() == 'true'
+        use_edited_content = request.form.get('use_edited_content', 'false').lower() == 'true'
 
         if not chatbot_code or new_content is None: # new_content can be empty string
             return jsonify({"success": False, "error": "Chatbot code and content are required."}), 400
@@ -1356,60 +1374,74 @@ def admin_update_chatbot_content():
         if not chatbot.is_active:
             return jsonify({"success": False, "error": "Cannot update content of an inactive (deleted) chatbot. Please restore it first."}), 400
 
-        # Check if files were uploaded
-        files = request.files.getlist('files')
-        if files and files[0]:
-            combined_content = ""
-            for file in files:
-                filename = secure_filename(file.filename)
-                file_ext = os.path.splitext(filename)[1].lower()
-                temp_path = os.path.join('temp', filename)
-                os.makedirs('temp', exist_ok=True)
-                file.save(temp_path)
-                try:
-                    file_content = ""
-                    if file_ext == '.txt':
-                        with open(temp_path, 'r', encoding='utf-8') as f:
-                            file_content = f.read()
-                    elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
-                        with open(temp_path, 'rb') as f:
-                            pdf_reader = PyPDF2.PdfReader(f)
-                            for page_num in range(len(pdf_reader.pages)):
-                                page = pdf_reader.pages[page_num]
-                                file_content += (page.extract_text() or "") + "\n"
-                    elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
-                        presentation = Presentation(temp_path)
-                        for slide in presentation.slides:
-                            for shape in slide.shapes:
-                                if hasattr(shape, "text"):
-                                    file_content += shape.text + "\n"
-                    elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
-                        doc = docx.Document(temp_path)
-                        for para in doc.paragraphs:
-                            file_content += para.text + "\n"
-                    elif TEXTRACT_AVAILABLE:
-                        file_content = textract.process(temp_path).decode('utf-8')
+        # If using edited content from the preview, we already have it in new_content
+        # Only process files if not using edited content
+        if not use_edited_content:
+            # Check if files were uploaded
+            files = request.files.getlist('files')
+            if files and files[0]:
+                combined_content = ""
+                for file in files:
+                    filename = secure_filename(file.filename)
+                    file_ext = os.path.splitext(filename)[1].lower()
+                    temp_path = os.path.join('temp', filename)
+                    os.makedirs('temp', exist_ok=True)
+                    file.save(temp_path)
+                    try:
+                        file_content = ""
+                        if file_ext == '.txt':
+                            with open(temp_path, 'r', encoding='utf-8') as f:
+                                file_content = f.read()
+                        elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
+                            with open(temp_path, 'rb') as f:
+                                pdf_reader = PyPDF2.PdfReader(f)
+                                for page_num in range(len(pdf_reader.pages)):
+                                    page = pdf_reader.pages[page_num]
+                                    file_content += (page.extract_text() or "") + "\n"
+                        elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
+                            presentation = Presentation(temp_path)
+                            for slide in presentation.slides:
+                                for shape in slide.shapes:
+                                    if hasattr(shape, "text"):
+                                        file_content += shape.text + "\n"
+                        elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
+                            doc = docx.Document(temp_path)
+                            for para in doc.paragraphs:
+                                file_content += para.text + "\n"
+                        elif TEXTRACT_AVAILABLE:
+                            file_content = textract.process(temp_path).decode('utf-8')
+                        else:
+                            return jsonify({"success": False, "error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
+                        
+                        # Clean the extracted content
+                        cleaned_content = clean_text(file_content)
+                        combined_content += cleaned_content + "\n\n"
+                        
+                    except Exception as e:
+                        logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
+                        return jsonify({"success": False, "error": f"Error extracting content from {filename}: {str(e)}"}), 500
+                    finally:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                
+                if combined_content:
+                    # If should_append is true, append the new content to the existing content
+                    # Otherwise, replace the content with the new content
+                    if should_append and new_content:
+                        new_content = new_content + "\n\n" + combined_content
                     else:
-                        return jsonify({"success": False, "error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
-                    
-                    # Clean the extracted content
-                    cleaned_content = clean_text(file_content)
-                    combined_content += cleaned_content + "\n\n"
-                    
-                except Exception as e:
-                    logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
-                    return jsonify({"success": False, "error": f"Error extracting content from {filename}: {str(e)}"}), 500
-                finally:
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
-            
-            if combined_content:
-                new_content = combined_content
+                        new_content = combined_content
 
         # Check character limit
         content_length = len(new_content)
         if content_length > char_limit:
-            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {content_length//4:,} tokens, costing about ${(content_length/4000)*0.001:.3f} per conversation."
+            # Calculate costs using GPT-4o-mini pricing
+            estimated_tokens = content_length // 4  # Rough estimate of tokens
+            input_cost = (estimated_tokens * 0.0000005)  # $0.0005 per 1K tokens for input
+            output_cost = 100 * 0.0000015  # Assuming ~100 output tokens, $0.0015 per 1K tokens
+            total_cost = input_cost + output_cost
+            
+            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {estimated_tokens:,} input tokens, costing about ${total_cost:.5f} per conversation based on GPT-4o-mini pricing."
             return jsonify({
                 "success": False,
                 "error": "Content too long",
@@ -1512,6 +1544,128 @@ def clear_chat_history():
         return jsonify({'success': False, 'error': str(e)})
     finally:
         close_db(db)
+
+@app.route('/admin_preview_upload', methods=['POST'])
+@requires_auth
+def admin_preview_upload():
+    """Preview uploaded files before creating or updating a chatbot"""
+    try:
+        # Get files from request
+        files = request.files.getlist('files')
+        if not files or not files[0]:
+            return jsonify({"error": "Please upload at least one file"}), 400
+            
+        logger.info(f"Preview request received: {[f.filename for f in files]}")
+        
+        # Check if this is for appending to existing content
+        current_content = request.form.get('current_content', '')
+        append_content = request.form.get('append_content', 'false').lower() == 'true'
+        
+        # Save and extract text from each file
+        combined_content = ""
+        file_contents = []
+        
+        for file in files:
+            filename = secure_filename(file.filename)
+            file_ext = os.path.splitext(filename)[1].lower()
+            temp_path = os.path.join('temp', filename)
+            os.makedirs('temp', exist_ok=True)
+            file.save(temp_path)
+            
+            try:
+                file_content = ""
+                if file_ext == '.txt':
+                    with open(temp_path, 'r', encoding='utf-8') as f:
+                        file_content = f.read()
+                elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
+                    with open(temp_path, 'rb') as f:
+                        pdf_reader = PyPDF2.PdfReader(f)
+                        for page_num in range(len(pdf_reader.pages)):
+                            page = pdf_reader.pages[page_num]
+                            file_content += (page.extract_text() or "") + "\n"
+                elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
+                    presentation = Presentation(temp_path)
+                    for slide in presentation.slides:
+                        for shape in slide.shapes:
+                            if hasattr(shape, "text"):
+                                file_content += shape.text + "\n"
+                elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
+                    doc = docx.Document(temp_path)
+                    for para in doc.paragraphs:
+                        file_content += para.text + "\n"
+                elif TEXTRACT_AVAILABLE:
+                    file_content = textract.process(temp_path).decode('utf-8')
+                else:
+                    return jsonify({"error": f"No library available to process {file_ext} files"}), 400
+                
+                # Clean the extracted content
+                cleaned_content = clean_text(file_content)
+                
+                # Add to file contents array with metadata
+                file_contents.append({
+                    "filename": filename,
+                    "content": cleaned_content,
+                    "char_count": len(cleaned_content)
+                })
+                
+                combined_content += cleaned_content + "\n\n"
+                
+            except Exception as e:
+                logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
+                return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+        
+        if not combined_content.strip():
+            return jsonify({"error": "The extracted content is empty"}), 400
+        
+        # If appending to existing content, include that in the preview
+        preview_content = combined_content
+        if append_content and current_content:
+            preview_content = current_content + "\n\n" + combined_content
+            # Add a note about existing content
+            file_contents.insert(0, {
+                "filename": "Existing Content",
+                "content": current_content,
+                "char_count": len(current_content)
+            })
+        
+        # Check character limit
+        content_length = len(preview_content)
+        char_limit = 50000  # Default limit, would normally come from the form
+        
+        try:
+            char_limit = int(request.form.get('char_limit', 50000))
+        except:
+            pass
+            
+        # Prepare response with preview data
+        response = {
+            "success": True,
+            "files": file_contents,
+            "total_char_count": content_length,
+            "char_limit": char_limit,
+            "exceeds_limit": content_length > char_limit,
+            "combined_preview": preview_content,
+            "append_mode": append_content
+        }
+        
+        # Add specific warning if limit exceeded
+        if content_length > char_limit:
+            # Calculate costs using GPT-4o-mini pricing
+            estimated_tokens = content_length // 4  # Rough estimate of tokens
+            input_cost = (estimated_tokens * 0.0000005)  # $0.0005 per 1K tokens for input
+            output_cost = 100 * 0.0000015  # Assuming ~100 output tokens, $0.0015 per 1K tokens
+            total_cost = input_cost + output_cost
+            
+            response["warning"] = f"Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {estimated_tokens:,} input tokens, costing about ${total_cost:.5f} per conversation based on GPT-4o-mini pricing."
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in preview: {str(e)}", exc_info=True)
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

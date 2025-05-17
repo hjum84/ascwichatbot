@@ -121,8 +121,74 @@
                                 <div class="form-text">You can upload multiple files. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
                             </div>
                             
-                            <button type="button" id="submit-btn" class="btn btn-primary">Upload and Update Chatbot</button>
+                            <button type="button" id="preview-btn" class="btn btn-secondary me-2">Preview Content</button>
+                            <button type="button" id="submit-btn" class="btn btn-primary" disabled>Upload and Update Chatbot</button>
                         </form>
+                        
+                        <div id="preview-section" class="mt-4" style="display: none;">
+                            <h4>Content Preview</h4>
+                            <div class="alert alert-info mb-3">
+                                <p>Review the extracted content below. You can edit the content before uploading if needed.</p>
+                                <p><strong>Instructions:</strong></p>
+                                <ol>
+                                    <li>Review the extracted text from each file</li>
+                                    <li>Make any necessary edits directly in the text boxes</li>
+                                    <li>Click "Apply Changes" to update the content</li>
+                                    <li>When satisfied, click "Upload and Update Chatbot" to save</li>
+                                </ol>
+                            </div>
+                            
+                            <div id="character-count-info" class="mb-3">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h5 class="card-title">Content Statistics</h5>
+                                        <p>Total Character Count: <strong id="total-char-count">0</strong></p>
+                                        <p>Character Limit: <strong id="char-limit">50000</strong></p>
+                                        <div id="limit-warning" class="alert alert-danger" style="display: none;">
+                                            <p><strong>Warning: Content exceeds the character limit!</strong></p>
+                                            <p id="limit-warning-message"></p>
+                                            <p>Options:</p>
+                                            <ul>
+                                                <li>Reduce content by editing the text below</li>
+                                                <li>Increase the character limit (will increase API costs)</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <ul class="nav nav-tabs mb-3" id="contentTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="files-tab" data-bs-toggle="tab" data-bs-target="#files-content" type="button" role="tab" aria-controls="files-content" aria-selected="true">Individual Files</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="combined-tab" data-bs-toggle="tab" data-bs-target="#combined-content" type="button" role="tab" aria-controls="combined-content" aria-selected="false">Combined Content</button>
+                                </li>
+                            </ul>
+                            
+                            <div class="tab-content" id="contentTabsContent">
+                                <div class="tab-pane fade show active" id="files-content" role="tabpanel" aria-labelledby="files-tab">
+                                    <div id="file-previews" class="mb-4">
+                                        <!-- Individual file previews will be added here -->
+                                    </div>
+                                </div>
+                                <div class="tab-pane fade" id="combined-content" role="tabpanel" aria-labelledby="combined-tab">
+                                    <div class="mb-4">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <label for="combined-preview" class="form-label">Full Content (Editable)</label>
+                                                <textarea id="combined-preview" class="form-control" style="white-space: pre-wrap; min-height: 300px; font-family: monospace;"></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="d-flex justify-content-end mt-3">
+                                <button type="button" id="update-combined-content" class="btn btn-primary me-2">Apply Changes</button>
+                                <span id="update-combined-content-status" class="text-success align-self-center" style="display: none;">Changes applied successfully!</span>
+                            </div>
+                        </div>
                         
                         <div id="debug-info"></div>
                         <div id="upload-status" class="mt-3"></div>
@@ -220,19 +286,96 @@
                         <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="editFiles" class="form-label">Upload New Files (Optional)</label>
-                        <input type="file" class="form-control" id="editFiles" name="files" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple>
-                        <div class="form-text">Upload new files to replace or add to the current content. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
-                    </div>
+                    <ul class="nav nav-tabs mb-3" id="editContentTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="current-content-tab" data-bs-toggle="tab" data-bs-target="#current-content-panel" type="button" role="tab" aria-controls="current-content-panel" aria-selected="true">Current Content</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="upload-files-tab" data-bs-toggle="tab" data-bs-target="#upload-files-panel" type="button" role="tab" aria-controls="upload-files-panel" aria-selected="false">Upload New Files</button>
+                        </li>
+                    </ul>
                     
-                    <div class="mb-3">
-                        <label for="chatbotContentTextarea" class="form-label">Content</label>
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-muted">Current character count: <span id="currentCharCount">0</span></span>
-                            <span class="text-muted">Character limit: <span id="charLimitDisplay">50,000</span></span>
+                    <div class="tab-content" id="editContentTabsContent">
+                        <div class="tab-pane fade show active" id="current-content-panel" role="tabpanel" aria-labelledby="current-content-tab">
+                            <div class="mb-3">
+                                <label for="chatbotContentTextarea" class="form-label">Current Content</label>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted">Character count: <span id="currentCharCount">0</span></span>
+                                    <span class="text-muted">Character limit: <span id="charLimitDisplay">50,000</span></span>
+                                </div>
+                                <textarea id="chatbotContentTextarea" class="form-control" rows="20" style="white-space: pre-wrap; word-wrap: break-word;"></textarea>
+                            </div>
                         </div>
-                        <textarea id="chatbotContentTextarea" class="form-control" rows="20" style="white-space: pre-wrap; word-wrap: break-word;"></textarea>
+                        <div class="tab-pane fade" id="upload-files-panel" role="tabpanel" aria-labelledby="upload-files-tab">
+                            <div class="mb-3">
+                                <label for="editFiles" class="form-label">Upload New Files</label>
+                                <input type="file" class="form-control" id="editFiles" name="files" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple>
+                                <div class="form-text">Upload new files to replace or add to the current content. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="appendContent" checked>
+                                    <label class="form-check-label" for="appendContent">
+                                        Append new files to existing content (uncheck to replace all content)
+                                    </label>
+                                </div>
+                                <button type="button" id="editPreviewBtn" class="btn btn-primary mt-3">Preview Files</button>
+                            </div>
+                            
+                            <div id="edit-preview-section" class="mt-4" style="display: none;">
+                                <h5>File Preview</h5>
+                                <div class="alert alert-info">
+                                    <p>Review and edit the extracted content before saving changes.</p>
+                                    <ol>
+                                        <li>Review the extracted text from each file</li>
+                                        <li>Make any necessary edits</li>
+                                        <li>Click "Apply Changes" to update</li>
+                                    </ol>
+                                </div>
+                                
+                                <div class="card mb-3">
+                                    <div class="card-body">
+                                        <h6>Content Statistics</h6>
+                                        <p>Total Character Count: <strong id="edit-total-char-count">0</strong></p>
+                                        <p>Character Limit: <strong id="edit-char-limit">50000</strong></p>
+                                        <div id="edit-limit-warning" class="alert alert-danger" style="display: none;">
+                                            <p><strong>Warning: Content exceeds the character limit!</strong></p>
+                                            <p id="edit-limit-warning-message"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <ul class="nav nav-tabs mb-3" id="editPreviewTabs" role="tablist">
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link active" id="edit-files-tab" data-bs-toggle="tab" data-bs-target="#edit-files-content" type="button" role="tab" aria-controls="edit-files-content" aria-selected="true">Individual Files</button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link" id="edit-combined-tab" data-bs-toggle="tab" data-bs-target="#edit-combined-content" type="button" role="tab" aria-controls="edit-combined-content" aria-selected="false">Combined Content</button>
+                                    </li>
+                                </ul>
+                                
+                                <div class="tab-content" id="editPreviewTabsContent">
+                                    <div class="tab-pane fade show active" id="edit-files-content" role="tabpanel" aria-labelledby="edit-files-tab">
+                                        <div id="edit-file-previews" class="mb-3">
+                                            <!-- Individual file previews will be added here -->
+                                        </div>
+                                    </div>
+                                    <div class="tab-pane fade" id="edit-combined-content" role="tabpanel" aria-labelledby="edit-combined-tab">
+                                        <div class="mb-3">
+                                            <div class="card">
+                                                <div class="card-body">
+                                                    <label for="edit-combined-preview" class="form-label">Combined Content (Editable)</label>
+                                                    <textarea id="edit-combined-preview" class="form-control" style="white-space: pre-wrap; min-height: 200px; font-family: monospace;"></textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex justify-content-end mt-3 mb-3">
+                                    <button type="button" id="update-edit-combined-content" class="btn btn-primary">Apply Changes</button>
+                                    <span id="update-edit-combined-content-status" class="ms-2 text-success align-self-center" style="display: none;">Changes applied!</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -301,11 +444,29 @@
                     alert('Please select at least one file');
                     return;
                 }
-                for (let i = 0; i < fileInput.files.length; i++) {
-                    formData.append('files', fileInput.files[i]);
+                
+                // Check if we have edited content in the preview
+                const combinedPreview = document.getElementById('combined-preview');
+                const previewSection = document.getElementById('preview-section');
+                
+                if (previewSection.style.display !== 'none' && combinedPreview && combinedPreview.value) {
+                    // Use the edited content instead of the original files
+                    formData.append('combined_content', combinedPreview.value);
+                    formData.append('use_edited_content', 'true');
+                } else {
+                    // Use the original files
+                    for (let i = 0; i < fileInput.files.length; i++) {
+                        formData.append('files', fileInput.files[i]);
+                    }
                 }
+                
                 // Remove the single 'file' field to avoid duplication
                 formData.delete('file');
+                
+                // Show loading state
+                this.disabled = true;
+                this.textContent = 'Uploading...';
+                
                 fetch("{{ url_for('admin_upload') }}", {
                     method: 'POST',
                     body: formData
@@ -315,11 +476,153 @@
                     if (data.success) {
                         window.location.href = "{{ url_for('admin', message='The chatbot has been successfully updated', message_type='success') }}";
                     } else {
-                        alert('Error: ' + (data.error || 'Could not upload files.'));
+                        // If error is about character limit, show a more detailed error
+                        if (data.error === "Content too long" && data.warning) {
+                            const charLimitModal = new bootstrap.Modal(document.getElementById('editWarningModal'));
+                            document.getElementById('edit-warning-message').textContent = data.warning;
+                            document.getElementById('edit-warning-content-length').textContent = data.content_length.toLocaleString();
+                            document.getElementById('edit-warning-char-limit').textContent = data.char_limit.toLocaleString();
+                            charLimitModal.show();
+                        } else {
+                            alert('Error: ' + (data.error || 'Could not upload files.'));
+                        }
+                        this.disabled = false;
+                        this.textContent = 'Upload and Update Chatbot';
                     }
                 })
                 .catch(error => {
                     alert('Network error: ' + error);
+                    this.disabled = false;
+                    this.textContent = 'Upload and Update Chatbot';
+                });
+            });
+            
+            // Preview button handler
+            document.getElementById('preview-btn').addEventListener('click', function() {
+                const form = document.getElementById('upload-form');
+                const formData = new FormData(form);
+                const fileInput = document.getElementById('file');
+                if (!fileInput.files.length) {
+                    alert('Please select at least one file');
+                    return;
+                }
+                
+                // Add files to form data
+                for (let i = 0; i < fileInput.files.length; i++) {
+                    formData.append('files', fileInput.files[i]);
+                }
+                // Remove the single 'file' field to avoid duplication
+                formData.delete('file');
+                
+                // Show loading state
+                this.disabled = true;
+                this.textContent = 'Generating Preview...';
+                
+                fetch("{{ url_for('admin_preview_upload') }}", {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Enable submit button after preview
+                        document.getElementById('submit-btn').disabled = false;
+                        
+                        // Show preview section
+                        document.getElementById('preview-section').style.display = 'block';
+                        
+                        // Update character counts
+                        document.getElementById('total-char-count').textContent = data.total_char_count.toLocaleString();
+                        document.getElementById('char-limit').textContent = data.char_limit.toLocaleString();
+                        
+                        // Show warning if limit exceeded
+                        const limitWarning = document.getElementById('limit-warning');
+                        if (data.exceeds_limit) {
+                            limitWarning.style.display = 'block';
+                            document.getElementById('limit-warning-message').textContent = data.warning;
+                        } else {
+                            limitWarning.style.display = 'none';
+                        }
+                        
+                        // Show combined preview in textarea
+                        document.getElementById('combined-preview').value = data.combined_preview;
+                        
+                        // Create file previews with editable textareas
+                        const filePreviewsContainer = document.getElementById('file-previews');
+                        filePreviewsContainer.innerHTML = '';
+                        
+                        data.files.forEach((file, index) => {
+                            const fileCard = document.createElement('div');
+                            fileCard.className = 'card mb-3';
+                            fileCard.innerHTML = `
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span>${file.filename}</span>
+                                    <span class="badge bg-secondary">${file.char_count.toLocaleString()} characters</span>
+                                </div>
+                                <div class="card-body">
+                                    <label for="file-content-${index}" class="form-label">Extracted text:</label>
+                                    <textarea id="file-content-${index}" class="form-control" style="white-space: pre-wrap; max-height: 200px; min-height: 100px; font-family: monospace;">${file.content}</textarea>
+                                </div>
+                            `;
+                            filePreviewsContainer.appendChild(fileCard);
+                        });
+                        
+                        // Add event listener to update combined content
+                        document.getElementById('update-combined-content').addEventListener('click', function() {
+                            // Collect all individual file contents
+                            let updatedContents = [];
+                            data.files.forEach((file, index) => {
+                                const textarea = document.getElementById(`file-content-${index}`);
+                                if (textarea) {
+                                    updatedContents.push(textarea.value);
+                                }
+                            });
+                            
+                            // Update the combined content
+                            const combinedContent = updatedContents.join('\n\n');
+                            document.getElementById('combined-preview').value = combinedContent;
+                            
+                            // Update character count info
+                            const newCount = combinedContent.length;
+                            document.getElementById('total-char-count').textContent = newCount.toLocaleString();
+                            
+                            // Check if exceeds limit
+                            const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
+                            const limitWarning = document.getElementById('limit-warning');
+                            
+                            if (newCount > charLimit) {
+                                limitWarning.style.display = 'block';
+                                // We don't have the exact warning message here, but we can show a generic one
+                                document.getElementById('limit-warning-message').textContent = 
+                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}).`;
+                            } else {
+                                limitWarning.style.display = 'none';
+                            }
+                            
+                            // Show status
+                            document.getElementById('update-combined-content-status').style.display = 'inline';
+                            setTimeout(() => {
+                                document.getElementById('update-combined-content-status').style.display = 'none';
+                            }, 2000);
+                            
+                            // Switch to combined tab to show the result
+                            document.getElementById('combined-tab').click();
+                        });
+                        
+                        // Scroll to preview section
+                        document.getElementById('preview-section').scrollIntoView({ behavior: 'smooth' });
+                    } else {
+                        alert('Error: ' + (data.error || 'Could not generate preview.'));
+                    }
+                    
+                    // Reset button state
+                    this.disabled = false;
+                    this.textContent = 'Preview Content';
+                })
+                .catch(error => {
+                    alert('Network error: ' + error);
+                    this.disabled = false;
+                    this.textContent = 'Preview Content';
                 });
             });
             
@@ -479,21 +782,35 @@
             // Save Content button handler
             document.getElementById('saveContentChangesBtn').addEventListener('click', function() {
                 const chatbotCode = document.getElementById('editChatbotNameInput').value;
-                const newContent = document.getElementById('chatbotContentTextarea').value;
                 const charLimit = document.getElementById('editCharLimit').value;
+                const appendContent = document.getElementById('appendContent').checked;
                 const saveButton = this;
+                
+                // Check if we have edited content in the preview
+                let newContent = document.getElementById('chatbotContentTextarea').value;
+                const editPreviewSection = document.getElementById('edit-preview-section');
+                const editCombinedPreview = document.getElementById('edit-combined-preview');
+                
+                // Use the edited content from the preview if it exists and is visible
+                if (editPreviewSection.style.display !== 'none' && editCombinedPreview && editCombinedPreview.value) {
+                    newContent = editCombinedPreview.value;
+                }
                 
                 const formData = new FormData();
                 formData.append('chatbot_code', chatbotCode);
                 formData.append('content', newContent);
                 formData.append('char_limit', charLimit);
+                formData.append('append_content', appendContent.toString());
 
-                // Add files if any are selected
+                // Add files if any are selected and if we're not using edited content
                 const fileInput = document.getElementById('editFiles');
-                if (fileInput.files.length > 0) {
+                if (editPreviewSection.style.display === 'none' && fileInput.files.length > 0) {
                     for (let i = 0; i < fileInput.files.length; i++) {
                         formData.append('files', fileInput.files[i]);
                     }
+                } else if (editPreviewSection.style.display !== 'none' && fileInput.files.length > 0) {
+                    // If we're using edited content, add a flag to tell the server
+                    formData.append('use_edited_content', 'true');
                 }
                 
                 saveButton.disabled = true;
@@ -593,6 +910,174 @@
                         alert('Network error while updating quota. Please try again.');
                     };
                     xhr.send(formData);
+                });
+            });
+
+            // Preview Files button handler in edit modal
+            document.getElementById('editPreviewBtn').addEventListener('click', function() {
+                const fileInput = document.getElementById('editFiles');
+                if (!fileInput.files.length) {
+                    alert('Please select at least one file to preview');
+                    return;
+                }
+                
+                const formData = new FormData();
+                // Add files to form data
+                for (let i = 0; i < fileInput.files.length; i++) {
+                    formData.append('files', fileInput.files[i]);
+                }
+                
+                // Add character limit
+                const charLimit = document.getElementById('editCharLimit').value;
+                formData.append('char_limit', charLimit);
+                
+                // Add current content and append flag for a more accurate preview
+                const currentContent = document.getElementById('chatbotContentTextarea').value;
+                const appendContent = document.getElementById('appendContent').checked;
+                if (appendContent && currentContent) {
+                    formData.append('current_content', currentContent);
+                    formData.append('append_content', 'true');
+                }
+                
+                // Show loading state
+                this.disabled = true;
+                this.textContent = 'Generating Preview...';
+                
+                fetch("{{ url_for('admin_preview_upload') }}", {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Show preview section
+                        document.getElementById('edit-preview-section').style.display = 'block';
+                        
+                        // Update character counts
+                        document.getElementById('edit-total-char-count').textContent = data.total_char_count.toLocaleString();
+                        document.getElementById('edit-char-limit').textContent = data.char_limit.toLocaleString();
+                        
+                        // Show warning if limit exceeded
+                        const limitWarning = document.getElementById('edit-limit-warning');
+                        if (data.exceeds_limit) {
+                            limitWarning.style.display = 'block';
+                            document.getElementById('edit-limit-warning-message').textContent = data.warning;
+                        } else {
+                            limitWarning.style.display = 'none';
+                        }
+                        
+                        // Show combined preview in textarea
+                        document.getElementById('edit-combined-preview').value = data.combined_preview;
+                        
+                        // Create file previews with editable textareas
+                        const filePreviewsContainer = document.getElementById('edit-file-previews');
+                        filePreviewsContainer.innerHTML = '';
+                        
+                        data.files.forEach((file, index) => {
+                            const fileCard = document.createElement('div');
+                            fileCard.className = 'card mb-3';
+                            fileCard.innerHTML = `
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span>${file.filename}</span>
+                                    <span class="badge bg-secondary">${file.char_count.toLocaleString()} characters</span>
+                                </div>
+                                <div class="card-body">
+                                    <label for="edit-file-content-${index}" class="form-label">Extracted text:</label>
+                                    <textarea id="edit-file-content-${index}" class="form-control" style="white-space: pre-wrap; max-height: 150px; min-height: 100px; font-family: monospace;">${file.content}</textarea>
+                                </div>
+                            `;
+                            filePreviewsContainer.appendChild(fileCard);
+                        });
+                        
+                        // Add event listeners to update buttons for individual files
+                        document.querySelectorAll('.edit-update-file-content').forEach(button => {
+                            button.addEventListener('click', function() {
+                                const fileIndex = this.getAttribute('data-file-index');
+                                const updatedContent = document.getElementById(`edit-file-content-${fileIndex}`).value;
+                                data.files[fileIndex].content = updatedContent;
+                                
+                                // Recalculate character count
+                                data.files[fileIndex].char_count = updatedContent.length;
+                                this.parentElement.parentElement.parentElement.querySelector('.badge').textContent = 
+                                    `${updatedContent.length.toLocaleString()} characters`;
+                                
+                                // Show status
+                                document.getElementById(`edit-update-file-status-${fileIndex}`).style.display = 'inline';
+                                setTimeout(() => {
+                                    document.getElementById(`edit-update-file-status-${fileIndex}`).style.display = 'none';
+                                }, 2000);
+                            });
+                        });
+                        
+                        // Add event listener to update combined content and sync with textarea
+                        document.getElementById('update-edit-combined-content').addEventListener('click', function() {
+                            // Collect all individual file contents first
+                            let updatedContents = [];
+                            data.files.forEach((file, index) => {
+                                const textarea = document.getElementById(`edit-file-content-${index}`);
+                                if (textarea) {
+                                    updatedContents.push(textarea.value);
+                                }
+                            });
+                            
+                            // Use either the combined edited content or individual file contents
+                            const activeTab = document.querySelector('#editPreviewTabs .nav-link.active');
+                            let updatedCombinedContent;
+                            
+                            if (activeTab && activeTab.id === 'edit-combined-tab') {
+                                // Using the combined editor
+                                updatedCombinedContent = document.getElementById('edit-combined-preview').value;
+                            } else {
+                                // Using individual file editors
+                                updatedCombinedContent = updatedContents.join('\n\n');
+                                document.getElementById('edit-combined-preview').value = updatedCombinedContent;
+                            }
+                            
+                            // Update textarea with edited content
+                            document.getElementById('chatbotContentTextarea').value = updatedCombinedContent;
+                            updateCharCount(); // Call the existing function to update character count display
+                            
+                            // Update character count info
+                            const newCount = updatedCombinedContent.length;
+                            document.getElementById('edit-total-char-count').textContent = newCount.toLocaleString();
+                            
+                            // Check if exceeds limit
+                            const charLimit = parseInt(document.getElementById('edit-char-limit').textContent.replace(/,/g, ''));
+                            const limitWarning = document.getElementById('edit-limit-warning');
+                            
+                            if (newCount > charLimit) {
+                                limitWarning.style.display = 'block';
+                                // We don't have the exact warning message here, but we can show a generic one
+                                document.getElementById('edit-limit-warning-message').textContent = 
+                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}).`;
+                            } else {
+                                limitWarning.style.display = 'none';
+                            }
+                            
+                            // Show status
+                            document.getElementById('update-edit-combined-content-status').style.display = 'inline';
+                            setTimeout(() => {
+                                document.getElementById('update-edit-combined-content-status').style.display = 'none';
+                            }, 2000);
+                            
+                            // Switch to the main content tab to show updated content
+                            document.getElementById('current-content-tab').click();
+                        });
+                        
+                        // Scroll to preview section
+                        document.getElementById('edit-preview-section').scrollIntoView({ behavior: 'smooth' });
+                    } else {
+                        alert('Error: ' + (data.error || 'Could not preview files.'));
+                    }
+                    
+                    // Reset button state
+                    this.disabled = false;
+                    this.textContent = 'Preview Files';
+                })
+                .catch(error => {
+                    alert('Network error: ' + error);
+                    this.disabled = false;
+                    this.textContent = 'Preview Files';
                 });
             });
         });

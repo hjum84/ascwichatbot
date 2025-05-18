@@ -185,6 +185,45 @@
                                                                 </div>
                                                             </div>
                                                         </div>
+                                                        
+                                                        <!-- Intro Message Section -->
+                                                        <div class="row mt-2">
+                                                            <div class="col-12">
+                                                                <div class="update-intro-form mb-3">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.name }}">
+                                                                    <div class="mb-3">
+                                                                        <label for="intro_{{ chatbot.name }}" class="form-label">
+                                                                            <strong>Chatbot Intro Message:</strong>
+                                                                            <span class="text-muted ms-2">(Default: 3 questions per day)</span>
+                                                                        </label>
+                                                                        
+                                                                        <div class="card mb-2 bg-light">
+                                                                            <div class="card-body py-2">
+                                                                                <div class="intro-message-preview">
+                                                                                    <strong>Preview:</strong> <span class="preview-text">
+                                                                                        {% if 'intro_message' in chatbot %}
+                                                                                            {{ chatbot.intro_message.replace('{program}', chatbot.display_name).replace('{quota}', chatbot.quota | string) }}
+                                                                                        {% else %}
+                                                                                            Hi, I am the {{ chatbot.display_name }} chatbot. I can answer up to {{ chatbot.quota }} question(s) related to this program per day.
+                                                                                        {% endif %}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                        
+                                                                        <textarea class="form-control intro-field" id="intro_{{ chatbot.name }}" rows="2">{% if 'intro_message' in chatbot %}{{ chatbot.intro_message }}{% else %}Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.{% endif %}</textarea>
+                                                                        <div class="form-text">
+                                                                            <i class="bi bi-info-circle"></i> 
+                                                                            Use <code>{program}</code> to insert program name and <code>{quota}</code> to insert daily quota value.
+                                                                            <button type="button" class="btn btn-sm btn-link text-decoration-none reset-intro-btn p-0 ms-2">Reset to default</button>
+                                                                        </div>
+                                                                    </div>
+                                                                    <button type="button" class="btn btn-sm btn-primary update-intro-btn">
+                                                                        <i class="bi bi-check-circle"></i> Update Intro Message
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 {% endfor %}
@@ -231,6 +270,24 @@
                                                 <label for="description" class="form-label">Program Description</label>
                                                 <textarea class="form-control" id="description" name="description" rows="3"></textarea>
                                                 <div class="form-text">Brief description of the program (will appear on selection page)</div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label for="intro_message" class="form-label">Chatbot Intro Message</label>
+                                                <textarea class="form-control" id="intro_message" name="intro_message" rows="2">Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.</textarea>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i> 
+                                                    Welcome message shown to users. Use <code>{program}</code> to insert program name and <code>{quota}</code> to insert daily quota.
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label for="default_quota" class="form-label">Default Daily Question Quota</label>
+                                                <div class="input-group">
+                                                    <input type="number" class="form-control" id="default_quota" name="default_quota" min="1" max="20" value="3">
+                                                    <span class="input-group-text">questions per day</span>
+                                                </div>
+                                                <div class="form-text">Maximum number of questions a user can ask per day. Default is 3.</div>
                                             </div>
                                             
                                             <div class="mb-3">
@@ -978,35 +1035,48 @@
                         return;
                     }
 
-                    const formData = new FormData();
-                    formData.append('chatbot_name', chatbotName);
-                    formData.append('quota', quota);
+                    // Show a brief loading indicator on the button
+                    const originalText = this.innerHTML;
+                    this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+                    this.disabled = true;
 
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', "{{ url_for('admin_update_chatbot_quota') }}", true);
-
-                    xhr.onload = function() {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            try {
-                                const response = JSON.parse(xhr.responseText);
-                                if (response.success) {
-                                    // 수정된 부분: JS에서 동적으로 URL 생성
-                                    const redirectUrl = "{{ url_for('admin') }}?message=" + encodeURIComponent('Quota has been updated for ' + response.display_name) + "&message_type=success";
-                                    window.location.href = redirectUrl;
-                                } else {
-                                    alert('Error: ' + (response.error || 'Could not update quota.'));
-                                }
-                            } catch (e) {
-                                alert('Error parsing server response while updating quota.');
-                            }
+                    fetch('/update_quota', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            chatbot_code: chatbotName,
+                            quota: parseInt(quota)
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        // Reset button state
+                        this.innerHTML = originalText;
+                        this.disabled = false;
+                        
+                        if (data.success) {
+                            // Show temporary success message next to the button
+                            const successMsg = document.createElement('span');
+                            successMsg.className = 'text-success ms-2';
+                            successMsg.innerHTML = '<i class="bi bi-check-circle"></i> Updated!';
+                            this.parentNode.appendChild(successMsg);
+                            
+                            // Remove success message after 2 seconds
+                            setTimeout(() => {
+                                successMsg.remove();
+                            }, 2000);
                         } else {
-                            alert('Error: Could not update quota. Status: ' + xhr.statusText);
+                            alert('Error: ' + (data.error || 'Could not update quota.'));
                         }
-                    };
-                    xhr.onerror = function () {
+                    })
+                    .catch(error => {
+                        // Reset button state
+                        this.innerHTML = originalText;
+                        this.disabled = false;
                         alert('Network error while updating quota. Please try again.');
-                    };
-                    xhr.send(formData);
+                    });
                 });
             });
 
@@ -1177,6 +1247,178 @@
                     this.textContent = 'Preview Files';
                 });
             });
+
+            // Improved handling for intro message editing with live preview
+            document.querySelectorAll('.update-intro-form').forEach(form => {
+                const introField = form.querySelector('.intro-field');
+                const previewText = form.querySelector('.preview-text');
+                const resetBtn = form.querySelector('.reset-intro-btn');
+                const chatbotName = form.querySelector('.chatbot-name').value;
+                
+                // Get quota from the same chatbot card
+                const chatbotCard = form.closest('.chatbot-card');
+                const quotaField = chatbotCard.querySelector('.quota-field');
+                const displayName = chatbotCard.querySelector('.card-header h5').textContent.trim();
+                
+                // Update preview when intro message is edited
+                introField.addEventListener('input', function() {
+                    updateIntroPreview(this.value, displayName, quotaField.value);
+                });
+                
+                // Also update preview when quota changes
+                quotaField.addEventListener('change', function() {
+                    updateIntroPreview(introField.value, displayName, this.value);
+                });
+                
+                // Reset to default intro message
+                resetBtn.addEventListener('click', function() {
+                    const defaultIntro = "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.";
+                    introField.value = defaultIntro;
+                    updateIntroPreview(defaultIntro, displayName, quotaField.value);
+                });
+                
+                // Function to update the preview
+                function updateIntroPreview(text, program, quota) {
+                    let preview = text.replace('{program}', program).replace('{quota}', quota);
+                    previewText.textContent = preview;
+                }
+                
+                // Initialize preview
+                updateIntroPreview(introField.value, displayName, quotaField.value);
+            });
+
+            // Update the Create New Chatbot form as well with intro message preview
+            const createForm = document.getElementById('upload-form');
+            if (createForm) {
+                const introField = createForm.querySelector('#intro_message');
+                const quotaField = createForm.querySelector('#default_quota');
+                const displayNameField = createForm.querySelector('#display_name');
+                
+                if (introField && displayNameField) {
+                    // Add a preview section after the intro message field
+                    const previewDiv = document.createElement('div');
+                    previewDiv.className = 'card bg-light mb-3';
+                    previewDiv.innerHTML = `
+                        <div class="card-body py-2">
+                            <div class="intro-message-preview">
+                                <strong>Preview:</strong> <span id="create-preview-text"></span>
+                            </div>
+                        </div>
+                    `;
+                    introField.parentNode.insertBefore(previewDiv, introField.nextSibling);
+                    
+                    const previewText = document.getElementById('create-preview-text');
+                    
+                    // Update preview when any field changes
+                    function updateCreatePreview() {
+                        const displayName = displayNameField.value || "[Program Name]";
+                        const quota = quotaField ? quotaField.value : "3";
+                        let preview = introField.value.replace('{program}', displayName).replace('{quota}', quota);
+                        previewText.textContent = preview;
+                    }
+                    
+                    introField.addEventListener('input', updateCreatePreview);
+                    if (displayNameField) displayNameField.addEventListener('input', updateCreatePreview);
+                    if (quotaField) quotaField.addEventListener('input', updateCreatePreview);
+                    
+                    // Add reset button to intro message field
+                    const helpText = introField.nextElementSibling;
+                    if (helpText && helpText.classList.contains('form-text')) {
+                        const resetBtn = document.createElement('button');
+                        resetBtn.type = 'button';
+                        resetBtn.className = 'btn btn-sm btn-link text-decoration-none p-0 ms-2';
+                        resetBtn.textContent = 'Reset to default';
+                        resetBtn.addEventListener('click', function() {
+                            const defaultIntro = "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.";
+                            introField.value = defaultIntro;
+                            updateCreatePreview();
+                        });
+                        helpText.appendChild(resetBtn);
+                    }
+                    
+                    // Initialize preview
+                    updateCreatePreview();
+                }
+            }
+
+            // Setup event listeners for intro message updates
+            document.querySelectorAll('.update-intro-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const form = this.closest('.update-intro-form');
+                    const chatbotName = form.querySelector('.chatbot-name').value;
+                    const introMessage = form.querySelector('.intro-field').value.trim();
+                    
+                    if (!introMessage) {
+                        alert('Please enter an intro message');
+                        return;
+                    }
+                    
+                    // Show a brief loading indicator on the button
+                    const originalText = this.innerHTML;
+                    this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+                    this.disabled = true;
+                    
+                    fetch('/update_intro_message', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            chatbot_code: chatbotName,
+                            intro_message: introMessage
+                        }),
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        // Reset button state
+                        this.innerHTML = originalText;
+                        this.disabled = false;
+                        
+                        if (data.success) {
+                            // Show temporary success message next to the button
+                            const successMsg = document.createElement('span');
+                            successMsg.className = 'text-success ms-2';
+                            successMsg.innerHTML = '<i class="bi bi-check-circle"></i> Updated!';
+                            this.parentNode.appendChild(successMsg);
+                            
+                            // Remove success message after 2 seconds
+                            setTimeout(() => {
+                                successMsg.remove();
+                            }, 2000);
+                        } else {
+                            alert('Error updating intro message: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        // Reset button state
+                        this.innerHTML = originalText;
+                        this.disabled = false;
+                        alert('Network error while updating intro message. Please try again.');
+                    });
+                });
+            });
+
+            // Function to show alert messages
+            function showAlert(message, type) {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+                alertDiv.innerHTML = `
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                `;
+                
+                // Find a good place to insert the alert
+                const container = document.querySelector('.card-body');
+                if (container) {
+                    container.insertAdjacentElement('afterbegin', alertDiv);
+                    
+                    // Auto dismiss after 3 seconds
+                    setTimeout(() => {
+                        alertDiv.classList.remove('show');
+                        setTimeout(() => alertDiv.remove(), 150);
+                    }, 3000);
+                }
+            }
         });
     </script>
 </body>

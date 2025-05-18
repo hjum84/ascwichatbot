@@ -608,13 +608,17 @@ def index_bcc():
         chatbot = ChatbotContent.get_by_code(db, 'BCC')
         quota = chatbot.quota if chatbot else 3
         program_display_name = chatbot.name if chatbot else "Building Coaching Competency"
+        intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
     finally:
         close_db(db)
+    # Format the intro message by replacing placeholders
+    formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
     return render_template('index.html',
                          program='BCC',
                          program_display_name=program_display_name,
                          chat_history=chat_history,
-                         quota=quota)
+                         quota=quota,
+                         intro_message=formatted_intro)
 
 # MI Chatbot interface
 @app.route('/index_mi')
@@ -628,13 +632,17 @@ def index_mi():
         chatbot = ChatbotContent.get_by_code(db, 'MI')
         quota = chatbot.quota if chatbot else 3
         program_display_name = chatbot.name if chatbot else "Motivational Interviewing"
+        intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
     finally:
         close_db(db)
+    # Format the intro message by replacing placeholders
+    formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
     return render_template('index.html',
                          program='MI',
                          program_display_name=program_display_name,
                          chat_history=chat_history,
-                         quota=quota)
+                         quota=quota,
+                         intro_message=formatted_intro)
 
 # Safety Chatbot interface
 @app.route('/index_safety')
@@ -648,13 +656,17 @@ def index_safety():
         chatbot = ChatbotContent.get_by_code(db, 'Safety')
         quota = chatbot.quota if chatbot else 3
         program_display_name = chatbot.name if chatbot else "Safety and Risk Assessment"
+        intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
     finally:
         close_db(db)
+    # Format the intro message by replacing placeholders
+    formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
     return render_template('index.html',
                          program='Safety',
                          program_display_name=program_display_name,
                          chat_history=chat_history,
-                         quota=quota)
+                         quota=quota,
+                         intro_message=formatted_intro)
 
 # Generic chatbot interface for custom programs
 @app.route('/index_generic/<program>')
@@ -957,7 +969,8 @@ def admin():
                 "name": chatbot.code,
                 "display_name": chatbot.name,
                 "description": chatbot.description or "",
-                "quota": chatbot.quota  # Add quota here
+                "quota": chatbot.quota,
+                "intro_message": chatbot.intro_message  # Add intro_message to the dictionary
             })
         
         # Get inactive (deleted) chatbots
@@ -1032,6 +1045,21 @@ def admin_upload():
         # Get description (optional)
         description = request.form.get('description', '')
         logger.info(f"Description received: {description[:30]}..." if description else "No description")
+        
+        # Get default quota (optional, default 3)
+        try:
+            quota = int(request.form.get('default_quota', 3))
+            if quota < 1:
+                quota = 1
+            elif quota > 20:
+                quota = 20
+        except ValueError:
+            quota = 3
+        logger.info(f"Default quota set to: {quota}")
+        
+        # Get intro message (optional)
+        intro_message = request.form.get('intro_message', "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.")
+        logger.info(f"Intro message: {intro_message[:50]}..." if intro_message else "Using default intro message")
         
         # Get character limit (optional, default 50,000)
         try:
@@ -1135,16 +1163,23 @@ def admin_upload():
         logger.info(f"Storing content for {course_name_upper} in database")
         try:
             db = get_db()
-            ChatbotContent.create_or_update(
+            chatbot = ChatbotContent.create_or_update(
                 db,
                 code=course_name_upper,
                 name=display_name,
                 content=combined_content,
                 description=description
             )
-            chatbot = ChatbotContent.get_by_code(db, course_name_upper)
-            if chatbot and not chatbot.is_active:
+            
+            # Set additional properties after creation/update
+            chatbot.quota = quota
+            chatbot.char_limit = char_limit
+            chatbot.intro_message = intro_message
+            
+            # Make sure chatbot is active
+            if not chatbot.is_active:
                 chatbot.is_active = True
+                
             db.commit()
             close_db(db)
             load_program_content()
@@ -1474,49 +1509,66 @@ def admin_update_chatbot_content():
             close_db(db)
 
 # Route to update chatbot quota
-@app.route('/admin_update_chatbot_quota', methods=['POST'])
+@app.route('/update_quota', methods=['POST'])
 @requires_auth
-def admin_update_chatbot_quota():
-    db = get_db()
+def update_quota():
     try:
-        chatbot_code = request.form.get('chatbot_name') # Sent as 'chatbot_name' from admin.html
-        quota_str = request.form.get('quota')
-
-        if not chatbot_code or not quota_str:
-            return jsonify({"success": False, "error": "Chatbot code and quota are required."}), 400
+        data = request.json
+        chatbot_code = data.get('chatbot_code')
+        quota = int(data.get('quota', 3))
         
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+        
+        if quota < 1:
+            return jsonify({"success": False, "error": "Quota must be at least 1"}), 400
+        
+        db = get_db()
         try:
-            quota = int(quota_str)
-            if quota < 1:
-                raise ValueError("Quota must be at least 1.")
-        except ValueError as ve:
-            return jsonify({"success": False, "error": str(ve)}), 400
-
-        chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
-        if not chatbot:
-            return jsonify({"success": False, "error": "Chatbot not found."}), 404
-        
-        chatbot.quota = quota
-        db.commit()
-        
-        # Reload program content to update in-memory quota if you have such a cache
-        # load_program_content() # Assuming this function would also update quotas in memory
-
-        logger.info(f"Quota for chatbot {chatbot.name} (Code: {chatbot_code}) updated to {quota}.")
-        return jsonify({
-            "success": True, 
-            "message": f"Quota for {chatbot.name} updated to {quota}.",
-            "display_name": chatbot.name 
-            }), 200
-
-    except Exception as e:
-        if db:
-            db.rollback()
-        logger.error(f"Error updating chatbot quota for {request.form.get('chatbot_name')}: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "error": "Server error occurred during quota update."}), 500
-    finally:
-        if db:
+            chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+            if not chatbot:
+                return jsonify({"success": False, "error": "Chatbot not found"}), 404
+            
+            chatbot.quota = quota
+            db.commit()
+            return jsonify({"success": True, "message": "Quota updated successfully"})
+        finally:
             close_db(db)
+            
+    except Exception as e:
+        logger.error(f"Error updating quota: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# Route to update chatbot intro message
+@app.route('/update_intro_message', methods=['POST'])
+@requires_auth
+def update_intro_message():
+    try:
+        data = request.json
+        chatbot_code = data.get('chatbot_code')
+        intro_message = data.get('intro_message')
+        
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+        
+        if not intro_message:
+            return jsonify({"success": False, "error": "Intro message is required"}), 400
+        
+        db = get_db()
+        try:
+            chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+            if not chatbot:
+                return jsonify({"success": False, "error": "Chatbot not found"}), 404
+            
+            chatbot.intro_message = intro_message
+            db.commit()
+            return jsonify({"success": True, "message": "Intro message updated successfully"})
+        finally:
+            close_db(db)
+            
+    except Exception as e:
+        logger.error(f"Error updating intro message: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/clear_chat_history', methods=['POST'])
 @login_required

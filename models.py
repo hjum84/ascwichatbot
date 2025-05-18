@@ -75,6 +75,7 @@ class ChatbotContent(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     quota = Column(Integer, nullable=False, default=3)  # Max questions quota
+    intro_message = Column(Text, nullable=False, default="Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.")  # Customizable intro message
     
     @classmethod
     def get_by_code(cls, db, code):
@@ -117,7 +118,8 @@ class ChatbotContent(Base):
             "content": self.content,
             "is_active": self.is_active,
             "created_at": self.created_at,
-            "updated_at": self.updated_at
+            "updated_at": self.updated_at,
+            "intro_message": self.intro_message
         }
 
 # Chat history model

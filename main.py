@@ -971,41 +971,29 @@ def get_paired_conversations(db, page=1, per_page=10):
     offset = (page - 1) * per_page
     history = history_query.offset(offset).limit(per_page * 10).all()
     paired_conversations = []
-    used_bot_ids = set()
-    i = 0
-    while i < len(history):
+    
+    # 각 대화 기록을 처리
+    for i in range(min(len(history), per_page)):
         current_msg = history[i]
-        if current_msg.sender == 'user':
-            user_obj = db.query(User).filter(User.id == current_msg.user_id).first()
-            chatbot_obj = db.query(ChatbotContent).filter(ChatbotContent.code == current_msg.program_code).first()
-            user_name = user_obj.last_name if user_obj else 'Unknown'
-            user_email = user_obj.email if user_obj else 'Unknown'
-            chatbot_name_display = chatbot_obj.name if chatbot_obj else current_msg.program_code
-            pair_data = {
-                'user_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
-                'user_name': user_name,
-                'user_email': user_email,
-                'chatbot_name': chatbot_name_display,
-                'user_message': current_msg.message,
-                'bot_timestamp': 'N/A',
-                'bot_message': 'No reply found.'
-            }
-            for j in range(i+1, len(history)):
-                next_msg = history[j]
-                if (
-                    next_msg.sender == 'bot' and
-                    next_msg.user_id == current_msg.user_id and
-                    next_msg.program_code == current_msg.program_code and
-                    next_msg.id not in used_bot_ids
-                ):
-                    pair_data['bot_timestamp'] = next_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if next_msg.timestamp else 'N/A'
-                    pair_data['bot_message'] = next_msg.message
-                    used_bot_ids.add(next_msg.id)
-                    break
-            paired_conversations.append(pair_data)
-        i += 1
-        if len(paired_conversations) >= per_page:
-            break
+        user_obj = db.query(User).filter(User.id == current_msg.user_id).first()
+        chatbot_obj = db.query(ChatbotContent).filter(ChatbotContent.code == current_msg.program_code).first()
+        
+        user_name = user_obj.last_name if user_obj else 'Unknown'
+        user_email = user_obj.email if user_obj else 'Unknown'
+        chatbot_name_display = chatbot_obj.name if chatbot_obj else current_msg.program_code
+        
+        pair_data = {
+            'user_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
+            'user_name': user_name,
+            'user_email': user_email,
+            'chatbot_name': chatbot_name_display,
+            'user_message': current_msg.user_message,
+            'bot_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
+            'bot_message': current_msg.bot_message
+        }
+        
+        paired_conversations.append(pair_data)
+        
     return paired_conversations, total_pages, page
 
 @app.route('/admin')
@@ -1178,7 +1166,13 @@ def admin_search_conversations():
         query = db.query(ChatHistory)
         
         if search_term:
-            query = query.filter(ChatHistory.message.ilike(f'%{search_term}%'))
+            query = query.filter(
+                # 검색어를 user_message 또는 bot_message에서 찾습니다
+                db.or_(
+                    ChatHistory.user_message.ilike(f'%{search_term}%'),
+                    ChatHistory.bot_message.ilike(f'%{search_term}%')
+                )
+            )
         if chatbot:
             query = query.filter(ChatHistory.program_code == chatbot)
         if user_email:
@@ -1196,13 +1190,26 @@ def admin_search_conversations():
         for conv in conversations:
             user = db.query(User).filter(User.id == conv.user_id).first()
             chatbot = db.query(ChatbotContent).filter(ChatbotContent.code == conv.program_code).first()
+            
+            # Add user message
             result.append({
                 'id': conv.id,
                 'user_name': user.last_name if user else 'Unknown',
                 'user_email': user.email if user else 'Unknown',
                 'chatbot_name': chatbot.name if chatbot else conv.program_code,
-                'message': conv.message,
-                'sender': conv.sender,
+                'message': conv.user_message,
+                'sender': 'user',
+                'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            })
+            
+            # Add bot message
+            result.append({
+                'id': conv.id,
+                'user_name': user.last_name if user else 'Unknown',
+                'user_email': user.email if user else 'Unknown',
+                'chatbot_name': chatbot.name if chatbot else conv.program_code,
+                'message': conv.bot_message,
+                'sender': 'bot',
                 'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S')
             })
         
@@ -1266,15 +1273,29 @@ def get_recent_conversations(limit=100):
         for conv in conversations:
             user = db.query(User).filter(User.id == conv.user_id).first()
             chatbot_content = db.query(ChatbotContent).filter(ChatbotContent.code == conv.program_code).first() # Renamed for clarity
+            
+            # Add user message
             result.append({
                 'id': conv.id,
                 'user_id': conv.user_id,
                 'user_name': user.last_name if user else 'Unknown',
                 'user_email': user.email if user else 'Unknown',
                 'chatbot_name': chatbot_content.name if chatbot_content else conv.program_code,
-                'message': conv.message,
-                'sender': conv.sender,
-                'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S') if conv.timestamp else 'N/A' # Format timestamp
+                'message': conv.user_message,
+                'sender': 'user',
+                'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S') if conv.timestamp else 'N/A'
+            })
+            
+            # Add bot message
+            result.append({
+                'id': conv.id,
+                'user_id': conv.user_id,
+                'user_name': user.last_name if user else 'Unknown',
+                'user_email': user.email if user else 'Unknown',
+                'chatbot_name': chatbot_content.name if chatbot_content else conv.program_code,
+                'message': conv.bot_message,
+                'sender': 'bot',
+                'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S') if conv.timestamp else 'N/A'
             })
         return result
     finally:

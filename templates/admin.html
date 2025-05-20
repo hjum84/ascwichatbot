@@ -92,6 +92,20 @@
         .progress-bar {
             transition: width 0.6s ease;
         }
+        
+        /* Shadow pulse animation for guiding user attention */
+        @keyframes shadow-pulse {
+            0% {
+                box-shadow: 0 0 0 0px rgba(40, 167, 69, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
+            }
+        }
+
+        .shadow-pulse {
+            animation: shadow-pulse 1.5s infinite;
+        }
     </style>
 </head>
 <body>
@@ -410,6 +424,12 @@
                                                 <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                                             </div>
                                             
+                                            <div class="mb-3 form-check">
+                                                <input type="checkbox" class="form-check-input" id="auto_summarize" name="auto_summarize" checked>
+                                                <label class="form-check-label" for="auto_summarize">Automatically summarize content if it exceeds the character limit</label>
+                                                <div class="form-text">When enabled, content will be intelligently trimmed to fit within the character limit by removing duplicate content, boilerplate text, and less important sections.</div>
+                                            </div>
+                                            
                                             <div class="mb-3">
                                                 <label for="file" class="form-label">Upload Files</label>
                                                 <input type="file" class="form-control" id="file" name="file" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple required>
@@ -441,7 +461,7 @@
                                                     <div class="card-body">
                                                         <h5 class="card-title">Content Statistics</h5>
                                                         <p>Total Character Count: <strong id="total-char-count">0</strong></p>
-                                                        <p>Character Limit: <strong id="char-limit">50000</strong></p>
+                                                        <p>Character Limit: <strong id="char-limit">50,000</strong></p>
                                                         <div id="limit-warning" class="alert alert-danger" style="display: none;">
                                                             <p><strong>Warning: Content exceeds the character limit!</strong></p>
                                                             <p id="limit-warning-message"></p>
@@ -449,6 +469,12 @@
                                                             <ul>
                                                                 <li>Reduce content by editing the text below</li>
                                                                 <li>Increase the character limit (will increase API costs)</li>
+                                                                <li>
+                                                                    <button id="summarize-now-btn" class="btn btn-warning btn-sm">
+                                                                        <span class="summarize-btn-text"><i class="bi bi-magic"></i> Summarize Now</span>
+                                                                        <span class="spinner-border spinner-border-sm summarize-spinner" role="status" style="display: none;"></span>
+                                                                    </button>
+                                                                </li>
                                                             </ul>
                                                         </div>
                                                     </div>
@@ -720,6 +746,12 @@
                         <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                     </div>
                     
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="editAutoSummarize" name="auto_summarize" checked>
+                        <label class="form-check-label" for="editAutoSummarize">Automatically summarize content if it exceeds the character limit</label>
+                        <div class="form-text">When enabled, content will be intelligently trimmed to fit within the character limit by removing duplicate content, boilerplate text, and less important sections.</div>
+                    </div>
+                    
                     <ul class="nav nav-tabs mb-3" id="editContentTabs" role="tablist">
                         <li class="nav-item" role="presentation">
                             <button class="nav-link active" id="current-content-tab" data-bs-toggle="tab" data-bs-target="#current-content-panel" type="button" role="tab" aria-controls="current-content-panel" aria-selected="true">Current Content</button>
@@ -773,6 +805,12 @@
                                         <div id="edit-limit-warning" class="alert alert-danger" style="display: none;">
                                             <p><strong>Warning: Content exceeds the character limit!</strong></p>
                                             <p id="edit-limit-warning-message"></p>
+                                            <div class="mt-2">
+                                                <button id="edit-summarize-now-btn" class="btn btn-warning btn-sm">
+                                                    <span class="summarize-btn-text"><i class="bi bi-magic"></i> Summarize Now</span>
+                                                    <span class="spinner-border spinner-border-sm summarize-spinner" role="status" style="display: none;"></span>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -890,27 +928,60 @@
                     return;
                 }
                 
-                // Check if we have edited content in the preview
-                const combinedPreview = document.getElementById('combined-preview');
-                const previewSection = document.getElementById('preview-section');
+                // Get auto summarize option
+                const autoSummarize = document.getElementById('auto_summarize').checked;
+                formData.append('auto_summarize', autoSummarize.toString());
                 
-                if (previewSection.style.display !== 'none' && combinedPreview && combinedPreview.value) {
-                    // Use the edited content instead of the original files
-                    formData.append('combined_content', combinedPreview.value);
-                    formData.append('use_edited_content', 'true');
+                // Check if we have edited content in the preview section
+                const previewSection = document.getElementById('preview-section');
+                const isPreviewVisible = previewSection && previewSection.style.display !== 'none';
+                
+                console.log("Submit button clicked");
+                console.log("Preview section visible:", isPreviewVisible);
+                
+                // Always remove original file fields from form data to avoid duplication
+                formData.delete('file');
+                
+                // CRITICAL APPROACH: When preview is visible, ALWAYS use the combined preview content
+                if (isPreviewVisible) {
+                    const combinedPreview = document.getElementById('combined-preview');
+                    if (combinedPreview && combinedPreview.value) {
+                        const combinedContent = combinedPreview.value;
+                        console.log(`Using edited content from preview. Length: ${combinedContent.length} chars`);
+                        
+                        // IMPORTANT: Remove any files to ensure we only use the edited content
+                        // This prevents the server from trying to process both sources
+                        formData.delete('files');
+                        
+                        // Add the edited content as the definitive source
+                        formData.append('combined_content', combinedContent);
+                        formData.append('use_edited_content', 'true');
+                        
+                        console.log("Removed original files from submission and using only combined_content");
+                    } else {
+                        console.warn("Preview section is visible but combined-preview element not found or empty");
+                    }
                 } else {
-                    // Use the original files
+                    // Only use the original files if no preview content exists
+                    console.log("No preview section found, using original files");
                     for (let i = 0; i < fileInput.files.length; i++) {
                         formData.append('files', fileInput.files[i]);
                     }
                 }
                 
-                // Remove the single 'file' field to avoid duplication
-                formData.delete('file');
-                
                 // Show loading state
                 this.disabled = true;
                 this.textContent = 'Uploading...';
+                
+                // Debug form data being submitted
+                console.log("Form data keys being submitted:");
+                for (const key of formData.keys()) {
+                    if (key === 'combined_content') {
+                        console.log(`${key}: [content length: ${formData.get(key).length} chars]`);
+                    } else {
+                        console.log(`${key}: ${formData.get(key)}`);
+                    }
+                }
                 
                 fetch("{{ url_for('admin_upload') }}", {
                     method: 'POST',
@@ -919,7 +990,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        window.location.href = "{{ url_for('admin', message='The chatbot has been successfully updated', message_type='success') }}";
+                        window.location.href = "{{ url_for('admin', message='The chatbot has been successfully created', message_type='success') }}";
                     } else {
                         // If error is about character limit, show a more detailed error
                         if (data.error === "Content too long" && data.warning) {
@@ -929,16 +1000,16 @@
                             document.getElementById('edit-warning-char-limit').textContent = data.char_limit.toLocaleString();
                             charLimitModal.show();
                         } else {
-                            alert('Error: ' + (data.error || 'Could not upload files.'));
+                            alert('Error: ' + (data.error || 'Could not create chatbot.'));
                         }
                         this.disabled = false;
-                        this.textContent = 'Upload and Update Chatbot';
+                        this.textContent = 'Create Chatbot';
                     }
                 })
                 .catch(error => {
                     alert('Network error: ' + error);
                     this.disabled = false;
-                    this.textContent = 'Upload and Update Chatbot';
+                    this.textContent = 'Create Chatbot';
                 });
             });
             
@@ -951,6 +1022,10 @@
                     alert('Please select at least one file');
                     return;
                 }
+                
+                // Get auto-summarize option and add it to form data
+                const autoSummarize = document.getElementById('auto_summarize').checked;
+                formData.append('auto_summarize', autoSummarize.toString());
                 
                 // Add files to form data
                 for (let i = 0; i < fileInput.files.length; i++) {
@@ -980,10 +1055,15 @@
                         document.getElementById('total-char-count').textContent = data.total_char_count.toLocaleString();
                         document.getElementById('char-limit').textContent = data.char_limit.toLocaleString();
                         
-                        // Show warning if limit exceeded
+                        // Show warning or success message based on summarization result
                         const limitWarning = document.getElementById('limit-warning');
                         if (data.exceeds_limit) {
                             limitWarning.style.display = 'block';
+                            limitWarning.className = 'alert alert-danger';
+                            document.getElementById('limit-warning-message').textContent = data.warning;
+                        } else if (data.was_summarized) {
+                            limitWarning.style.display = 'block';
+                            limitWarning.className = 'alert alert-success';
                             document.getElementById('limit-warning-message').textContent = data.warning;
                         } else {
                             limitWarning.style.display = 'none';
@@ -1014,34 +1094,92 @@
                         
                         // Add event listener to update combined content
                         document.getElementById('update-combined-content').addEventListener('click', function() {
-                            // Collect all individual file contents
-                            let updatedContents = [];
-                            data.files.forEach((file, index) => {
-                                const textarea = document.getElementById(`file-content-${index}`);
-                                if (textarea) {
-                                    updatedContents.push(textarea.value);
-                                }
-                            });
+                            console.log("Apply Changes button clicked");
                             
-                            // Update the combined content
-                            const combinedContent = updatedContents.join('\n\n');
-                            document.getElementById('combined-preview').value = combinedContent;
+                            // Determine which tab is active - file-content or combined-preview
+                            const isFilesTabActive = document.getElementById('files-tab').classList.contains('active');
+                            const isCombinedTabActive = document.getElementById('combined-tab').classList.contains('active');
+                            
+                            // Based on tab, get content appropriately
+                            let updatedContent = '';
+                            
+                            if (isFilesTabActive) {
+                                // Collect all individual file contents
+                                console.log("Files tab active - collecting content from individual textareas");
+                                const contentParts = [];
+                                data.files.forEach((file, index) => {
+                                    const textarea = document.getElementById(`file-content-${index}`);
+                                    if (textarea) {
+                                        contentParts.push(textarea.value);
+                                        console.log(`File ${index} (${file.filename}): ${textarea.value.length} chars`);
+                                    }
+                                });
+                                updatedContent = contentParts.join('\n\n');
+                            } 
+                            else if (isCombinedTabActive) {
+                                // Just use the combined preview content directly
+                                console.log("Combined tab active - using combined textarea directly");
+                                const combinedTextarea = document.getElementById('combined-preview');
+                                if (combinedTextarea) {
+                                    updatedContent = combinedTextarea.value;
+                                }
+                            }
+                            
+                            if (!updatedContent) {
+                                console.error("No content found to update");
+                                alert("Error: No content found to update. Please try again.");
+                                return;
+                            }
+                            
+                            console.log(`Combined content updated to ${updatedContent.length} characters`);
+                            
+                            // Update BOTH views - always keep them in sync
+                            // 1. Update combined view
+                            const combinedPreview = document.getElementById('combined-preview');
+                            if (combinedPreview) {
+                                combinedPreview.value = updatedContent;
+                            }
+                            
+                            // 2. Update individual files view 
+                            // Only if the update came from combined view and there's a substantial change
+                            if (isCombinedTabActive && data.files.length > 0) {
+                                // This would require content splitting logic to redistribute
+                                // For this fix, we're focusing on ensuring the combined content is correct
+                                console.log("Note: Individual file textareas not updated from combined content");
+                            }
                             
                             // Update character count info
-                            const newCount = combinedContent.length;
+                            const newCount = updatedContent.length;
                             document.getElementById('total-char-count').textContent = newCount.toLocaleString();
                             
                             // Check if exceeds limit
                             const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
                             const limitWarning = document.getElementById('limit-warning');
                             
+                            console.log(`Checking limits: ${newCount} chars vs ${charLimit} limit`);
+                            
                             if (newCount > charLimit) {
+                                console.log("Content exceeds limit after changes applied");
                                 limitWarning.style.display = 'block';
-                                // We don't have the exact warning message here, but we can show a generic one
+                                limitWarning.className = 'alert alert-danger';
                                 document.getElementById('limit-warning-message').textContent = 
-                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}).`;
+                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}). Consider using "Summarize Now" or manual editing.`;
+                                
+                                // Ensure summarize button is visible since we're over limit again
+                                const summarizeBtn = document.getElementById('summarize-now-btn');
+                                if (summarizeBtn) {
+                                    summarizeBtn.style.display = 'inline-block';
+                                }
+                                const optionsUl = limitWarning.querySelector('ul');
+                                if (optionsUl) { 
+                                    optionsUl.style.display = 'block';
+                                }
                             } else {
-                                limitWarning.style.display = 'none';
+                                console.log("Content is within limit after changes applied");
+                                // Only hide warning if it was a danger warning, keep success messages
+                                if (limitWarning.classList.contains('alert-danger')) {
+                                    limitWarning.style.display = 'none';
+                                }
                             }
                             
                             // Show status
@@ -1050,12 +1188,53 @@
                                 document.getElementById('update-combined-content-status').style.display = 'none';
                             }, 2000);
                             
-                            // Switch to combined tab to show the result
-                            document.getElementById('combined-tab').click();
+                            // Highlight the Create Chatbot button to guide the user to the next step
+                            document.getElementById('submit-btn').classList.add('btn-success');
+                            document.getElementById('submit-btn').classList.remove('btn-primary');
+                            document.getElementById('submit-btn').innerHTML = '<i class="bi bi-plus-circle"></i> <strong>Create Chatbot</strong> <i class="bi bi-arrow-right"></i>';
+                            document.getElementById('submit-btn').classList.add('shadow-pulse');
+                            // Scroll to make the button visible
+                            document.getElementById('submit-btn').scrollIntoView({ behavior: 'smooth', block: 'center' });
                         });
                         
                         // Scroll to preview section
                         document.getElementById('preview-section').scrollIntoView({ behavior: 'smooth' });
+
+                        // NEW: Add input event listener for live character count on combined-preview
+                        const combinedPreviewTextarea = document.getElementById('combined-preview');
+                        if (combinedPreviewTextarea) {
+                            combinedPreviewTextarea.addEventListener('input', function() {
+                                const newCount = this.value.length;
+                                document.getElementById('total-char-count').textContent = newCount.toLocaleString();
+                                
+                                const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
+                                const limitWarningDiv = document.getElementById('limit-warning');
+                                const limitWarningMessageP = document.getElementById('limit-warning-message');
+                                const summarizeBtn = document.getElementById('summarize-now-btn');
+                                const optionsUl = limitWarningDiv.querySelector('ul');
+
+                                if (newCount > charLimit) {
+                                    // If content goes over limit due to direct editing
+                                    limitWarningDiv.style.display = 'block';
+                                    limitWarningDiv.className = 'alert alert-danger'; // Show danger state
+                                    limitWarningMessageP.innerHTML = `<p><strong>Warning: Content exceeds the character limit!</strong></p>` +
+                                                                  `<p>Current length: ${newCount.toLocaleString()} characters. Limit: ${charLimit.toLocaleString()} characters.</p>` +
+                                                                  `<p>You may need to use the \'Summarize Now\' button or manually reduce content.</p>`;
+                                    // Ensure options are visible if they were hidden by a previous success
+                                    if (optionsUl) optionsUl.style.display = 'block';
+                                    if (summarizeBtn) summarizeBtn.style.display = 'inline-block';
+                                } else {
+                                    // Content is within limit
+                                    // If the warning was previously a danger (due to exceeding limit) and now it's fine, hide it.
+                                    // If it was showing success, leave it as success.
+                                    if (limitWarningDiv.classList.contains('alert-danger')) {
+                                        limitWarningDiv.style.display = 'none';
+                                    }
+                                    // If it was success (alert-success), it should remain visible with its success message
+                                    // and the options should remain hidden as per previous successful summarization.
+                                }
+                            });
+                        }
                     } else {
                         alert('Error: ' + (data.error || 'Could not generate preview.'));
                     }
@@ -1229,6 +1408,7 @@
                 const chatbotCode = document.getElementById('editChatbotNameInput').value;
                 const charLimit = document.getElementById('editCharLimit').value;
                 const appendContent = document.getElementById('appendContent').checked;
+                const autoSummarize = document.getElementById('editAutoSummarize').checked;
                 const saveButton = this;
                 
                 // Check if we have edited content in the preview
@@ -1246,6 +1426,7 @@
                 formData.append('content', newContent);
                 formData.append('char_limit', charLimit);
                 formData.append('append_content', appendContent.toString());
+                formData.append('auto_summarize', autoSummarize.toString());
 
                 // Add files if any are selected and if we're not using edited content
                 const fileInput = document.getElementById('editFiles');
@@ -1311,6 +1492,10 @@
                 document.getElementById('editCharLimit').value = newLimit;
                 document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
                 bootstrap.Modal.getInstance(document.getElementById('editWarningModal')).hide();
+                
+                // Also add an option to try automatic summarization
+                document.getElementById('editAutoSummarize').checked = true;
+                
                 document.getElementById('saveContentChangesBtn').click();
             });
 
@@ -1389,6 +1574,10 @@
                 const charLimit = document.getElementById('editCharLimit').value;
                 formData.append('char_limit', charLimit);
                 
+                // Add auto-summarize option
+                const autoSummarize = document.getElementById('editAutoSummarize').checked;
+                formData.append('auto_summarize', autoSummarize.toString());
+                
                 // Add current content and append flag for a more accurate preview
                 const currentContent = document.getElementById('chatbotContentTextarea').value;
                 const appendContent = document.getElementById('appendContent').checked;
@@ -1415,10 +1604,15 @@
                         document.getElementById('edit-total-char-count').textContent = data.total_char_count.toLocaleString();
                         document.getElementById('edit-char-limit').textContent = data.char_limit.toLocaleString();
                         
-                        // Show warning if limit exceeded
+                        // Show warning if limit exceeded or success message if summarized
                         const limitWarning = document.getElementById('edit-limit-warning');
                         if (data.exceeds_limit) {
                             limitWarning.style.display = 'block';
+                            limitWarning.className = 'alert alert-danger';
+                            document.getElementById('edit-limit-warning-message').textContent = data.warning;
+                        } else if (data.was_summarized) {
+                            limitWarning.style.display = 'block';
+                            limitWarning.className = 'alert alert-success';
                             document.getElementById('edit-limit-warning-message').textContent = data.warning;
                         } else {
                             limitWarning.style.display = 'none';
@@ -1469,12 +1663,15 @@
                         
                         // Add event listener to update combined content and sync with textarea
                         document.getElementById('update-edit-combined-content').addEventListener('click', function() {
+                            console.log("Edit modal: Apply Changes button clicked");
+                            
                             // Collect all individual file contents first
                             let updatedContents = [];
                             data.files.forEach((file, index) => {
                                 const textarea = document.getElementById(`edit-file-content-${index}`);
                                 if (textarea) {
                                     updatedContents.push(textarea.value);
+                                    console.log(`Edit modal: File ${index} (${file.filename}): ${textarea.value.length} chars`);
                                 }
                             });
                             
@@ -1485,10 +1682,12 @@
                             if (activeTab && activeTab.id === 'edit-combined-tab') {
                                 // Using the combined editor
                                 updatedCombinedContent = document.getElementById('edit-combined-preview').value;
+                                console.log(`Edit modal: Using combined editor content (${updatedCombinedContent.length} chars)`);
                             } else {
                                 // Using individual file editors
                                 updatedCombinedContent = updatedContents.join('\n\n');
                                 document.getElementById('edit-combined-preview').value = updatedCombinedContent;
+                                console.log(`Edit modal: Using individual files content (${updatedCombinedContent.length} chars)`);
                             }
                             
                             // Update textarea with edited content
@@ -1498,16 +1697,55 @@
                             // Update character count info
                             const newCount = updatedCombinedContent.length;
                             document.getElementById('edit-total-char-count').textContent = newCount.toLocaleString();
+                            console.log(`Edit modal: New content length: ${newCount} chars`);
                             
                             // Check if exceeds limit
                             const charLimit = parseInt(document.getElementById('edit-char-limit').textContent.replace(/,/g, ''));
                             const limitWarning = document.getElementById('edit-limit-warning');
                             
+                            console.log(`Edit modal: Checking limits: ${newCount} chars vs ${charLimit} limit`);
+                            
                             if (newCount > charLimit) {
+                                console.log("Edit modal: Content exceeds limit after changes applied");
                                 limitWarning.style.display = 'block';
-                                // We don't have the exact warning message here, but we can show a generic one
+                                limitWarning.className = 'alert alert-danger';
                                 document.getElementById('edit-limit-warning-message').textContent = 
-                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}).`;
+                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}). You may need to summarize again.`;
+                                
+                                // If auto-summarize is checked, offer to summarize now
+                                if (document.getElementById('editAutoSummarize').checked) {
+                                    const shouldSummarize = confirm(`Content exceeds character limit. Would you like to automatically summarize it now?`);
+                                    if (shouldSummarize) {
+                                        // Re-trigger the preview with the current content to invoke auto-summarization
+                                        const summaryFormData = new FormData();
+                                        summaryFormData.append('current_content', updatedCombinedContent);
+                                        summaryFormData.append('append_content', 'false');
+                                        summaryFormData.append('char_limit', charLimit);
+                                        summaryFormData.append('auto_summarize', 'true');
+                                        
+                                        console.log("Edit modal: Requesting auto-summarization");
+                                        
+                                        fetch("{{ url_for('admin_preview_upload') }}", {
+                                            method: 'POST',
+                                            body: summaryFormData
+                                        })
+                                        .then(response => response.json())
+                                        .then(summaryData => {
+                                            if (summaryData.success && summaryData.was_summarized) {
+                                                console.log(`Edit modal: Summarization successful. New length: ${summaryData.total_char_count} chars`);
+                                                document.getElementById('edit-combined-preview').value = summaryData.combined_preview;
+                                                document.getElementById('chatbotContentTextarea').value = summaryData.combined_preview;
+                                                document.getElementById('edit-total-char-count').textContent = summaryData.total_char_count.toLocaleString();
+                                                
+                                                // Show success message
+                                                limitWarning.className = 'alert alert-success';
+                                                document.getElementById('edit-limit-warning-message').textContent = summaryData.warning;
+                                                updateCharCount();
+                                            }
+                                        });
+                                    }
+                                }
+                                
                             } else {
                                 limitWarning.style.display = 'none';
                             }
@@ -1518,7 +1756,15 @@
                                 document.getElementById('update-edit-combined-content-status').style.display = 'none';
                             }, 2000);
                             
-                            // Switch to the main content tab to show updated content
+                            // Highlight the Save Changes button to guide the user to the next step
+                            document.getElementById('saveContentChangesBtn').classList.add('btn-success');
+                            document.getElementById('saveContentChangesBtn').classList.remove('btn-primary');
+                            document.getElementById('saveContentChangesBtn').innerHTML = '<i class="bi bi-save"></i> <strong>Save Changes</strong> <i class="bi bi-arrow-right"></i>';
+                            document.getElementById('saveContentChangesBtn').classList.add('shadow-pulse');
+                            // Scroll to make the button visible
+                            document.getElementById('saveContentChangesBtn').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            
+                            // Switch to main content tab to show updated content
                             document.getElementById('current-content-tab').click();
                         });
                         
@@ -1733,6 +1979,255 @@
                         if (subTab) subTab.click();
                     }, 200);
                 }
+            }
+
+            // Add handler for "Summarize Now" button in main creation form
+            document.getElementById('summarize-now-btn').addEventListener('click', function() {
+                const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
+                const currentContent = document.getElementById('combined-preview').value;
+                
+                if (!currentContent) {
+                    alert('No content to summarize.');
+                    return;
+                }
+                
+                // Show loading state
+                this.disabled = true;
+                this.querySelector('.summarize-btn-text').style.display = 'none';
+                this.querySelector('.summarize-spinner').style.display = 'inline-block';
+                this.classList.remove('btn-warning');
+                this.classList.add('btn-secondary');
+                
+                const formData = new FormData();
+                formData.append('current_content', currentContent);
+                formData.append('char_limit', charLimit);
+                formData.append('auto_summarize', 'true');
+                
+                // Update message to indicate summarization is in progress
+                const limitWarning = document.getElementById('limit-warning');
+                const originalMessage = document.getElementById('limit-warning-message').textContent;
+                document.getElementById('limit-warning-message').innerHTML = 
+                    `<div class="alert alert-info mb-0">
+                        <p><i class="bi bi-hourglass-split"></i> <strong>Processing...</strong></p>
+                        <p>Summarizing content. This may take a moment for large documents.</p>
+                    </div>`;
+                
+                fetch("{{ url_for('admin_preview_upload') }}", {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.was_summarized) {
+                        // Update the content
+                        document.getElementById('combined-preview').value = data.combined_preview;
+                        
+                        // NEW: Update individual file textareas if data.files is available
+                        if (data.files && Array.isArray(data.files)) {
+                            data.files.forEach((file, index) => {
+                                const individualFileTextarea = document.getElementById(`file-content-${index}`);
+                                if (individualFileTextarea) {
+                                    individualFileTextarea.value = file.content;
+                                    console.log(`Updated file-content-${index} with summarized part, new length: ${file.content.length}`);
+                                }
+                            });
+                        }
+                        
+                        // Update count
+                        document.getElementById('total-char-count').textContent = data.total_char_count.toLocaleString();
+                        
+                        // Create detailed success message
+                        const stats = data.summarization_stats;
+                        let summaryHtml = `
+                            <div class="alert alert-success mb-0">
+                                <p><i class="bi bi-check-circle"></i> <strong>Summarization Complete!</strong></p>
+                                <p>${data.warning}</p>
+                                <div class="progress mt-2 mb-2" style="height: 20px;">
+                                    <div class="progress-bar bg-success" role="progressbar" 
+                                         style="width: ${stats.percent_reduced}%;" 
+                                         aria-valuenow="${stats.percent_reduced}" 
+                                         aria-valuemin="0" aria-valuemax="100">
+                                        ${stats.percent_reduced}% Reduced
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-between text-muted small">
+                                    <span>Original: ${stats.original_length.toLocaleString()} chars</span>
+                                    <span>Final: ${stats.final_length.toLocaleString()} chars</span>
+                                </div>
+                            </div>`;
+                        
+                        // Show success message
+                        limitWarning.style.display = 'block';
+                        limitWarning.className = 'alert alert-success';
+                        document.getElementById('limit-warning-message').innerHTML = summaryHtml;
+                        
+                        // Hide the unnecessary options after successful summarization
+                        const optionsUl = limitWarning.querySelector('ul');
+                        if (optionsUl) {
+                            optionsUl.style.display = 'none';
+                        }
+                        const summarizeBtnItself = document.getElementById('summarize-now-btn');
+                        if (summarizeBtnItself) {
+                            summarizeBtnItself.style.display = 'none';
+                        }
+                        
+                        // Highlight the Apply Changes button to guide the user to the next step
+                        document.getElementById('update-combined-content').classList.add('btn-success');
+                        document.getElementById('update-combined-content').classList.remove('btn-primary');
+                        document.getElementById('update-combined-content').innerHTML = '<i class="bi bi-check2-all"></i> <strong>Apply Changes</strong> <i class="bi bi-arrow-right"></i>';
+                        document.getElementById('update-combined-content').classList.add('shadow-pulse');
+                        
+                        // Switch to combined tab to show the result
+                        document.getElementById('combined-tab').click();
+                    } else {
+                        // Show error message
+                        limitWarning.className = 'alert alert-danger';
+                        document.getElementById('limit-warning-message').textContent = data.error || data.warning || 'No changes made.';
+                    }
+                    
+                    // Reset button state
+                    this.disabled = false;
+                    this.querySelector('.summarize-btn-text').style.display = 'inline-block';
+                    this.querySelector('.summarize-spinner').style.display = 'none';
+                    this.classList.remove('btn-secondary');
+                    this.classList.add('btn-warning');
+                })
+                .catch(error => {
+                    alert('Network error: ' + error);
+                    // Reset button state
+                    this.disabled = false;
+                    this.querySelector('.summarize-btn-text').style.display = 'inline-block';
+                    this.querySelector('.summarize-spinner').style.display = 'none';
+                    this.classList.remove('btn-secondary');
+                    this.classList.add('btn-warning');
+                    // Restore original message
+                    document.getElementById('limit-warning-message').textContent = originalMessage;
+                });
+            });
+            
+            // Add handler for "Summarize Now" button in edit mode
+            const editSummarizeBtn = document.getElementById('edit-summarize-now-btn');
+            if (editSummarizeBtn) {
+                editSummarizeBtn.addEventListener('click', function() {
+                    const charLimit = parseInt(document.getElementById('edit-char-limit').textContent.replace(/,/g, ''));
+                    const currentContent = document.getElementById('edit-combined-preview') 
+                        ? document.getElementById('edit-combined-preview').value 
+                        : document.getElementById('chatbotContentTextarea').value;
+                    
+                    if (!currentContent) {
+                        alert('No content to summarize.');
+                        return;
+                    }
+                    
+                    // Show loading state
+                    this.disabled = true;
+                    this.querySelector('.summarize-btn-text').style.display = 'none';
+                    this.querySelector('.summarize-spinner').style.display = 'inline-block';
+                    this.classList.remove('btn-warning');
+                    this.classList.add('btn-secondary');
+                    
+                    // Update message to indicate summarization is in progress
+                    const limitWarning = document.getElementById('edit-limit-warning');
+                    const originalMessage = document.getElementById('edit-limit-warning-message').textContent;
+                    document.getElementById('edit-limit-warning-message').innerHTML = 
+                        `<div class="alert alert-info mb-0">
+                            <p><i class="bi bi-hourglass-split"></i> <strong>Processing...</strong></p>
+                            <p>Summarizing content. This may take a moment for large documents. Please be patient.</p>
+                        </div>`;
+                    
+                    const formData = new FormData();
+                    formData.append('current_content', currentContent);
+                    formData.append('char_limit', charLimit);
+                    formData.append('auto_summarize', 'true');
+                    
+                    fetch("{{ url_for('admin_preview_upload') }}", {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.was_summarized) {
+                            // Update the content in both places
+                            if (document.getElementById('edit-combined-preview')) {
+                                document.getElementById('edit-combined-preview').value = data.combined_preview;
+                            }
+                            document.getElementById('chatbotContentTextarea').value = data.combined_preview;
+                            
+                            // Update count and status
+                            document.getElementById('edit-total-char-count').textContent = data.total_char_count.toLocaleString();
+                            updateCharCount(); // This updates currentCharCount for chatbotContentTextarea
+                            
+                            // Create detailed success message
+                            const stats = data.summarization_stats;
+                            let summaryHtml = `
+                                <div class="alert alert-success mb-0">
+                                    <p><i class="bi bi-check-circle"></i> <strong>Summarization Complete!</strong></p>
+                                    <p>${data.warning}</p>
+                                    <div class="progress mt-2 mb-2" style="height: 20px;">
+                                        <div class="progress-bar bg-success" role="progressbar" 
+                                             style="width: ${stats.percent_reduced}%;" 
+                                             aria-valuenow="${stats.percent_reduced}" 
+                                             aria-valuemin="0" aria-valuemax="100">
+                                            ${stats.percent_reduced}% Reduced
+                                        </div>
+                                    </div>
+                                    <div class="d-flex justify-content-between text-muted small">
+                                        <span>Original: ${stats.original_length.toLocaleString()} chars</span>
+                                        <span>Final: ${stats.final_length.toLocaleString()} chars</span>
+                                    </div>
+                                </div>`;
+                            
+                            const editLimitWarning = document.getElementById('edit-limit-warning');
+                            editLimitWarning.style.display = 'block'; // Show the warning area
+                            editLimitWarning.className = 'alert alert-success'; // Style as success
+                            document.getElementById('edit-limit-warning-message').innerHTML = summaryHtml; // Populate with success details
+
+                            // Hide the "Summarize Now" button in the edit modal as summarization is complete
+                            const editSummarizeBtnItself = document.getElementById('edit-summarize-now-btn');
+                            if (editSummarizeBtnItself) {
+                                const btnContainer = editSummarizeBtnItself.closest('.mt-2'); // Find parent div with class 'mt-2'
+                                if (btnContainer) {
+                                    btnContainer.style.display = 'none';
+                                } else {
+                                    editSummarizeBtnItself.style.display = 'none'; // Fallback if container not found
+                                }
+                            }
+                            
+                            // Highlight the Apply Changes button in the modal
+                            const updateEditCombinedContentBtn = document.getElementById('update-edit-combined-content');
+                            if(updateEditCombinedContentBtn){
+                                updateEditCombinedContentBtn.classList.add('btn-success', 'shadow-pulse');
+                                updateEditCombinedContentBtn.classList.remove('btn-primary');
+                                updateEditCombinedContentBtn.innerHTML = '<i class="bi bi-check2-all"></i> <strong>Apply Changes</strong> <i class="bi bi-arrow-right"></i>';
+                            }
+                            
+                            // Switch to main content tab to show updated content
+                            document.getElementById('current-content-tab').click();
+                        } else {
+                            // Show error message
+                            limitWarning.className = 'alert alert-danger';
+                            document.getElementById('edit-limit-warning-message').textContent = data.error || data.warning || 'No changes made.';
+                        }
+                        
+                        // Reset button state
+                        this.disabled = false;
+                        this.querySelector('.summarize-btn-text').style.display = 'inline-block';
+                        this.querySelector('.summarize-spinner').style.display = 'none';
+                        this.classList.remove('btn-secondary');
+                        this.classList.add('btn-warning');
+                    })
+                    .catch(error => {
+                        alert('Network error: ' + error);
+                        // Reset button state
+                        this.disabled = false;
+                        this.querySelector('.summarize-btn-text').style.display = 'inline-block';
+                        this.querySelector('.summarize-spinner').style.display = 'none';
+                        this.classList.remove('btn-secondary');
+                        this.classList.add('btn-warning');
+                        // Restore original message
+                        document.getElementById('edit-limit-warning-message').textContent = originalMessage;
+                    });
+                });
             }
         });
 

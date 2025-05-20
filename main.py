@@ -1449,56 +1449,222 @@ def extract_text_from_file(file_storage):
             pass # Stream might be closed or unseekable
         return ""
 
+# Somewhere in the smart_text_summarization function, add a function to proportionally distribute content
+def distribute_content_to_files(original_files, combined_content):
+    """Distribute the summarized combined content back to individual files proportionally."""
+    # If no files or empty combined content, nothing to do
+    if not original_files or not combined_content:
+        return original_files
+
+    # Calculate total original length
+    total_original_length = sum(len(f['content']) for f in original_files)
+    
+    # If total length is 0, we can't distribute proportionally
+    if total_original_length == 0:
+        return original_files
+    
+    # Calculate new total length
+    new_total_length = len(combined_content)
+    
+    # Make a copy of the files list
+    updated_files = []
+    
+    # Keep track of content already assigned
+    content_assigned = 0
+    
+    # For each file except the last one
+    for i, file in enumerate(original_files[:-1]):
+        # Calculate proportion
+        original_proportion = len(file['content']) / total_original_length
+        
+        # Calculate new length for this file
+        new_length = int(new_total_length * original_proportion)
+        
+        # Slice the content for this file
+        if i == 0:  # First file
+            file_content = combined_content[:new_length]
+        else:  # Middle files
+            file_content = combined_content[content_assigned:content_assigned + new_length]
+        
+        # Update the file
+        updated_file = file.copy()
+        updated_file['content'] = file_content
+        updated_file['char_count'] = len(file_content)
+        updated_files.append(updated_file)
+        
+        # Update content assigned
+        content_assigned += new_length
+    
+    # Add the last file with remaining content to avoid rounding errors
+    if original_files:
+        last_file = original_files[-1].copy()
+        last_file['content'] = combined_content[content_assigned:]
+        last_file['char_count'] = len(last_file['content'])
+        updated_files.append(last_file)
+    
+    return updated_files
 
 @app.route('/admin/preview_upload', methods=['POST'])
 @requires_auth
 def admin_preview_upload():
     """Handles file uploads for previewing content before chatbot creation."""
-    if 'files' not in request.files:
-        return jsonify({"success": False, "error": "No files provided for preview."}), 400
+    try:
+        logger.info("admin_preview_upload called")
+        
+        if 'files' not in request.files and 'current_content' not in request.form:
+            logger.warning("No files or content provided for preview")
+            return jsonify({"success": False, "error": "No files or content provided for preview."}), 400
 
-    files = request.files.getlist('files')
-    char_limit = int(request.form.get('char_limit', 50000))
-    
-    # For edit modal scenario
-    current_content_text = request.form.get('current_content', '')
-    append_content_flag = request.form.get('append_content', 'false').lower() == 'true'
+        char_limit = int(request.form.get('char_limit', 50000))
+        auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
+        
+        logger.info(f"Preview settings - char_limit: {char_limit}, auto_summarize: {auto_summarize}")
+        
+        # For edit modal scenario or direct summarization
+        current_content_text = request.form.get('current_content', '')
+        if current_content_text:
+            logger.info(f"Current content provided with length: {len(current_content_text)}")
+            
+        append_content_flag = request.form.get('append_content', 'false').lower() == 'true'
+        logger.info(f"Append content flag: {append_content_flag}")
 
-    extracted_files_data = []
-    combined_text_parts = []
+        extracted_files_data = []
+        combined_text_parts = []
 
-    if append_content_flag and current_content_text:
-        combined_text_parts.append(current_content_text)
+        if append_content_flag and current_content_text:
+            combined_text_parts.append(current_content_text)
+            logger.info(f"Added current content to text parts ({len(current_content_text)} chars)")
 
-    for file_storage in files:
-        if file_storage and file_storage.filename:
-            text = extract_text_from_file(file_storage)
-            extracted_files_data.append({
-                "filename": secure_filename(file_storage.filename),
-                "content": text,
-                "char_count": len(text)
-            })
-            combined_text_parts.append(text)
-        else:
-            logger.warning("Empty file storage object received in preview_upload.")
+        # Only process files if they were provided
+        if 'files' in request.files:
+            files = request.files.getlist('files')
+            logger.info(f"Processing {len(files)} files for preview")
+            
+            for file_storage in files:
+                if file_storage and file_storage.filename:
+                    try:
+                        text = extract_text_from_file(file_storage)
+                        logger.info(f"Extracted {len(text)} chars from {file_storage.filename}")
+                        
+                        extracted_files_data.append({
+                            "filename": secure_filename(file_storage.filename),
+                            "content": text,
+                            "char_count": len(text)
+                        })
+                        combined_text_parts.append(text)
+                    except Exception as e:
+                        logger.error(f"Error extracting text from {file_storage.filename}: {str(e)}")
+                        return jsonify({"success": False, "error": f"Error processing file {file_storage.filename}: {str(e)}"}), 500
+                else:
+                    logger.warning("Empty file storage object received in preview_upload.")
+        elif current_content_text:
+            # If only current_content was provided (direct summarization)
+            logger.info("Using only current_content (no files)")
+            combined_text_parts = [current_content_text]
 
+        # Combine all text parts
+        combined_preview_content = "\n\n".join(combined_text_parts)
+        total_char_count = len(combined_preview_content)
+        
+        logger.info(f"Combined preview content length: {total_char_count}, char_limit: {char_limit}")
+        
+        # Check if content exceeds character limit
+        exceeds_limit = total_char_count > char_limit
+        was_summarized = False
+        summarization_result = {"original_length": total_char_count, "final_length": total_char_count, "percent_reduced": 0}
+        warning_message = ""
 
-    combined_preview_content = "\\n\\n".join(combined_text_parts)
-    total_char_count = len(combined_preview_content)
-    exceeds_limit = total_char_count > char_limit
-    warning_message = ""
-    if exceeds_limit:
-        warning_message = f"Content ({total_char_count:,} chars) exceeds limit of {char_limit:,} chars."
+        # Apply summarization if enabled and needed
+        if exceeds_limit and auto_summarize:
+            logger.info(f"Content exceeds limit, applying summarization (auto_summarize={auto_summarize})")
+            
+            # Store the original content length before summarization
+            original_content_length = total_char_count
+            
+            # Apply smart summarization with target slightly under the limit
+            combined_preview_content = smart_text_summarization(
+                combined_preview_content, 
+                target_length=int(char_limit * 0.95),
+                max_length=char_limit
+            )
+            
+            # Update the total character count after summarization
+            final_content_length = len(combined_preview_content)
+            total_char_count = final_content_length
+            
+            # Check if summarization reduced content
+            if final_content_length < original_content_length:
+                was_summarized = True
+                percent_reduced = round(((original_content_length - final_content_length) / original_content_length) * 100, 1)
+                
+                summarization_result = {
+                    "original_length": original_content_length,
+                    "final_length": final_content_length,
+                    "percent_reduced": percent_reduced
+                }
+                
+                logger.info(f"Content summarized: {original_content_length} -> {final_content_length} chars ({percent_reduced}%)")
+                
+                warning_message = f"Content was automatically summarized to fit within the {char_limit:,} character limit. " \
+                                f"Reduced by {percent_reduced}% from {original_content_length:,} to {final_content_length:,} characters."
+                
+                # Update the individual file contents using our distribution function
+                if extracted_files_data:
+                    logger.info("Distributing summarized content back to individual files proportionally")
+                    extracted_files_data = distribute_content_to_files(extracted_files_data, combined_preview_content)
+                    logger.info(f"Successfully distributed content to {len(extracted_files_data)} files")
+            else:
+                logger.warning("Summarization did not reduce content length")
+                warning_message = "Automatic summarization could not reduce the content further. Manual editing may be required."
+                exceeds_limit = total_char_count > char_limit
+        elif exceeds_limit:
+            logger.info("Content exceeds limit but auto-summarize is disabled")
+            warning_message = f"Content exceeds the {char_limit:,} character limit (current: {total_char_count:,} characters). " \
+                            f"Enable auto-summarize or reduce content manually."
 
-    return jsonify({
-        "success": True,
-        "files": extracted_files_data,
-        "combined_preview": combined_preview_content,
-        "total_char_count": total_char_count,
-        "char_limit": char_limit,
-        "exceeds_limit": exceeds_limit,
-        "warning": warning_message
-    })
+        # If there was an error or no summarization was needed, return appropriate message
+        if not was_summarized and 'current_content' in request.form and not 'files' in request.files:
+            logger.info("Direct summarization request handling")
+            # This was a direct summarization request that didn't result in summarization
+            if exceeds_limit:
+                # Content still exceeds limit but no summarization occurred
+                logger.warning("Content still exceeds limit but could not be automatically summarized")
+                return jsonify({
+                    "success": False, 
+                    "error": "Content still exceeds limit but could not be automatically summarized. Try manual editing instead.",
+                    "exceeds_limit": exceeds_limit,
+                    "total_char_count": total_char_count,
+                    "char_limit": char_limit
+                }), 400
+            else:
+                # Content doesn't need summarization
+                logger.info("Content doesn't need summarization")
+                return jsonify({
+                    "success": True,
+                    "files": extracted_files_data,
+                    "combined_preview": combined_preview_content,
+                    "total_char_count": total_char_count,
+                    "char_limit": char_limit,
+                    "exceeds_limit": exceeds_limit,
+                    "warning": "No summarization needed. Content is already within character limit.",
+                    "was_summarized": False
+                })
+
+        logger.info(f"Returning preview content - total_char_count: {total_char_count}, was_summarized: {was_summarized}")
+        return jsonify({
+            "success": True,
+            "files": extracted_files_data,
+            "combined_preview": combined_preview_content,
+            "total_char_count": total_char_count,
+            "char_limit": char_limit,
+            "exceeds_limit": exceeds_limit,
+            "warning": warning_message,
+            "was_summarized": was_summarized,
+            "summarization_stats": summarization_result
+        })
+    except Exception as e:
+        logger.error(f"Error in admin_preview_upload: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
 
 @app.route('/admin/upload', methods=['POST'])
 @requires_auth
@@ -1512,10 +1678,17 @@ def admin_upload():
         intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.')
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
-        
-        use_edited_content = request.form.get('use_edited_content', 'false').lower() == 'true'
+        auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
         final_content = ""
-
+        content_source = "unknown"
+        
+        # Log what we received for debugging
+        logger.info(f"Admin upload - chatbot_code: {chatbot_code}, display_name: {display_name}")
+        logger.info(f"Admin upload - char_limit: {char_limit}, auto_summarize: {auto_summarize}")
+        logger.info(f"Request form keys: {list(request.form.keys())}")
+        if 'files' in request.files:
+            logger.info(f"Request has {len(request.files.getlist('files'))} files")
+        
         if not chatbot_code or not display_name:
             return jsonify({"success": False, "error": "Chatbot ID (course_name) and Display Name are required."}), 400
         
@@ -1524,33 +1697,75 @@ def admin_upload():
         if existing_chatbot:
             return jsonify({"success": False, "error": f"Chatbot with ID '{chatbot_code}' already exists. Please use a unique ID."}), 400
 
-        if use_edited_content:
-            final_content = request.form.get('combined_content', '')
-        else:
-            files = request.files.getlist('files') # Changed from 'file' to 'files' based on JS
+        # CONTENT SOURCE DETERMINATION - HIGHEST PRIORITY TO combined_content
+        # 1. First priority: Use combined_content if it exists and has content
+        if 'combined_content' in request.form and request.form.get('combined_content', '').strip():
+            combined_content = request.form.get('combined_content')
+            logger.info(f"Using combined_content as primary source (length: {len(combined_content)})")
+            final_content = combined_content
+            content_source = "combined_content"
+        
+        # 2. Second priority: Use files only if combined_content is not available
+        elif 'files' in request.files:
+            files = request.files.getlist('files')
             if not files or all(not f.filename for f in files):
-                 return jsonify({"success": False, "error": "No files uploaded."}), 400
+                return jsonify({"success": False, "error": "No files uploaded."}), 400
             
+            logger.info(f"Processing {len(files)} files for content extraction")
             content_parts = []
             for file_storage in files:
                 if file_storage and file_storage.filename:
+                    logger.info(f"Extracting text from {file_storage.filename}")
                     text = extract_text_from_file(file_storage)
                     content_parts.append(text)
-            final_content = "\\n\\n".join(content_parts)
+            final_content = "\n\n".join(content_parts)
+            logger.info(f"Extracted content from files, total length: {len(final_content)}")
+            content_source = "files"
+        
+        # 3. No valid content source found
+        else:
+            logger.error("No valid content source found (neither combined_content nor files)")
+            return jsonify({"success": False, "error": "No content provided. Either upload files or ensure preview content is submitted."}), 400
 
-        if len(final_content) > char_limit:
-            return jsonify({
-                "success": False, 
-                "error": "Content too long",
-                "warning": f"Content length ({len(final_content):,} characters) exceeds the specified limit ({char_limit:,} characters).",
-                "content_length": len(final_content),
-                "char_limit": char_limit
-            }), 400
-
+        # Validate final content
         if not final_content.strip():
-             return jsonify({"success": False, "error": "Extracted content is empty. Please check your files."}), 400
+            logger.error(f"Final content is empty after processing from source: {content_source}")
+            return jsonify({"success": False, "error": "Extracted or provided content is empty. Please check your files or edited content."}), 400
 
-        # Create new chatbot
+        # LENGTH CHECK & AUTO-SUMMARIZATION
+        # If content exceeds limit and auto-summarize is enabled, try to summarize
+        if len(final_content) > char_limit:
+            logger.info(f"Content length {len(final_content)} exceeds limit {char_limit}")
+            if auto_summarize:
+                logger.info(f"Applying automatic summarization")
+                original_length = len(final_content)
+                final_content = smart_text_summarization(final_content, target_length=int(char_limit * 0.95), max_length=char_limit)
+                summarized_length = len(final_content)
+                logger.info(f"Content reduced from {original_length} to {summarized_length} characters")
+                
+                # Check if still over limit after summarization
+                if summarized_length > char_limit:
+                    logger.warning(f"Content still exceeds limit after summarization: {summarized_length} > {char_limit}")
+                    return jsonify({
+                        "success": False, 
+                        "error": "Content too long",
+                        "warning": f"Content length ({summarized_length:,} characters) still exceeds the limit ({char_limit:,}) after automatic summarization. Please edit manually.",
+                        "content_length": summarized_length,
+                        "char_limit": char_limit
+                    }), 400
+            else:
+                logger.info(f"Auto-summarize disabled, returning error")
+                return jsonify({
+                    "success": False, 
+                    "error": "Content too long",
+                    "warning": f"Content length ({len(final_content):,} characters) exceeds the specified limit ({char_limit:,} characters).",
+                    "content_length": len(final_content),
+                    "char_limit": char_limit
+                }), 400
+
+        # Create new chatbot (or update if editing)
+        logger.info(f"Creating chatbot with final content length: {len(final_content)}")
+        logger.info(f"Content source was: {content_source}")
         new_chatbot = ChatbotContent.create_or_update(
             db=db,
             code=chatbot_code.upper(),
@@ -1896,6 +2111,7 @@ def admin_update_chatbot_content():
         # Accept both chatbot_code and chatbot_name for compatibility
         chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
         content = request.form.get('content')
+        auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
         
         if not chatbot_code or content is None:
             return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
@@ -1906,14 +2122,23 @@ def admin_update_chatbot_content():
             
         # Check if content exceeds character limit
         char_limit = chatbot.char_limit or 50000
+        
+        # If content exceeds limit and auto-summarize is enabled, try to summarize
         if len(content) > char_limit:
-            return jsonify({
-                "success": False,
-                "error": f"Content exceeds character limit of {char_limit}",
-                "char_count": len(content),
-                "char_limit": char_limit
-            }), 400
-            
+            if auto_summarize:
+                logger.info(f"Content exceeded limit ({len(content)} > {char_limit}). Applying automatic summarization.")
+                original_length = len(content)
+                content = smart_text_summarization(content, target_length=int(char_limit * 0.95), max_length=char_limit)
+                logger.info(f"Content reduced from {original_length} to {len(content)} characters through automatic summarization.")
+            else:
+                return jsonify({
+                    "success": False, 
+                    "error": "Content too long",
+                    "warning": f"Content exceeds character limit of {char_limit:,} characters (current: {len(content):,} characters). Enable auto-summarize to reduce automatically.",
+                    "content_length": len(content),
+                    "char_limit": char_limit
+                }), 400
+        
         chatbot.content = content
         db.commit()
         
@@ -1953,6 +2178,247 @@ def custom_cosine_similarity(a, b):
         return 0  # Avoid division by zero
     else:
         return dot_product / (magnitude_a * magnitude_b)
+
+# Helper function to automatically summarize text
+def smart_text_summarization(text, target_length=None, max_length=50000):
+    """
+    Intelligently summarize text to meet a target length using various techniques.
+    
+    Args:
+        text (str): The input text to summarize
+        target_length (int, optional): Target character length. If None, defaults to 80% of max_length
+        max_length (int): Maximum allowed length
+        
+    Returns:
+        str: Summarized text within the target length
+    """
+    if not text:
+        return ""
+    
+    # If text is already shorter than max_length, return as is
+    if len(text) <= max_length:
+        return text
+    
+    if target_length is None:
+        target_length = int(max_length * 0.8)  # Target 80% of max to leave buffer
+    
+    original_length = len(text)
+    logger.info(f"Starting summarization: {original_length} characters to target {target_length} characters")
+    
+    # Step 1: Apply basic cleanup
+    # Remove duplicate newlines and spaces
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', text)
+    cleaned_text = re.sub(r' {2,}', ' ', cleaned_text)
+    
+    current_length = len(cleaned_text)
+    logger.info(f"After basic cleanup: {current_length} characters ({original_length - current_length} removed)")
+    
+    if current_length <= target_length:
+        return cleaned_text
+    
+    # Step 2: Remove common boilerplate content
+    if current_length > target_length:
+        # Remove common headers, footers, etc.
+        patterns_to_remove = [
+            r'(?i)confidential.*?notice.*?\n\n',            # Confidentiality notices
+            r'(?i)copyright.*?reserved.*?\n\n',             # Copyright notices
+            r'(?i)table of contents.*?\n\n',                # Table of contents markers
+            r'(?i)page \d+ of \d+',                         # Page numbers
+            r'(?i)this document contains.*?\n\n',           # Document notices
+            r'(?i)(http|https)://\S+',                       # URLs
+            r'(?i)www\.\S+',                                # Web addresses
+            r'(?i)email:.*?\n',                             # Email addresses
+            r'(?i)tel:.*?\n',                               # Phone numbers
+            r'(?i)all rights reserved.*?\n\n',              # Rights statements
+            r'(?i)terms and conditions.*?\n\n',             # Terms sections
+            r'(?i)for more information.*?\n\n',             # Common footer text
+            r'(?i)disclaimer.*?\n\n',                       # Disclaimer sections
+        ]
+        
+        for pattern in patterns_to_remove:
+            cleaned_text = re.sub(pattern, '', cleaned_text)
+        
+        current_length = len(cleaned_text)
+        logger.info(f"After boilerplate removal: {current_length} characters ({original_length - current_length} removed)")
+        
+        if current_length <= target_length:
+            return cleaned_text
+    
+    # Step 3: Remove duplicate paragraphs
+    if current_length > target_length:
+        paragraphs = cleaned_text.split('\n\n')
+        unique_paragraphs = []
+        content_hashes = set()
+        
+        for para in paragraphs:
+            # Create a simple hash of paragraph content
+            para_hash = hashlib.md5(para.lower().strip().encode()).hexdigest()
+            if para_hash not in content_hashes:
+                content_hashes.add(para_hash)
+                unique_paragraphs.append(para)
+        
+        cleaned_text = '\n\n'.join(unique_paragraphs)
+        current_length = len(cleaned_text)
+        logger.info(f"After duplicate removal: {current_length} characters ({original_length - current_length} removed)")
+        
+        if current_length <= target_length:
+            return cleaned_text
+    
+    # Step 4: Identify and trim less important sections
+    if current_length > target_length:
+        # Look for appendices, references, notes sections and trim them
+        sections_to_trim = [
+            (r'(?i)appendix.*?$', r'(?i)\n+[^\n]*?appendix.*?\n'),
+            (r'(?i)references.*?$', r'(?i)\n+[^\n]*?references.*?\n'),
+            (r'(?i)bibliography.*?$', r'(?i)\n+[^\n]*?bibliography.*?\n'),
+            (r'(?i)notes.*?$', r'(?i)\n+[^\n]*?notes.*?\n'),
+            (r'(?i)footnotes.*?$', r'(?i)\n+[^\n]*?footnotes.*?\n'),
+        ]
+        
+        for section_pattern, section_start in sections_to_trim:
+            if current_length > target_length:
+                match = re.search(section_start, cleaned_text)
+                if match:
+                    end_pos = match.start()
+                    remaining_text = cleaned_text[:end_pos].strip()
+                    appendix_notice = "\n\n[Content truncated to fit within character limit]"
+                    cleaned_text = remaining_text + appendix_notice
+                    current_length = len(cleaned_text)
+                    logger.info(f"After trimming section: {current_length} characters ({original_length - current_length} removed)")
+                    
+                    if current_length <= target_length:
+                        return cleaned_text
+    
+    # Step 5: More aggressive content reduction for very large content 
+    if current_length > target_length and current_length > target_length * 2:
+        # For very large content, extract key sections only
+        logger.info(f"Content still too large ({current_length} chars). Applying aggressive summarization.")
+        
+        paragraphs = cleaned_text.split('\n\n')
+        
+        # Keep introduction (first 10% of paragraphs)
+        intro_count = max(3, int(len(paragraphs) * 0.1))
+        # Keep conclusion (last 10% of paragraphs)
+        conclusion_count = max(3, int(len(paragraphs) * 0.1))
+        # Take some paragraphs from the middle
+        middle_count = max(5, int((target_length - (len('\n\n'.join(paragraphs[:intro_count])) + 
+                                              len('\n\n'.join(paragraphs[-conclusion_count:])) + 
+                                              100)) / 
+                                  (sum(len(p) for p in paragraphs[intro_count:-conclusion_count]) / 
+                                   len(paragraphs[intro_count:-conclusion_count]))))
+        
+        # Select paragraphs evenly distributed from the middle
+        if len(paragraphs) > intro_count + conclusion_count + middle_count and middle_count > 0:
+            middle_indices = []
+            step = (len(paragraphs) - intro_count - conclusion_count) / (middle_count + 1)
+            for i in range(1, middle_count + 1):
+                idx = intro_count + int(i * step)
+                if idx < len(paragraphs) - conclusion_count:
+                    middle_indices.append(idx)
+            
+            selected_paragraphs = paragraphs[:intro_count]
+            if middle_indices:
+                selected_paragraphs.append("\n\n[...content summarized...]\n\n")
+                for idx in middle_indices:
+                    selected_paragraphs.append(paragraphs[idx])
+            selected_paragraphs.append("\n\n[...content summarized...]\n\n")
+            selected_paragraphs.extend(paragraphs[-conclusion_count:])
+            
+            cleaned_text = '\n\n'.join(selected_paragraphs)
+            current_length = len(cleaned_text)
+            logger.info(f"After aggressive summarization: {current_length} characters ({original_length - current_length} removed)")
+            
+            if current_length <= target_length:
+                return cleaned_text
+    
+    # Step 6: If still too long, do proportional reduction
+    if current_length > target_length:
+        # Calculate how much we need to reduce each paragraph
+        paragraphs = cleaned_text.split('\n\n')
+        reduction_ratio = target_length / current_length
+        
+        new_paragraphs = []
+        total_length = 0
+        
+        # Keep introduction (first paragraph) intact
+        if paragraphs:
+            intro = paragraphs[0]
+            new_paragraphs.append(intro)
+            total_length += len(intro) + 2  # +2 for the \n\n
+        
+        # We'll keep paragraphs in proportion to their original size
+        for i, para in enumerate(paragraphs[1:-1] if len(paragraphs) > 2 else []):
+            # Very short paragraphs are kept intact
+            if len(para) < 100:
+                new_paragraphs.append(para)
+                total_length += len(para) + 2  # +2 for the \n\n
+            else:
+                # Calculate target length for this paragraph
+                para_target_len = max(50, int(len(para) * reduction_ratio * 0.9))  # Use 90% of ratio to leave buffer
+                
+                # Shorten to complete sentences if possible
+                if para_target_len < len(para):
+                    # Find the last complete sentence that fits
+                    sentences = re.split(r'(?<=[.!?])\s+', para)
+                    kept_sentences = []
+                    current_len = 0
+                    
+                    for sentence in sentences:
+                        if current_len + len(sentence) + 1 <= para_target_len:  # +1 for space
+                            kept_sentences.append(sentence)
+                            current_len += len(sentence) + 1
+                        else:
+                            break
+                    
+                    if kept_sentences:
+                        trimmed_para = ' '.join(kept_sentences)
+                        if i % 5 == 0:  # Add indicator every few paragraphs
+                            trimmed_para += " [...]"
+                    else:
+                        # If no complete sentence fits, just truncate with indicator
+                        trimmed_para = para[:para_target_len].strip() + " [...]"
+                    
+                    new_paragraphs.append(trimmed_para)
+                    total_length += len(trimmed_para) + 2
+            
+            # Stop if we've reached the target
+            if total_length >= target_length * 0.9:  # Leave 10% for conclusion
+                break
+        
+        # Keep conclusion (last paragraph) intact if possible
+        if len(paragraphs) > 1 and total_length + len(paragraphs[-1]) + 2 <= target_length:
+            new_paragraphs.append(paragraphs[-1])
+            total_length += len(paragraphs[-1]) + 2
+        
+        if new_paragraphs:
+            cleaned_text = '\n\n'.join(new_paragraphs)
+            current_length = len(cleaned_text)
+            logger.info(f"After proportional reduction: {current_length} characters ({original_length - current_length} removed)")
+    
+    # Final check - if all else fails, just truncate with notice
+    if len(cleaned_text) > max_length:
+        truncation_notice = "\n\n[Content truncated to fit within character limit]"
+        text_portion = max_length - len(truncation_notice)
+        
+        # Find last complete sentence before truncation point
+        text_to_truncate = cleaned_text[:text_portion]
+        last_sentence_end = max(text_to_truncate.rfind('.'), 
+                               text_to_truncate.rfind('!'), 
+                               text_to_truncate.rfind('?'))
+        
+        if last_sentence_end > 0 and last_sentence_end > 0.7 * text_portion:
+            # If we found a sentence ending and it's reasonably far along
+            cleaned_text = cleaned_text[:last_sentence_end+1] + truncation_notice
+        else:
+            # Otherwise just truncate at character limit
+            cleaned_text = cleaned_text[:text_portion] + truncation_notice
+        
+        current_length = len(cleaned_text)
+        logger.info(f"After final truncation: {current_length} characters ({original_length - current_length} removed)")
+    
+    # Return the cleaned text, which should now be under max_length
+    logger.info(f"Summarization complete: Reduced from {original_length} to {len(cleaned_text)} characters")
+    return cleaned_text
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

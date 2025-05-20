@@ -90,7 +90,9 @@ class ChatbotContent(Base):
         return db.query(cls).filter(cls.is_active == True).all()
     
     @classmethod
-    def create_or_update(cls, db, code, name, content, description=None):
+    def create_or_update(cls, db, code, name, content, description=None, quota=3, 
+                        intro_message="Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.",
+                        char_limit=50000, is_active=True):
         """Create or update chatbot content"""
         existing = cls.get_by_code(db, code)
         if existing:
@@ -98,6 +100,10 @@ class ChatbotContent(Base):
             existing.content = content
             if description is not None:
                 existing.description = description
+            existing.quota = quota
+            existing.intro_message = intro_message
+            existing.char_limit = char_limit
+            existing.is_active = is_active
             existing.updated_at = datetime.datetime.utcnow()
             return existing
         else:
@@ -105,7 +111,11 @@ class ChatbotContent(Base):
                 code=code,
                 name=name,
                 description=description,
-                content=content
+                content=content,
+                quota=quota,
+                intro_message=intro_message,
+                char_limit=char_limit,
+                is_active=is_active
             )
             db.add(new_content)
             return new_content

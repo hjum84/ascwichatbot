@@ -82,7 +82,7 @@ class ChatbotContent(Base):
     def get_by_code(cls, db, code):
         """Get chatbot content by code (case-insensitive search).
         Assumes the 'code' parameter is already uppercased by the caller."""
-        return db.query(cls).filter(func.upper(cls.code) == code).first()
+        return db.query(cls).filter(func.upper(cls.code) == func.upper(code)).first()
     
     @classmethod
     def get_all_active(cls, db):

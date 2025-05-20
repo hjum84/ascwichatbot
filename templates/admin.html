@@ -274,7 +274,7 @@
                                                             <h5 class="mb-0">{{ chatbot.display_name }}</h5>
                                                             <div>
                                                                 <button type="button" class="btn btn-info btn-sm edit-content-btn me-2"
-                                                                        data-chatbot-name="{{ chatbot.code }}" data-chatbot-display-name="{{ chatbot.display_name }}"><i class="bi bi-pencil-square"></i> Edit Content</button>
+                                                                        data-chatbot-code="{{ chatbot.code }}" data-chatbot-display-name="{{ chatbot.display_name }}"><i class="bi bi-pencil-square"></i> Edit Content</button>
                                                                 <button type="button" class="btn btn-danger btn-sm delete-btn" 
                                                                         data-chatbot-name="{{ chatbot.code }}"><i class="bi bi-trash"></i> Delete</button>
                                                             </div>
@@ -427,7 +427,16 @@
                                             <div class="mb-3 form-check">
                                                 <input type="checkbox" class="form-check-input" id="auto_summarize" name="auto_summarize" checked>
                                                 <label class="form-check-label" for="auto_summarize">Automatically summarize content if it exceeds the character limit</label>
-                                                <div class="form-text">When enabled, content will be intelligently trimmed to fit within the character limit by removing duplicate content, boilerplate text, and less important sections.</div>
+                                                <div class="form-text">When enabled, content will be intelligently trimmed to fit within the character limit by removing duplicates, boilerplate text, and formatting.</div>
+                                                <div class="alert alert-warning mt-2 small">
+                                                    <p><strong><i class="bi bi-exclamation-triangle"></i> Important Notice:</strong></p>
+                                                    <ul class="mb-0">
+                                                        <li>The auto-summarization feature analyzes text content to remove duplicate content, formatting elements, and unnecessary instructions.</li>
+                                                        <li>For better summarization quality, copy and paste only essential content directly from PowerPoint or Word documents.</li>
+                                                        <li>PowerPoint presenter notes are not extracted, so important content should be included in the slide body.</li>
+                                                        <li>For best results, it is recommended to organize and upload the content manually.</li>
+                                                    </ul>
+                                                </div>
                                             </div>
                                             
                                             <div class="mb-3">
@@ -749,7 +758,16 @@
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" id="editAutoSummarize" name="auto_summarize" checked>
                         <label class="form-check-label" for="editAutoSummarize">Automatically summarize content if it exceeds the character limit</label>
-                        <div class="form-text">When enabled, content will be intelligently trimmed to fit within the character limit by removing duplicate content, boilerplate text, and less important sections.</div>
+                        <div class="form-text">When enabled, content will be intelligently trimmed to fit within the character limit by removing duplicates, boilerplate text, and formatting.</div>
+                        <div class="alert alert-warning mt-2 small">
+                            <p><strong><i class="bi bi-exclamation-triangle"></i> Important Notice:</strong></p>
+                            <ul class="mb-0">
+                                <li>The auto-summarization feature analyzes text content to remove duplicate content, formatting elements, and unnecessary instructions.</li>
+                                <li>For better summarization quality, copy and paste only essential content directly from PowerPoint or Word documents.</li>
+                                <li>PowerPoint presenter notes are not extracted, so important content should be included in the slide body.</li>
+                                <li>For best results, it is recommended to organize and upload the content manually.</li>
+                            </ul>
+                        </div>
                     </div>
                     
                     <ul class="nav nav-tabs mb-3" id="editContentTabs" role="tablist">
@@ -1350,7 +1368,7 @@
             // Edit Content button handler
             document.querySelectorAll('.edit-content-btn').forEach(function(btn) {
                 btn.addEventListener('click', function() {
-                    const chatbotCode = this.getAttribute('data-chatbot-name');
+                    const chatbotCode = this.getAttribute('data-chatbot-code');
                     const chatbotDisplayName = this.getAttribute('data-chatbot-display-name');
                     
                     const modalTitle = document.getElementById('editContentModalLabel');
@@ -1363,33 +1381,31 @@
                     hiddenChatbotNameInput.value = chatbotCode;
                     editContentModal.show();
 
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('GET', `{{ url_for('admin_get_chatbot_content', chatbot_code='TEMP_CODE') }}`.replace('TEMP_CODE', chatbotCode), true);
+                    console.log("Fetching content for chatbot:", chatbotCode);
                     
-                    xhr.onload = function() {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            try {
-                                const response = JSON.parse(xhr.responseText);
-                                if (response.success) {
-                                    contentTextarea.value = response.content;
-                                    document.getElementById('editCharLimit').value = response.char_limit;
-                                    document.getElementById('charLimitDisplay').textContent = response.char_limit.toLocaleString();
-                                    updateCharCount();
-                                } else {
-                                    contentTextarea.value = 'Error: ' + response.error;
-                                }
-                            } catch (e) {
-                                contentTextarea.value = 'Error parsing server response.';
-                                console.error('Parse error:', e);
+                    // Use fetch API instead of XMLHttpRequest for better error handling
+                    fetch(`/admin/get_chatbot_content/${encodeURIComponent(chatbotCode)}`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`Error: ${response.status} ${response.statusText}`);
                             }
-                        } else {
-                            contentTextarea.value = 'Error fetching content: ' + xhr.statusText;
-                        }
-                    };
-                    xhr.onerror = function() {
-                        contentTextarea.value = 'Network error. Please try again.';
-                    };
-                    xhr.send();
+                            return response.json();
+                        })
+                        .then(data => {
+                            if (data.success) {
+                                contentTextarea.value = data.content;
+                                document.getElementById('editCharLimit').value = data.char_limit;
+                                document.getElementById('charLimitDisplay').textContent = data.char_limit.toLocaleString();
+                                updateCharCount();
+                            } else {
+                                contentTextarea.value = 'Error: ' + (data.error || 'Failed to load content');
+                                console.error('Server returned error:', data.error);
+                            }
+                        })
+                        .catch(error => {
+                            contentTextarea.value = 'Error fetching content: ' + error.message;
+                            console.error('Fetch error:', error);
+                        });
                 });
             });
             
@@ -1411,78 +1427,179 @@
                 const autoSummarize = document.getElementById('editAutoSummarize').checked;
                 const saveButton = this;
                 
-                // Check if we have edited content in the preview
-                let newContent = document.getElementById('chatbotContentTextarea').value;
+                if (!chatbotCode) {
+                    alert('Error: Cannot identify chatbot. Please reload the page and try again.');
+                    return;
+                }
+                
+                // Get current content based on active tab
+                let newContent = "";
                 const editPreviewSection = document.getElementById('edit-preview-section');
                 const editCombinedPreview = document.getElementById('edit-combined-preview');
+                const chatbotContentTextarea = document.getElementById('chatbotContentTextarea');
                 
-                // Use the edited content from the preview if it exists and is visible
-                if (editPreviewSection.style.display !== 'none' && editCombinedPreview && editCombinedPreview.value) {
+                // Log what content we're using
+                console.log("Save button clicked for chatbot:", chatbotCode);
+                
+                // Case 1: Using preview content if available and visible
+                if (editPreviewSection && editPreviewSection.style.display !== 'none' && 
+                    editCombinedPreview && editCombinedPreview.value) {
                     newContent = editCombinedPreview.value;
+                    console.log("Using edited content from preview tab, length:", newContent.length);
+                } 
+                // Case 2: Using main text area content
+                else if (chatbotContentTextarea && chatbotContentTextarea.value) {
+                    newContent = chatbotContentTextarea.value;
+                    console.log("Using content from main textarea, length:", newContent.length);
+                }
+                else {
+                    alert('Error: No content found to save. Please add some content first.');
+                    return;
+                }
+                
+                if (!newContent.trim()) {
+                    alert('Error: Cannot save empty content. Please add some content first.');
+                    return;
                 }
                 
                 const formData = new FormData();
                 formData.append('chatbot_code', chatbotCode);
                 formData.append('content', newContent);
                 formData.append('char_limit', charLimit);
-                formData.append('append_content', appendContent.toString());
-                formData.append('auto_summarize', autoSummarize.toString());
-
-                // Add files if any are selected and if we're not using edited content
-                const fileInput = document.getElementById('editFiles');
-                if (editPreviewSection.style.display === 'none' && fileInput.files.length > 0) {
-                    for (let i = 0; i < fileInput.files.length; i++) {
-                        formData.append('files', fileInput.files[i]);
+                formData.append('append_content', 'false'); // When editing, we're replacing content, not appending
+                
+                // Only enable auto-summarize when content exceeds limit
+                const contentExceedsLimit = newContent.length > parseInt(charLimit);
+                formData.append('auto_summarize', (autoSummarize && contentExceedsLimit).toString());
+                
+                // Show warning if content exceeds limit and auto-summarize is not enabled
+                if (contentExceedsLimit && !autoSummarize) {
+                    if (!confirm(`Content length (${newContent.length.toLocaleString()} characters) exceeds the character limit (${parseInt(charLimit).toLocaleString()} characters).\n\nContinue without auto-summarization? You may get an error if you don't enable auto-summarize.`)) {
+                        return;
                     }
-                } else if (editPreviewSection.style.display !== 'none' && fileInput.files.length > 0) {
-                    // If we're using edited content, add a flag to tell the server
-                    formData.append('use_edited_content', 'true');
                 }
                 
+                formData.append('use_edited_content', 'true'); // Always treat this as edited content
+                
+                // Visual feedback - show a loading overlay
                 saveButton.disabled = true;
-                saveButton.textContent = 'Saving...';
+                saveButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+                
+                // Create a status message element for continuous feedback
+                let statusMsg = document.createElement('div');
+                statusMsg.className = 'alert alert-info mt-2';
+                statusMsg.innerHTML = '<i class="bi bi-info-circle"></i> Saving changes...';
+                saveButton.parentNode.appendChild(statusMsg);
 
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', "{{ url_for('admin_update_chatbot_content') }}", true);
-                
-                xhr.onload = function() {
-                    saveButton.disabled = false;
-                    saveButton.textContent = 'Save Changes';
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            const response = JSON.parse(xhr.responseText);
-                            if (response.success) {
-                                const editContentModalElement = document.getElementById('editContentModal');
-                                const editContentModal = bootstrap.Modal.getInstance(editContentModalElement);
-                                if (editContentModal) {
-                                    editContentModal.hide();
-                                }
-                                window.location.href = "{{ url_for('admin') }}?message=" + encodeURIComponent('Content has been updated successfully!') + "&message_type=success";
-                            } else if (response.error === "Content too long") {
-                                // Show warning modal
-                                document.getElementById('edit-warning-message').textContent = response.warning;
-                                document.getElementById('edit-warning-content-length').textContent = response.content_length.toLocaleString();
-                                document.getElementById('edit-warning-char-limit').textContent = response.char_limit.toLocaleString();
-                                const editWarningModal = new bootstrap.Modal(document.getElementById('editWarningModal'));
-                                editWarningModal.show();
-                            } else {
-                                alert('Error: ' + (response.error || 'Could not update content.'));
-                            }
-                        } catch (e) {
-                            alert('Error parsing server response while saving.');
-                            console.error("Parse error on save:", e, xhr.responseText);
+                fetch("/admin/update_chatbot_content", {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    // First check if the response is ok
+                    console.log("Server response status:", response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("Server response:", data);
+                    if (data.success) {
+                        // Success - update status and redirect after a short delay
+                        statusMsg.className = 'alert alert-success mt-2';
+                        
+                        // Check if content was summarized
+                        if (data.was_summarized) {
+                            statusMsg.innerHTML = `
+                                <i class="bi bi-check-circle"></i> <strong>Content saved successfully!</strong>
+                                <p>${data.warning || 'Content was automatically summarized to fit within the character limit.'}</p>
+                                <div class="progress mt-2 mb-2" style="height: 20px;">
+                                    <div class="progress-bar bg-success" role="progressbar" 
+                                        style="width: ${data.summarization_stats.percent_reduced}%;" 
+                                        aria-valuenow="${data.summarization_stats.percent_reduced}" 
+                                        aria-valuemin="0" aria-valuemax="100">
+                                        ${data.summarization_stats.percent_reduced}% Reduced
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-between text-muted small">
+                                    <span>Original: ${data.summarization_stats.original_length.toLocaleString()} chars</span>
+                                    <span>Final: ${data.summarization_stats.final_length.toLocaleString()} chars</span>
+                                </div>
+                                <p class="mt-2">Redirecting...</p>
+                            `;
+                        } else {
+                            statusMsg.innerHTML = '<i class="bi bi-check-circle"></i> Content saved successfully! Redirecting...';
                         }
+                        
+                        setTimeout(() => {
+                            const editContentModal = bootstrap.Modal.getInstance(document.getElementById('editContentModal'));
+                            if (editContentModal) {
+                                editContentModal.hide();
+                            }
+                            window.location.href = "{{ url_for('admin') }}?message=" + encodeURIComponent('Content has been updated successfully!') + "&message_type=success";
+                        }, 2000);
                     } else {
-                        alert('Error: Could not update content. Status: ' + xhr.statusText);
+                        // Server returned success:false with an error message
+                        statusMsg.className = 'alert alert-danger mt-2';
+                        
+                        if (data.error === "Content too long") {
+                            // Handle character limit error specially
+                            statusMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> <strong>Content too long:</strong> ${data.warning || 'The content exceeds the character limit.'}`;
+                            
+                            // Show character limit details
+                            let limitDetails = document.createElement('div');
+                            limitDetails.innerHTML = `
+                                <div class="mt-2">
+                                    <p>Current length: <strong>${Number(data.content_length).toLocaleString()}</strong> characters</p>
+                                    <p>Character limit: <strong>${Number(data.char_limit).toLocaleString()}</strong> characters</p>
+                                    <div class="d-flex gap-2 mt-2">
+                                        <button class="btn btn-sm btn-warning increase-limit-btn">Increase Limit</button>
+                                        <button class="btn btn-sm btn-primary enable-auto-summarize-btn">Enable Auto-Summarize</button>
+                                    </div>
+                                </div>
+                            `;
+                            statusMsg.appendChild(limitDetails);
+                            
+                            // Add event handlers for the action buttons
+                            statusMsg.querySelector('.increase-limit-btn').addEventListener('click', function() {
+                                const newLimit = Math.min(parseInt(charLimit) + 10000, 100000);
+                                document.getElementById('editCharLimit').value = newLimit;
+                                document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
+                                statusMsg.remove();
+                                // Re-enable the save button
+                                saveButton.disabled = false;
+                                saveButton.innerHTML = '<i class="bi bi-save"></i> Save Changes';
+                            });
+                            
+                            statusMsg.querySelector('.enable-auto-summarize-btn').addEventListener('click', function() {
+                                document.getElementById('editAutoSummarize').checked = true;
+                                statusMsg.remove();
+                                // Re-enable the save button and click it again
+                                saveButton.disabled = false;
+                                saveButton.innerHTML = '<i class="bi bi-save"></i> Save Changes';
+                                saveButton.click();
+                            });
+                        } else {
+                            // Generic error
+                            statusMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> <strong>Error:</strong> ${data.error || 'Could not save content.'}<br>
+                                                 <small>Please try again or check the console for more details.</small>`;
+                            console.error('Error saving content:', data);
+                        }
+                        
+                        // Re-enable the save button for retry
+                        saveButton.disabled = false;
+                        saveButton.innerHTML = '<i class="bi bi-save"></i> Save Changes';
                     }
-                };
-                xhr.onerror = function() {
+                })
+                .catch(error => {
+                    // Network or parsing error
+                    statusMsg.className = 'alert alert-danger mt-2';
+                    statusMsg.innerHTML = `<i class="bi bi-exclamation-triangle"></i> <strong>Error:</strong> ${error.message}<br>
+                                         <small>Please check your network connection and try again.</small>`;
+                    console.error('Error saving content:', error);
+                    
+                    // Re-enable the save button
                     saveButton.disabled = false;
-                    saveButton.textContent = 'Save Changes';
-                    alert('Network error. Please try again.');
-                };
-                
-                xhr.send(formData);
+                    saveButton.innerHTML = '<i class="bi bi-save"></i> Save Changes';
+                });
             });
 
             // Add event listener for the edit increase limit button

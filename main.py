@@ -2121,7 +2121,7 @@ def admin_update_chatbot_content():
             return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
             
         # Check if content exceeds character limit
-        char_limit = chatbot.char_limit or 50000
+        char_limit = int(request.form.get('char_limit', chatbot.char_limit or 50000))
         
         # If content exceeds limit and auto-summarize is enabled, try to summarize
         if len(content) > char_limit:
@@ -2129,7 +2129,25 @@ def admin_update_chatbot_content():
                 logger.info(f"Content exceeded limit ({len(content)} > {char_limit}). Applying automatic summarization.")
                 original_length = len(content)
                 content = smart_text_summarization(content, target_length=int(char_limit * 0.95), max_length=char_limit)
+                
+                # Calculate reduction stats
+                summarization_stats = {
+                    "original_length": original_length,
+                    "final_length": len(content),
+                    "chars_removed": original_length - len(content),
+                    "percent_reduced": round((original_length - len(content)) / original_length * 100, 1)
+                }
+                
                 logger.info(f"Content reduced from {original_length} to {len(content)} characters through automatic summarization.")
+                return jsonify({
+                    "success": True, 
+                    "message": "Chatbot content updated successfully with summarization",
+                    "was_summarized": True,
+                    "warning": f"Content was automatically summarized to fit within the character limit of {char_limit:,} characters.",
+                    "summarization_stats": summarization_stats,
+                    "content_length": len(content),
+                    "char_limit": char_limit
+                })
             else:
                 return jsonify({
                     "success": False, 
@@ -2139,6 +2157,10 @@ def admin_update_chatbot_content():
                     "char_limit": char_limit
                 }), 400
         
+        # Only update the character limit if it's different
+        if chatbot.char_limit != char_limit:
+            chatbot.char_limit = char_limit
+            
         chatbot.content = content
         db.commit()
         
@@ -2223,9 +2245,11 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
             r'(?i)confidential.*?notice.*?\n\n',            # Confidentiality notices
             r'(?i)copyright.*?reserved.*?\n\n',             # Copyright notices
             r'(?i)table of contents.*?\n\n',                # Table of contents markers
-            r'(?i)page \d+ of \d+',                         # Page numbers
+            r'(?i)page \d+ of \d+',                         # Page numbers format 1
+            r'(?i)page\s+\d+',                              # Page numbers format 2 
+            r'(?i)slide\s+\d+',                             # Slide numbers
             r'(?i)this document contains.*?\n\n',           # Document notices
-            r'(?i)(http|https)://\S+',                       # URLs
+            r'(?i)(http|https)://\S+',                      # URLs
             r'(?i)www\.\S+',                                # Web addresses
             r'(?i)email:.*?\n',                             # Email addresses
             r'(?i)tel:.*?\n',                               # Phone numbers
@@ -2233,6 +2257,19 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
             r'(?i)terms and conditions.*?\n\n',             # Terms sections
             r'(?i)for more information.*?\n\n',             # Common footer text
             r'(?i)disclaimer.*?\n\n',                       # Disclaimer sections
+            r'(?i)facilitators?\s+say:',                    # Facilitator instructions
+            r'(?i)facilitators?\s+notes?:',                 # Facilitator notes
+            r'(?i)notes?\s+to\s+facilitators?:',            # Notes to facilitator
+            r'(?i)course\s+materials?:',                    # Course materials heading
+            r'(?i)recommended\s+equipment:',                # Equipment list heading
+            r'(?i)session\s+outline:',                      # Session outline heading
+            r'(?i)^\s*\d+\.\d+\.\d+\s+',                   # Detailed numbering schemes
+            r'(?i)header\s*\d*\s*:',                        # Header indicators
+            r'(?i)footer\s*\d*\s*:',                        # Footer indicators
+            r'(?i)\[\s*end\s+of\s+\w+\s*\]',                # End markers
+            r'(?im)^\s*[\d\.]+\s+agenda\s*$',               # Agenda numbered headers
+            r'(?im)^\s*[\d\.]+\s+purpose\s*$',              # Purpose numbered headers
+            r'(?im)^\s*[\d\.]+\s+overview\s*$',             # Overview numbered headers
         ]
         
         for pattern in patterns_to_remove:
@@ -2251,8 +2288,18 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
         content_hashes = set()
         
         for para in paragraphs:
+            # Skip very short paragraphs that are likely just numbers or formatting
+            if len(para.strip()) < 5:
+                continue
+                
             # Create a simple hash of paragraph content
-            para_hash = hashlib.md5(para.lower().strip().encode()).hexdigest()
+            # Normalize for better duplicate detection
+            normalized_para = re.sub(r'[\d\s,\.\(\)]', '', para.lower().strip())
+            if len(normalized_para) < 10:  # If normalized content is too small, it's likely not meaningful
+                unique_paragraphs.append(para)
+                continue
+                
+            para_hash = hashlib.md5(normalized_para.encode()).hexdigest()
             if para_hash not in content_hashes:
                 content_hashes.add(para_hash)
                 unique_paragraphs.append(para)
@@ -2273,6 +2320,8 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
             (r'(?i)bibliography.*?$', r'(?i)\n+[^\n]*?bibliography.*?\n'),
             (r'(?i)notes.*?$', r'(?i)\n+[^\n]*?notes.*?\n'),
             (r'(?i)footnotes.*?$', r'(?i)\n+[^\n]*?footnotes.*?\n'),
+            (r'(?i)attachment.*?$', r'(?i)\n+[^\n]*?attachment.*?\n'),
+            (r'(?i)exhibit.*?$', r'(?i)\n+[^\n]*?exhibit.*?\n'),
         ]
         
         for section_pattern, section_start in sections_to_trim:
@@ -2281,18 +2330,44 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
                 if match:
                     end_pos = match.start()
                     remaining_text = cleaned_text[:end_pos].strip()
-                    appendix_notice = "\n\n[Content truncated to fit within character limit]"
+                    appendix_notice = "\n\n[Content truncated: supplementary sections removed]"
                     cleaned_text = remaining_text + appendix_notice
                     current_length = len(cleaned_text)
                     logger.info(f"After trimming section: {current_length} characters ({original_length - current_length} removed)")
                     
                     if current_length <= target_length:
                         return cleaned_text
+                        
+    # Step 5: Remove repetitive phrases and instructions
+    if current_length > target_length:
+        # Define patterns for repetitive or instructional content
+        repetitive_patterns = [
+            (r'(?i)activity\s+\d+\s*:\s*[^\n]+\n', '[Activity description removed]\n'),
+            (r'(?i)exercise\s+\d+\s*:\s*[^\n]+\n', '[Exercise description removed]\n'),
+            (r'(?i)task\s+\d+\s*:\s*[^\n]+\n', '[Task description removed]\n'),
+            (r'(?i)step\s+\d+\s*:\s*[^\n]+\n', '[Step description removed]\n'),
+            (r'(?i)instructions?\s*:\s*[^\n]+\n', '[Instructions removed]\n'),
+            (r'(?i)guidelines?\s*:\s*[^\n]+\n', '[Guidelines removed]\n'),
+            (r'(?i)note\s+to\s+learners?\s*:\s*[^\n]+\n', ''),
+            (r'(?i)\[\s*begin\s+activity\s*\][^\[]*\[\s*end\s+activity\s*\]', '[Activity content removed]'),
+            (r'(?i)objectives?\s*:\s*\n(?:\s*[-•]\s*[^\n]+\n)+', '[Objectives section removed]\n'),
+            (r'(?i)materials?\s+needed\s*:\s*\n(?:\s*[-•]\s*[^\n]+\n)+', '[Materials list removed]\n'),
+            (r'(?i)key\s+points\s*:\s*\n(?:\s*[-•]\s*[^\n]+\n)+', '[Key points section removed]\n'),
+        ]
+        
+        for pattern, replacement in repetitive_patterns:
+            cleaned_text = re.sub(pattern, replacement, cleaned_text)
+            
+        current_length = len(cleaned_text)
+        logger.info(f"After removing repetitive content: {current_length} characters ({original_length - current_length} removed)")
+            
+        if current_length <= target_length:
+            return cleaned_text
     
-    # Step 5: More aggressive content reduction for very large content 
-    if current_length > target_length and current_length > target_length * 2:
-        # For very large content, extract key sections only
-        logger.info(f"Content still too large ({current_length} chars). Applying aggressive summarization.")
+    # Step 6: More aggressive content reduction for very large content 
+    if current_length > target_length and current_length > target_length * 1.5:
+        # For very large content, preserve document structure but reduce detail
+        logger.info(f"Content still too large ({current_length} chars). Applying structural summarization.")
         
         paragraphs = cleaned_text.split('\n\n')
         
@@ -2300,38 +2375,77 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
         intro_count = max(3, int(len(paragraphs) * 0.1))
         # Keep conclusion (last 10% of paragraphs)
         conclusion_count = max(3, int(len(paragraphs) * 0.1))
-        # Take some paragraphs from the middle
-        middle_count = max(5, int((target_length - (len('\n\n'.join(paragraphs[:intro_count])) + 
-                                              len('\n\n'.join(paragraphs[-conclusion_count:])) + 
-                                              100)) / 
-                                  (sum(len(p) for p in paragraphs[intro_count:-conclusion_count]) / 
-                                   len(paragraphs[intro_count:-conclusion_count]))))
+        
+        # Estimate how many paragraphs we need from the middle
+        total_intro_conclusion_length = len('\n\n'.join(paragraphs[:intro_count] + paragraphs[-conclusion_count:]))
+        remaining_target = target_length - total_intro_conclusion_length - 100  # 100 chars buffer for section markers
         
         # Select paragraphs evenly distributed from the middle
-        if len(paragraphs) > intro_count + conclusion_count + middle_count and middle_count > 0:
-            middle_indices = []
-            step = (len(paragraphs) - intro_count - conclusion_count) / (middle_count + 1)
-            for i in range(1, middle_count + 1):
-                idx = intro_count + int(i * step)
-                if idx < len(paragraphs) - conclusion_count:
-                    middle_indices.append(idx)
+        if len(paragraphs) > intro_count + conclusion_count and remaining_target > 0:
+            # Calculate how many paragraphs we can fit
+            middle_paragraphs = paragraphs[intro_count:-conclusion_count] if conclusion_count > 0 else paragraphs[intro_count:]
             
-            selected_paragraphs = paragraphs[:intro_count]
-            if middle_indices:
-                selected_paragraphs.append("\n\n[...content summarized...]\n\n")
-                for idx in middle_indices:
-                    selected_paragraphs.append(paragraphs[idx])
-            selected_paragraphs.append("\n\n[...content summarized...]\n\n")
-            selected_paragraphs.extend(paragraphs[-conclusion_count:])
+            # First try to keep paragraph headers and key concepts
+            key_paragraphs = []
+            for para in middle_paragraphs:
+                # Check if paragraph is a header (short with title case or caps)
+                is_header = len(para.strip()) < 50 and (
+                    para.strip().istitle() or 
+                    para.strip().isupper() or 
+                    re.match(r'^[A-Z][\w\s]+:', para.strip())
+                )
+                
+                # Check for key concept indicators
+                has_key_indicators = any(indicator in para.lower() for indicator in [
+                    "key point", "important", "critical", "essential", "remember", 
+                    "concept", "principle", "main idea", "core", "fundamental"
+                ])
+                
+                if is_header or has_key_indicators:
+                    key_paragraphs.append(para)
             
-            cleaned_text = '\n\n'.join(selected_paragraphs)
+            # Get the total length of key paragraphs
+            key_paragraphs_length = sum(len(p) for p in key_paragraphs) + (len(key_paragraphs) * 2)  # +2 for each \n\n
+            
+            # If we have room for additional paragraphs beyond key ones
+            remaining_length = remaining_target - key_paragraphs_length
+            if remaining_length > 0 and len(middle_paragraphs) > len(key_paragraphs):
+                # Filter out paragraphs we already selected
+                remaining_paragraphs = [p for p in middle_paragraphs if p not in key_paragraphs]
+                
+                # Calculate how many more we can include
+                avg_para_length = sum(len(p) for p in remaining_paragraphs) / len(remaining_paragraphs)
+                additional_paras_count = int(remaining_length / (avg_para_length + 2))  # +2 for \n\n
+                
+                # Select additional paragraphs evenly distributed
+                if additional_paras_count > 0:
+                    step = len(remaining_paragraphs) / additional_paras_count
+                    indices = [int(i * step) for i in range(additional_paras_count)]
+                    additional_paras = [remaining_paragraphs[i] for i in indices if i < len(remaining_paragraphs)]
+                    key_paragraphs.extend(additional_paras)
+            
+            # Combine all selected paragraphs in proper order
+            all_middle_indices = [(middle_paragraphs.index(p), p) for p in key_paragraphs]
+            all_middle_indices.sort()  # Sort by original position
+            middle_selected = [p for _, p in all_middle_indices]
+            
+            # Final combination with introduction and conclusion
+            final_paragraphs = paragraphs[:intro_count]
+            if middle_selected:
+                final_paragraphs.append("\n[...content summarized...]\n")
+                final_paragraphs.extend(middle_selected)
+            final_paragraphs.append("\n[...content summarized...]\n")
+            if conclusion_count > 0:
+                final_paragraphs.extend(paragraphs[-conclusion_count:])
+            
+            cleaned_text = '\n\n'.join(final_paragraphs)
             current_length = len(cleaned_text)
-            logger.info(f"After aggressive summarization: {current_length} characters ({original_length - current_length} removed)")
+            logger.info(f"After structural summarization: {current_length} characters ({original_length - current_length} removed)")
             
             if current_length <= target_length:
                 return cleaned_text
     
-    # Step 6: If still too long, do proportional reduction
+    # Step 7: If still too long, do proportional reduction
     if current_length > target_length:
         # Calculate how much we need to reduce each paragraph
         paragraphs = cleaned_text.split('\n\n')
@@ -2417,7 +2531,6 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
         logger.info(f"After final truncation: {current_length} characters ({original_length - current_length} removed)")
     
     # Return the cleaned text, which should now be under max_length
-    logger.info(f"Summarization complete: Reduced from {original_length} to {len(cleaned_text)} characters")
     return cleaned_text
 
 if __name__ == '__main__':

@@ -131,6 +131,11 @@
                                     <i class="bi bi-database"></i> Database Statistics
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="data-mgmt-tab" data-bs-toggle="tab" data-bs-target="#data-mgmt-content" type="button" role="tab" aria-controls="data-mgmt-content" aria-selected="false">
+                                    <i class="bi bi-table"></i> Data Management
+                                </button>
+                            </li>
                         </ul>
                         
                         <!-- Tab Content -->
@@ -517,6 +522,134 @@
                                             {% else %}
                                                 <div class="alert alert-info">No deleted chatbots found.</div>
                                             {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- DATA MANAGEMENT TAB -->
+                            <div class="tab-pane fade" id="data-mgmt-content" role="tabpanel" aria-labelledby="data-mgmt-tab">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-light">
+                                        <h4 class="mb-0">Data Management</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Subtabs -->
+                                        <ul class="nav nav-tabs mb-3" id="dataMgmtTabs" role="tablist">
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link active" id="users-mgmt-tab" data-bs-toggle="tab" data-bs-target="#users-mgmt" type="button" role="tab">User Management</button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link" id="convo-logs-tab" data-bs-toggle="tab" data-bs-target="#convo-logs" type="button" role="tab">Conversation Logs</button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link" id="download-tab" data-bs-toggle="tab" data-bs-target="#download-data" type="button" role="tab">Download</button>
+                                            </li>
+                                        </ul>
+                                        <div class="tab-content" id="dataMgmtTabsContent">
+                                            <!-- User Management -->
+                                            <div class="tab-pane fade show active" id="users-mgmt" role="tabpanel">
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <h5>User List</h5>
+                                                    <button class="btn btn-primary btn-sm">Add User</button>
+                                                </div>
+                                                <div class="table-responsive">
+                                                    <table class="table table-striped">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>ID</th>
+                                                                <th>Name</th>
+                                                                <th>Email</th>
+                                                                <th>Visit Count</th>
+                                                                <th>Current Program</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% for user in users %}
+                                                            <tr>
+                                                                <td>{{ user.id }}</td>
+                                                                <td>{{ user.last_name }}</td>
+                                                                <td>{{ user.email }}</td>
+                                                                <td>{{ user.visit_count }}</td>
+                                                                <td>{{ user.current_program }}</td>
+                                                                <td>
+                                                                    <button class="btn btn-sm btn-info">Edit</button>
+                                                                    <button class="btn btn-sm btn-danger">Delete</button>
+                                                                </td>
+                                                            </tr>
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <!-- Conversation Logs -->
+                                            <div class="tab-pane fade" id="convo-logs" role="tabpanel">
+                                                <div class="d-flex justify-content-between mb-2 align-items-center">
+                                                    <h5>Conversation Logs (Paired)</h5>
+                                                    <div class="d-flex gap-2">
+                                                        <input type="text" class="form-control form-control-sm" id="searchConvoInput" placeholder="Search messages..." value="{{ search_term if search_term else '' }}">
+                                                        <select class="form-select form-select-sm" id="chatbotConvoFilter">
+                                                            <option value="">All Chatbots</option>
+                                                            {% for chatbot in available_chatbots %}
+                                                            <option value="{{ chatbot.code }}" {% if chatbot.code == selected_chatbot_code %}selected{% endif %}>{{ chatbot.name }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                        <button class="btn btn-sm btn-primary" onclick="applyConvoFilters()">Search</button>
+                                                    </div>
+                                                </div>
+                                                <div class="table-responsive">
+                                                    <table class="table table-striped table-bordered">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th scope="col">User</th>
+                                                                <th scope="col">Chatbot</th>
+                                                                <th scope="col">User Question</th>
+                                                                <th scope="col">Bot Reply</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="convoLogsTable">
+                                                            {% if conversations %}
+                                                                {% for conv_pair in conversations %}
+                                                                <tr>
+                                                                    <td>
+                                                                        {{ conv_pair.user_name }} ({{ conv_pair.user_email }})
+                                                                        <br><small class="text-muted">{{ conv_pair.user_timestamp }}</small>
+                                                                    </td>
+                                                                    <td>{{ conv_pair.chatbot_name }}</td>
+                                                                    <td style="word-wrap: break-word; min-width: 250px; max-width: 350px;">
+                                                                        {{ conv_pair.user_message }}
+                                                                    </td>
+                                                                    <td style="word-wrap: break-word; min-width: 250px; max-width: 350px;">
+                                                                        {{ conv_pair.bot_message }}
+                                                                        {% if conv_pair.bot_timestamp != 'N/A' %}
+                                                                        <br><small class="text-muted">{{ conv_pair.bot_timestamp }}</small>
+                                                                        {% endif %}
+                                                                    </td>
+                                                                </tr>
+                                                                {% endfor %}
+                                                            {% else %}
+                                                                <tr><td colspan="4" class="text-center">No conversation logs found or matching current filters.</td></tr>
+                                                            {% endif %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <!-- Download -->
+                                            <div class="tab-pane fade" id="download-data" role="tabpanel">
+                                                <h5>Download Data</h5>
+                                                <p>Export user data or conversation logs in CSV or Excel format.</p>
+                                                <div class="mb-3">
+                                                    <h6>Users</h6>
+                                                    <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=users&format=csv'">Users (CSV)</button>
+                                                    <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=users&format=excel'">Users (Excel)</button>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <h6>Conversations (Raw Log)</h6>
+                                                    <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=conversations&format=csv'">Conversations (CSV)</button>
+                                                    <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=conversations&format=excel'">Conversations (Excel)</button>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1548,6 +1681,41 @@
                     bar.setAttribute('aria-valuenow', width);
                 }
             });
+        });
+
+        function applyConvoFilters() {
+            const searchTerm = document.getElementById('searchConvoInput').value;
+            const chatbotCode = document.getElementById('chatbotConvoFilter').value;
+            
+            // Construct the query parameters for the current admin page, adding search filters
+            const url = new URL(window.location.href);
+            if (searchTerm) url.searchParams.set('search_term', searchTerm);
+            else url.searchParams.delete('search_term');
+            
+            if (chatbotCode) url.searchParams.set('chatbot_code', chatbotCode);
+            else url.searchParams.delete('chatbot_code');
+            
+            // Reload the page with new filters
+            window.location.href = url.toString();
+        }
+
+        // Function to parse URL parameters and apply filters on page load (optional, if you want to keep filters in URL)
+        // This would require modifying the 'admin' route in main.py to accept these parameters and filter data accordingly.
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const searchTerm = urlParams.get('search_term');
+            const chatbotCode = urlParams.get('chatbot_code');
+            
+            if (searchTerm) {
+                document.getElementById('searchConvoInput').value = searchTerm;
+            }
+            if (chatbotCode) {
+                document.getElementById('chatbotConvoFilter').value = chatbotCode;
+            }
+            
+            // If you implement server-side filtering based on these URL params,
+            // the table will be pre-filtered on load.
+            // Otherwise, this just sets the input values.
         });
     </script>
 </body>

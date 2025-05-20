@@ -104,7 +104,8 @@ def get_embedding(text):
             model="text-embedding-3-small",
             input=normalized_text
         )
-        embedding = response['data'][0]['embedding']
+        # Ensure embedding is a standard list to avoid method_descriptor errors
+        embedding = list(response['data'][0]['embedding'])
         
         # Store in cache
         with embedding_lock:
@@ -170,17 +171,18 @@ def find_similar_question(user_message, content_hash):
         if question_embedding is None:
             continue
         
-        # Calculate cosine similarity
-        similarity = cosine_similarity(
-            np.array([new_embedding]), 
-            np.array([question_embedding])
-        )[0][0]
-        
-        # If similarity exceeds threshold and is better than previous best, update
-        if similarity >= SIMILARITY_THRESHOLD and similarity > best_similarity:
-            best_similarity = similarity
-            best_question = question
-            logger.debug(f"Found similar question: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
+        try:
+            # Use custom cosine similarity function instead of scikit-learn's
+            similarity = custom_cosine_similarity(new_embedding, question_embedding)
+            
+            # If similarity exceeds threshold and is better than previous best, update
+            if similarity >= SIMILARITY_THRESHOLD and similarity > best_similarity:
+                best_similarity = similarity
+                best_question = question
+                logger.debug(f"Found similar question: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
+        except Exception as e:
+            logger.error(f"Error calculating similarity between embeddings: {str(e)}")
+            continue
     
     # Store in similar questions cache
     similar_questions_cache[cache_key] = best_question
@@ -730,8 +732,8 @@ def chat():
 
         # Count today's messages for this user and program
         today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.time.min)
-        today_end = datetime.combine(today, datetime.time.max)
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
         
         message_count = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
@@ -773,11 +775,16 @@ def chat():
         # If no exact match, try to find semantically similar question
         if not chatbot_reply:
             cache_result = "semantic_match"
-            similar_question = find_similar_question(user_message, content_hash)
-            if similar_question:
-                logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
-                chatbot_reply = get_cached_response(content_hash, similar_question)
-                logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
+            try:
+                similar_question = find_similar_question(user_message, content_hash)
+                if similar_question:
+                    logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
+                    chatbot_reply = get_cached_response(content_hash, similar_question)
+                    logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
+            except Exception as e:
+                logger.error(f"Error finding similar question: {str(e)}")
+                # Continue without similar questions if this fails
+                similar_question = None
         
         # If no cached response at all, get new response
         if not chatbot_reply:
@@ -838,7 +845,7 @@ def chat():
         if 'db' in locals():
             db.rollback()
         logger.error(f"Error in chat endpoint: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An error occurred while processing your request. Please try again."}), 500
     finally:
         close_db(db)
 
@@ -960,10 +967,10 @@ def export_page():
     return render_template('export.html', show_admin_link=True)
 
 def get_paired_conversations(db, page=1, per_page=10):
-    """Fetch and pair user questions with subsequent bot answers."""
-    # Use timestamp DESC to get the most recent conversations first
+    """Fetch and pair user questions with subsequent bot answers (robust version, ascending order)."""
+    # Use timestamp ASC to get the oldest conversations first
     history_query = db.query(ChatHistory).order_by(
-        ChatHistory.timestamp.desc()
+        ChatHistory.timestamp.asc()
     )
 
     # Calculate total count for pagination
@@ -972,13 +979,13 @@ def get_paired_conversations(db, page=1, per_page=10):
     
     # Apply pagination
     offset = (page - 1) * per_page
-    history = history_query.offset(offset).limit(per_page * 2).all()  # Fetch a bit more to ensure pairs
+    history = history_query.offset(offset).limit(per_page * 10).all()  # Fetch more to ensure pairs
 
     paired_conversations = []
+    used_bot_ids = set()
     i = 0
     while i < len(history):
         current_msg = history[i]
-        
         if current_msg.sender == 'user':
             user_obj = db.query(User).filter(User.id == current_msg.user_id).first()
             chatbot_obj = db.query(ChatbotContent).filter(ChatbotContent.code == current_msg.program_code).first()
@@ -997,98 +1004,103 @@ def get_paired_conversations(db, page=1, per_page=10):
                 'bot_message': 'No reply found.'
             }
 
-            # Look for the next message if it's a bot reply
-            if (i + 1) < len(history):
-                next_msg = history[i+1]
-                if next_msg.sender == 'bot' and \
-                   next_msg.user_id == current_msg.user_id and \
-                   next_msg.program_code == current_msg.program_code:
-                    # It's a direct bot reply to this user's message in the same session context
+            # Find the next bot reply for this user/program that hasn't been paired yet
+            for j in range(i+1, len(history)):
+                next_msg = history[j]
+                if (
+                    next_msg.sender == 'bot' and
+                    next_msg.user_id == current_msg.user_id and
+                    next_msg.program_code == current_msg.program_code and
+                    next_msg.id not in used_bot_ids and
+                    next_msg.timestamp > current_msg.timestamp
+                ):
                     pair_data['bot_timestamp'] = next_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if next_msg.timestamp else 'N/A'
                     pair_data['bot_message'] = next_msg.message
-                    i += 1 # Consume the bot message, so the next loop starts after this bot message
-            
+                    used_bot_ids.add(next_msg.id)
+                    break
+
             paired_conversations.append(pair_data)
-        i += 1 # Move to the next message
-        
-        # Stop when we have enough pairs for this page
+        i += 1
         if len(paired_conversations) >= per_page:
             break
-        
     return paired_conversations, total_pages, page
 
 @app.route('/admin')
 @requires_auth
 def admin():
-    available_chatbots = get_available_chatbots()
-    deleted_chatbots = get_deleted_chatbots()
-    db_stats = get_database_size()
-    alerts = check_database_limits()
-    
-    # For Data Management Tab - User List
-    users_list = get_all_users() 
-
-    # Get pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-
-    # For Data Management Tab - Paired Conversation Logs
-    paired_conversations_log, total_pages, current_page = get_paired_conversations(
-        get_db(), page=page, per_page=per_page
-    )
-
-    conversation_stats_overall = get_conversation_statistics() # General stats
-    top_users_list = get_top_users(limit=5)
-    top_chatbots_list = get_top_chatbots(limit=5)
-    
-    message = request.args.get('message')
-    message_type = request.args.get('message_type', 'info')
-    
-    # Search/filter parameters from URL for conversation logs
-    search_term_param = request.args.get('search_term', None)
-    chatbot_code_param = request.args.get('chatbot_code', None)
-
-    # If search parameters are present, filter the conversations
-    if search_term_param or chatbot_code_param:
-        temp_filtered_convos = []
-        for p_conv in paired_conversations_log:
-            match_search = True
-            if search_term_param and not (search_term_param.lower() in p_conv['user_message'].lower() or search_term_param.lower() in p_conv['bot_message'].lower()):
-                match_search = False
-            
-            match_chatbot = True
-            if chatbot_code_param:
-                is_correct_chatbot = False
-                for cb in available_chatbots:
-                    if cb['code'] == chatbot_code_param and p_conv['chatbot_name'] == cb['name']:
-                        is_correct_chatbot = True
-                        break
-                if not is_correct_chatbot:
-                     match_chatbot = False
-
-            if match_search and match_chatbot:
-                temp_filtered_convos.append(p_conv)
-        paired_conversations_log = temp_filtered_convos
+    db = get_db()
+    try:
+        available_chatbots = get_available_chatbots()
+        deleted_chatbots = get_deleted_chatbots()
+        db_stats = get_database_size()
+        alerts = check_database_limits()
         
-    return render_template('admin.html', 
-                          available_chatbots=available_chatbots, 
-                          deleted_chatbots=deleted_chatbots,
-                          message=message,
-                          message_type=message_type,
-                          db_stats=db_stats,
-                          alerts=alerts,
-                          users=users_list,
-                          conversations=paired_conversations_log,
-                          conversation_stats=conversation_stats_overall,
-                          top_users=top_users_list,
-                          top_chatbots=top_chatbots_list,
-                          search_term=search_term_param,
-                          selected_chatbot_code=chatbot_code_param,
-                          pagination={
-                              'total_pages': total_pages,
-                              'current_page': current_page,
-                              'per_page': per_page
-                          })
+        # For Data Management Tab - User List
+        users_list = get_all_users() 
+
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        # For Data Management Tab - Paired Conversation Logs
+        paired_conversations_log, total_pages, current_page = get_paired_conversations(
+            db, page=page, per_page=per_page
+        )
+
+        conversation_stats_overall = get_conversation_statistics() # General stats
+        top_users_list = get_top_users(limit=5)
+        top_chatbots_list = get_top_chatbots(limit=5)
+        
+        message = request.args.get('message')
+        message_type = request.args.get('message_type', 'info')
+        
+        # Search/filter parameters from URL for conversation logs
+        search_term_param = request.args.get('search_term', None)
+        chatbot_code_param = request.args.get('chatbot_code', None)
+
+        # If search parameters are present, filter the conversations
+        if search_term_param or chatbot_code_param:
+            temp_filtered_convos = []
+            for p_conv in paired_conversations_log:
+                match_search = True
+                if search_term_param and not (search_term_param.lower() in p_conv['user_message'].lower() or search_term_param.lower() in p_conv['bot_message'].lower()):
+                    match_search = False
+                
+                match_chatbot = True
+                if chatbot_code_param:
+                    is_correct_chatbot = False
+                    for cb in available_chatbots:
+                        if cb['code'] == chatbot_code_param and p_conv['chatbot_name'] == cb['name']:
+                            is_correct_chatbot = True
+                            break
+                    if not is_correct_chatbot:
+                         match_chatbot = False
+
+                if match_search and match_chatbot:
+                    temp_filtered_convos.append(p_conv)
+            paired_conversations_log = temp_filtered_convos
+            
+        return render_template('admin.html', 
+                              available_chatbots=available_chatbots, 
+                              deleted_chatbots=deleted_chatbots,
+                              message=message,
+                              message_type=message_type,
+                              db_stats=db_stats,
+                              alerts=alerts,
+                              users=users_list,
+                              conversations=paired_conversations_log,
+                              conversation_stats=conversation_stats_overall,
+                              top_users=top_users_list,
+                              top_chatbots=top_chatbots_list,
+                              search_term=search_term_param,
+                              selected_chatbot_code=chatbot_code_param,
+                              pagination={
+                                  'total_pages': total_pages,
+                                  'current_page': current_page,
+                                  'per_page': per_page
+                              })
+    finally:
+        close_db(db)
 
 @app.route('/admin/export_data')
 @requires_auth
@@ -1907,6 +1919,30 @@ def admin_update_chatbot_content():
         return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if db: close_db(db)
+
+# Custom cosine similarity function to avoid scikit-learn dependency issues
+def custom_cosine_similarity(a, b):
+    """Calculate cosine similarity between two vectors"""
+    # Convert inputs to numpy arrays if they aren't already
+    a = np.array(a, dtype=np.float64)
+    b = np.array(b, dtype=np.float64)
+    
+    # Ensure vectors are flattened
+    a = a.flatten()
+    b = b.flatten()
+    
+    # Calculate dot product
+    dot_product = np.dot(a, b)
+    
+    # Calculate magnitudes
+    magnitude_a = np.sqrt(np.sum(np.square(a)))
+    magnitude_b = np.sqrt(np.sum(np.square(b)))
+    
+    # Calculate cosine similarity
+    if magnitude_a == 0 or magnitude_b == 0:
+        return 0  # Avoid division by zero
+    else:
+        return dot_product / (magnitude_a * magnitude_b)
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

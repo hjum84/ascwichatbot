@@ -3,7 +3,7 @@ werkzeug==2.2.3
 python-dotenv==1.0.0
 sqlalchemy==2.0.9
 openai==0.27.8
-smartsheet-python-sdk==2.177.0
+smartsheet-python-sdk==2.177.1
 pandas==1.5.3
 numpy==1.24.2
 scikit-learn==1.2.2

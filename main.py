@@ -959,21 +959,24 @@ def export_page():
     # Add admin page to the routes available from export page
     return render_template('export.html', show_admin_link=True)
 
-def get_paired_conversations(db, limit=50):
+def get_paired_conversations(db, page=1, per_page=10):
     """Fetch and pair user questions with subsequent bot answers."""
-    # Fetching a bit more to ensure we can form pairs up to the limit
-    # Order by user, program, then timestamp to correctly pair.
+    # Use timestamp DESC to get the most recent conversations first
     history_query = db.query(ChatHistory).order_by(
-        ChatHistory.user_id, ChatHistory.program_code, ChatHistory.timestamp
+        ChatHistory.timestamp.desc()
     )
-    # If we want to limit based on raw messages initially:
-    # history = history_query.limit(limit * 2 + 50).all() # Fetch more to ensure enough pairs
 
-    history = history_query.all() # Fetch all for now, then slice pairs
+    # Calculate total count for pagination
+    total_count = history_query.count()
+    total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
+    
+    # Apply pagination
+    offset = (page - 1) * per_page
+    history = history_query.offset(offset).limit(per_page * 2).all()  # Fetch a bit more to ensure pairs
 
     paired_conversations = []
     i = 0
-    while i < len(history) and len(paired_conversations) < limit:
+    while i < len(history):
         current_msg = history[i]
         
         if current_msg.sender == 'user':
@@ -1008,7 +1011,11 @@ def get_paired_conversations(db, limit=50):
             paired_conversations.append(pair_data)
         i += 1 # Move to the next message
         
-    return paired_conversations
+        # Stop when we have enough pairs for this page
+        if len(paired_conversations) >= per_page:
+            break
+        
+    return paired_conversations, total_pages, page
 
 @app.route('/admin')
 @requires_auth
@@ -1021,9 +1028,14 @@ def admin():
     # For Data Management Tab - User List
     users_list = get_all_users() 
 
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+
     # For Data Management Tab - Paired Conversation Logs
-    # The 'conversations' variable should now hold paired data for the specific view
-    paired_conversations_log = get_paired_conversations(get_db(), limit=50) # Pass db session
+    paired_conversations_log, total_pages, current_page = get_paired_conversations(
+        get_db(), page=page, per_page=per_page
+    )
 
     conversation_stats_overall = get_conversation_statistics() # General stats
     top_users_list = get_top_users(limit=5)
@@ -1036,11 +1048,8 @@ def admin():
     search_term_param = request.args.get('search_term', None)
     chatbot_code_param = request.args.get('chatbot_code', None)
 
-    # If search parameters are present, you might want to filter paired_conversations_log further
-    # For now, this example passes all fetched pairs; filtering can be added here or in get_paired_conversations
+    # If search parameters are present, filter the conversations
     if search_term_param or chatbot_code_param:
-        # Example: Basic filtering (can be much more sophisticated)
-        # This is a simple client-side like filtering, ideally done in DB query in get_paired_conversations
         temp_filtered_convos = []
         for p_conv in paired_conversations_log:
             match_search = True
@@ -1048,15 +1057,10 @@ def admin():
                 match_search = False
             
             match_chatbot = True
-            # Assuming chatbot_obj.code was stored or can be derived for p_conv if needed for filtering
-            # For simplicity, let's say chatbot_name in p_conv can be used if available_chatbots has 'code'
             if chatbot_code_param:
-                # This requires chatbot_code to be part of p_conv or mapping display name back to code
-                # For now, this filter part might not work perfectly without `chatbot_code` in `p_conv`
-                # A better way is to pass filter params to get_paired_conversations
                 is_correct_chatbot = False
                 for cb in available_chatbots:
-                    if cb['code'] == chatbot_code_param and p_conv['chatbot_name'] == cb['name']: # Compare code with code
+                    if cb['code'] == chatbot_code_param and p_conv['chatbot_name'] == cb['name']:
                         is_correct_chatbot = True
                         break
                 if not is_correct_chatbot:
@@ -1067,19 +1071,24 @@ def admin():
         paired_conversations_log = temp_filtered_convos
         
     return render_template('admin.html', 
-                           available_chatbots=available_chatbots, 
-                           deleted_chatbots=deleted_chatbots,
-                           message=message,
-                           message_type=message_type,
-                           db_stats=db_stats,
-                           alerts=alerts,
-                           users=users_list, # Renamed for clarity in template
-                           conversations=paired_conversations_log, # This now sends paired conversations
-                           conversation_stats=conversation_stats_overall, # General stats
-                           top_users=top_users_list, # Renamed
-                           top_chatbots=top_chatbots_list, # Renamed
-                           search_term=search_term_param, # Pass search terms back to template
-                           selected_chatbot_code=chatbot_code_param)
+                          available_chatbots=available_chatbots, 
+                          deleted_chatbots=deleted_chatbots,
+                          message=message,
+                          message_type=message_type,
+                          db_stats=db_stats,
+                          alerts=alerts,
+                          users=users_list,
+                          conversations=paired_conversations_log,
+                          conversation_stats=conversation_stats_overall,
+                          top_users=top_users_list,
+                          top_chatbots=top_chatbots_list,
+                          search_term=search_term_param,
+                          selected_chatbot_code=chatbot_code_param,
+                          pagination={
+                              'total_pages': total_pages,
+                              'current_page': current_page,
+                              'per_page': per_page
+                          })
 
 @app.route('/admin/export_data')
 @requires_auth

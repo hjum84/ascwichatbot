@@ -640,7 +640,7 @@
                                                     <ul class="pagination justify-content-center">
                                                         <!-- Previous page button -->
                                                         <li class="page-item {% if pagination.current_page == 1 %}disabled{% endif %}">
-                                                            <a class="page-link" href="{{ url_for('admin', page=pagination.current_page-1, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}" aria-label="Previous">
+                                                            <a class="page-link" href="{{ url_for('admin', page=pagination.current_page-1, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}#data-mgmt-content-convo-logs" aria-label="Previous">
                                                                 <span aria-hidden="true">&laquo;</span>
                                                             </a>
                                                         </li>
@@ -649,7 +649,7 @@
                                                         {% for page_num in range(1, pagination.total_pages + 1) %}
                                                             {% if page_num == 1 or page_num == pagination.total_pages or (page_num >= pagination.current_page - 2 and page_num <= pagination.current_page + 2) %}
                                                                 <li class="page-item {% if page_num == pagination.current_page %}active{% endif %}">
-                                                                    <a class="page-link" href="{{ url_for('admin', page=page_num, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}">{{ page_num }}</a>
+                                                                    <a class="page-link" href="{{ url_for('admin', page=page_num, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}#data-mgmt-content-convo-logs">{{ page_num }}</a>
                                                                 </li>
                                                             {% elif page_num == pagination.current_page - 3 or page_num == pagination.current_page + 3 %}
                                                                 <li class="page-item disabled">
@@ -660,7 +660,7 @@
                                                         
                                                         <!-- Next page button -->
                                                         <li class="page-item {% if pagination.current_page == pagination.total_pages %}disabled{% endif %}">
-                                                            <a class="page-link" href="{{ url_for('admin', page=pagination.current_page+1, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}" aria-label="Next">
+                                                            <a class="page-link" href="{{ url_for('admin', page=pagination.current_page+1, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}#data-mgmt-content-convo-logs" aria-label="Next">
                                                                 <span aria-hidden="true">&raquo;</span>
                                                             </a>
                                                         </li>
@@ -1719,6 +1719,21 @@
                     bar.setAttribute('aria-valuenow', width);
                 }
             });
+
+            // Auto-activate Data Management > Conversation Logs tab if anchor is present
+            if (window.location.hash) {
+                const hash = window.location.hash.replace('#', '');
+                if (hash === 'data-mgmt-content-convo-logs') {
+                    // Activate Data Management main tab
+                    var mainTab = document.querySelector('button[data-bs-target="#data-mgmt-content"]');
+                    if (mainTab) mainTab.click();
+                    // Activate Conversation Logs sub-tab after a short delay
+                    setTimeout(function() {
+                        var subTab = document.querySelector('button[data-bs-target="#convo-logs"]');
+                        if (subTab) subTab.click();
+                    }, 200);
+                }
+            }
         });
 
         function applyConvoFilters() {

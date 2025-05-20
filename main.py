@@ -967,20 +967,12 @@ def export_page():
     return render_template('export.html', show_admin_link=True)
 
 def get_paired_conversations(db, page=1, per_page=10):
-    """Fetch and pair user questions with subsequent bot answers (robust version, ascending order)."""
-    # Use timestamp ASC to get the oldest conversations first
-    history_query = db.query(ChatHistory).order_by(
-        ChatHistory.timestamp.asc()
-    )
-
-    # Calculate total count for pagination
+    # 최신순 정렬
+    history_query = db.query(ChatHistory).order_by(ChatHistory.timestamp.desc())
     total_count = history_query.count()
-    total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
-    
-    # Apply pagination
+    total_pages = (total_count + per_page - 1) // per_page
     offset = (page - 1) * per_page
-    history = history_query.offset(offset).limit(per_page * 10).all()  # Fetch more to ensure pairs
-
+    history = history_query.offset(offset).limit(per_page * 10).all()
     paired_conversations = []
     used_bot_ids = set()
     i = 0
@@ -989,11 +981,9 @@ def get_paired_conversations(db, page=1, per_page=10):
         if current_msg.sender == 'user':
             user_obj = db.query(User).filter(User.id == current_msg.user_id).first()
             chatbot_obj = db.query(ChatbotContent).filter(ChatbotContent.code == current_msg.program_code).first()
-
             user_name = user_obj.last_name if user_obj else 'Unknown'
             user_email = user_obj.email if user_obj else 'Unknown'
             chatbot_name_display = chatbot_obj.name if chatbot_obj else current_msg.program_code
-
             pair_data = {
                 'user_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
                 'user_name': user_name,
@@ -1003,22 +993,18 @@ def get_paired_conversations(db, page=1, per_page=10):
                 'bot_timestamp': 'N/A',
                 'bot_message': 'No reply found.'
             }
-
-            # Find the next bot reply for this user/program that hasn't been paired yet
             for j in range(i+1, len(history)):
                 next_msg = history[j]
                 if (
                     next_msg.sender == 'bot' and
                     next_msg.user_id == current_msg.user_id and
                     next_msg.program_code == current_msg.program_code and
-                    next_msg.id not in used_bot_ids and
-                    next_msg.timestamp > current_msg.timestamp
+                    next_msg.id not in used_bot_ids
                 ):
                     pair_data['bot_timestamp'] = next_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if next_msg.timestamp else 'N/A'
                     pair_data['bot_message'] = next_msg.message
                     used_bot_ids.add(next_msg.id)
                     break
-
             paired_conversations.append(pair_data)
         i += 1
         if len(paired_conversations) >= per_page:

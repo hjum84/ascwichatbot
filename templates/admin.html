@@ -260,9 +260,9 @@
                                                             <h5 class="mb-0">{{ chatbot.display_name }}</h5>
                                                             <div>
                                                                 <button type="button" class="btn btn-info btn-sm edit-content-btn me-2"
-                                                                        data-chatbot-name="{{ chatbot.name }}" data-chatbot-display-name="{{ chatbot.display_name }}"><i class="bi bi-pencil-square"></i> Edit Content</button>
+                                                                        data-chatbot-name="{{ chatbot.code }}" data-chatbot-display-name="{{ chatbot.display_name }}"><i class="bi bi-pencil-square"></i> Edit Content</button>
                                                                 <button type="button" class="btn btn-danger btn-sm delete-btn" 
-                                                                        data-chatbot-name="{{ chatbot.name }}"><i class="bi bi-trash"></i> Delete</button>
+                                                                        data-chatbot-name="{{ chatbot.code }}"><i class="bi bi-trash"></i> Delete</button>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -276,7 +276,7 @@
                                                                     <p class="text-muted">{{ chatbot.description or 'No description available' }}</p>
                                                                     
                                                                     <div class="update-desc-form mb-2">
-                                                                        <input type="hidden" class="chatbot-name" value="{{ chatbot.name }}">
+                                                                        <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
                                                                         <div class="mb-2">
                                                                             <label for="description_{{ chatbot.name }}" class="form-label">Update Description:</label>
                                                                             <textarea class="form-control description-field" id="description_{{ chatbot.name }}" rows="2">{{ chatbot.description }}</textarea>
@@ -287,7 +287,7 @@
                                                             </div>
                                                             <div class="col-md-6">
                                                                 <div class="update-quota-form mb-3">
-                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.name }}">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
                                                                     <div class="mb-2">
                                                                         <label for="quota_{{ chatbot.name }}" class="form-label">Daily Question Quota:</label>
                                                                         <div class="input-group">
@@ -304,7 +304,7 @@
                                                         <div class="row mt-2">
                                                             <div class="col-12">
                                                                 <div class="update-intro-form mb-3">
-                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.name }}">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
                                                                     <div class="mb-3">
                                                                         <label for="intro_{{ chatbot.name }}" class="form-label">
                                                                             <strong>Chatbot Intro Message:</strong>
@@ -511,9 +511,9 @@
                                                             <h5 class="card-title mb-0">{{ chatbot.display_name }}</h5>
                                                             <div>
                                                                 <button type="button" class="btn btn-success btn-sm restore-btn me-2"
-                                                                        data-chatbot-name="{{ chatbot.name }}"><i class="bi bi-arrow-counterclockwise"></i> Restore</button>
+                                                                        data-chatbot-name="{{ chatbot.code }}"><i class="bi bi-arrow-counterclockwise"></i> Restore</button>
                                                                 <button type="button" class="btn btn-danger btn-sm permanent-delete-btn"
-                                                                        data-chatbot-name="{{ chatbot.name }}"><i class="bi bi-trash"></i> Permanent Delete</button>
+                                                                        data-chatbot-name="{{ chatbot.code }}"><i class="bi bi-trash"></i> Permanent Delete</button>
                                                             </div>
                                                         </div>
                                                     </div>

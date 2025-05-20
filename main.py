@@ -697,14 +697,20 @@ def index_generic(program):
         session['current_program'] = program_upper
         program_display_name = chatbot.name
         quota = chatbot.quota
+        intro_message = chatbot.intro_message if hasattr(chatbot, 'intro_message') and chatbot.intro_message else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
         user_id = session['user_id']
         chat_history = get_chat_history(user_id, program_upper)
         close_db(db)
+        
+        # Format the intro message by replacing placeholders
+        formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
+        
         return render_template('index.html',
                             program=program_upper,
                             program_display_name=program_display_name,
                             chat_history=chat_history,
-                            quota=quota)
+                            quota=quota,
+                            intro_message=formatted_intro)
     except Exception as e:
         if 'db' in locals():
             close_db(db)
@@ -1811,14 +1817,13 @@ def get_chatbot_content():
     finally:
         if db: close_db(db)
 
-@app.route('/admin/get_chatbot_content', methods=['GET'])
+@app.route('/admin/get_chatbot_content/<chatbot_code>', methods=['GET'])
 @requires_auth
-def admin_get_chatbot_content():
+def admin_get_chatbot_content(chatbot_code):
     """Get the content of a chatbot for editing (admin route)."""
     db = get_db()
     try:
-        # Accept both chatbot_code and chatbot_name for compatibility
-        chatbot_code = request.args.get('chatbot_code') or request.args.get('chatbot_name')
+        # No need to check query params as we get the code from URL path
         if not chatbot_code:
             return jsonify({"success": False, "error": "Chatbot code is required"}), 400
             
@@ -1829,7 +1834,8 @@ def admin_get_chatbot_content():
         return jsonify({
             "success": True,
             "content": chatbot.content,
-            "char_count": len(chatbot.content)
+            "char_count": len(chatbot.content),
+            "char_limit": chatbot.char_limit
         })
         
     except Exception as e:

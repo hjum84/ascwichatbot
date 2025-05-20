@@ -4,6 +4,7 @@ import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.sql import func
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -79,8 +80,9 @@ class ChatbotContent(Base):
     
     @classmethod
     def get_by_code(cls, db, code):
-        """Get chatbot content by code"""
-        return db.query(cls).filter(cls.code == code).first()
+        """Get chatbot content by code (case-insensitive search).
+        Assumes the 'code' parameter is already uppercased by the caller."""
+        return db.query(cls).filter(func.upper(cls.code) == code).first()
     
     @classmethod
     def get_all_active(cls, db):

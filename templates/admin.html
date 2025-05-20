@@ -88,6 +88,10 @@
             border-top: 1px solid #dee2e6;
             margin: 2rem 0;
         }
+        /* 추가 스타일 - 프로그레스 바 관련 */
+        .progress-bar {
+            transition: width 0.6s ease;
+        }
     </style>
 </head>
 <body>
@@ -122,10 +126,115 @@
                                     <i class="bi bi-trash"></i> Deleted Chatbots
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats-content" type="button" role="tab" aria-controls="stats-content" aria-selected="false">
+                                    <i class="bi bi-database"></i> Database Statistics
+                                </button>
+                            </li>
                         </ul>
                         
                         <!-- Tab Content -->
                         <div class="tab-content" id="adminTabsContent">
+                            <!-- DATABASE STATISTICS TAB -->
+                            <div class="tab-pane fade" id="stats-content" role="tabpanel" aria-labelledby="stats-tab">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-light">
+                                        <h4 class="mb-0">Database Statistics</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if alerts %}
+                                        <div class="alert alert-warning">
+                                            <h5><i class="bi bi-exclamation-triangle"></i> Database Alerts</h5>
+                                            <ul class="mb-0">
+                                                {% for alert in alerts %}
+                                                <li>{{ alert.message }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                        {% endif %}
+                                        
+                                        {% if db_stats.percent_used > 80 %}
+                                        <div class="alert alert-danger">
+                                            <h5><i class="bi bi-exclamation-circle-fill"></i> Storage Capacity Warning</h5>
+                                            <p>Your database is currently at <strong>{{ db_stats.percent_used }}%</strong> of its maximum capacity ({{ db_stats.max_size_pretty }}).</p>
+                                            <p><strong>Recommended actions:</strong></p>
+                                            <ul>
+                                                <li>Consider upgrading your Render database plan to increase storage capacity</li>
+                                                <li>Archive or delete old chat histories</li>
+                                                <li>Optimize chatbot content size</li>
+                                            </ul>
+                                        </div>
+                                        {% endif %}
+                                        
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <h5>Storage Usage</h5>
+                                                <p><strong>Total Database Size:</strong> {{ db_stats.total_size }} <span class="text-muted">(of {{ db_stats.max_size_pretty }} allowed)</span></p>
+                                                <p><strong>Chat History Size:</strong> {{ db_stats.chat_history_size }}</p>
+                                                <p><strong>Chatbot Contents Size:</strong> {{ db_stats.chatbot_contents_size }}</p>
+                                                
+                                                <h6><i class="bi bi-bar-chart-fill"></i> Overall Database Usage (% of Maximum Capacity)</h6>
+                                                <p class="small text-muted">Shows how much of your total database capacity is currently being used</p>
+                                                <div class="progress mb-3">
+                                                    <div class="progress-bar {{ 'bg-danger' if db_stats.percent_used > 80 else 'bg-success' }}" role="progressbar"
+                                                         data-width="{{ db_stats.percent_used }}"
+                                                         aria-valuemin="0"
+                                                         aria-valuemax="100">
+                                                        {{ db_stats.percent_used }}% of {{ db_stats.max_size_pretty }} Used
+                                                    </div>
+                                                </div>
+
+                                                <h6><i class="bi bi-pie-chart-fill"></i> Storage Breakdown by Data Type (% of Maximum Capacity)</h6>
+                                                <p class="small text-muted">Shows how storage is distributed between chat history and other data</p>
+                                                <div class="progress mb-3">
+                                                    <div class="progress-bar bg-primary" role="progressbar"
+                                                         data-width="{{ (db_stats.chat_history_size_bytes / db_stats.max_size_bytes * 100) | round(1) }}"
+                                                         aria-valuemin="0" aria-valuemax="100">
+                                                        Chat History ({{ (db_stats.chat_history_size_bytes / db_stats.max_size_bytes * 100) | round(1) }}%)
+                                                    </div>
+                                                    <div class="progress-bar bg-info" role="progressbar"
+                                                         data-width="{{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}"
+                                                         aria-valuemin="0" aria-valuemax="100">
+                                                        Other Data ({{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}%)
+                                                    </div>
+                                                </div>
+
+                                                <p class="small text-muted">
+                                                    <i class="bi bi-info-circle"></i> Maximum database size is set to {{ db_stats.max_size_pretty }}. 
+                                                    <span class="{{ 'text-danger' if db_stats.percent_used > 80 else '' }}">
+                                                        Currently using {{ db_stats.percent_used }}% of available storage.
+                                                    </span>
+                                                </p>
+                                            </div>
+                                            
+                                            <div class="col-md-6">
+                                                <h5>Usage Statistics</h5>
+                                                <p><strong>Total Messages:</strong> {{ db_stats.total_messages }}</p>
+                                                <p><strong>Total Chatbots:</strong> {{ db_stats.total_chatbots }}</p>
+                                                <p><strong>Unique Users:</strong> {{ db_stats.unique_users }}</p>
+                                                <p><strong>Last Updated:</strong> {{ db_stats.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-4">
+                                            <h5><i class="bi bi-info-circle"></i> About Database Limits</h5>
+                                            <p>Your database is hosted on Render with a maximum capacity of {{ db_stats.max_size_pretty }}. Storage usage is monitored automatically, and alerts will be displayed when approaching capacity limits.</p>
+                                            
+                                            <h6>To increase database capacity:</h6>
+                                            <ol>
+                                                <li>Log in to your Render dashboard</li>
+                                                <li>Navigate to the database settings</li>
+                                                <li>Upgrade your database plan or increase storage capacity</li>
+                                            </ol>
+
+                                            <div class="alert alert-info">
+                                                <i class="bi bi-lightbulb"></i> <strong>Tip:</strong> Regular monitoring of database usage helps prevent unexpected service interruptions due to storage limits.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- MANAGE EXISTING CHATBOTS TAB -->
                             <div class="tab-pane fade show active" id="manage-content" role="tabpanel" aria-labelledby="manage-tab">
                                 <div class="card mb-4">
@@ -588,6 +697,17 @@
                     }
                 }
             }
+            
+            // Set aria-valuenow for accessibility
+            const progressBars = document.querySelectorAll('.progress-bar');
+            progressBars.forEach(function(bar) {
+                // Extract width percentage from the style attribute if it exists
+                const style = bar.getAttribute('style') || '';
+                const widthMatch = style.match(/width:\s*([\d.]+)%/);
+                if (widthMatch && widthMatch[1]) {
+                    bar.setAttribute('aria-valuenow', widthMatch[1]);
+                }
+            });
             
             // Upload form submission
             document.getElementById('submit-btn').addEventListener('click', function() {
@@ -1419,6 +1539,15 @@
                     }, 3000);
                 }
             }
+
+            // Set styles for progress bars that use data-width attribute
+            document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
+                const width = bar.getAttribute('data-width');
+                if (width) {
+                    bar.style.width = width + '%';
+                    bar.setAttribute('aria-valuenow', width);
+                }
+            });
         });
     </script>
 </body>

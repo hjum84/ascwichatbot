@@ -23,6 +23,7 @@ import numpy as np
 from threading import Lock
 from sklearn.metrics.pairwise import cosine_similarity
 import time
+from database_monitor import get_database_size, check_database_limits, setup_database_monitoring
 
 # For file content extraction - try to import, but don't fail if not available
 try:
@@ -969,8 +970,7 @@ def admin():
                 "name": chatbot.code,
                 "display_name": chatbot.name,
                 "description": chatbot.description or "",
-                "quota": chatbot.quota,
-                "intro_message": chatbot.intro_message  # Add intro_message to the dictionary
+                "quota": chatbot.quota
             })
         
         # Get inactive (deleted) chatbots
@@ -982,9 +982,15 @@ def admin():
                 "display_name": chatbot.name
             })
         
+        # Get database statistics
+        db_stats = get_database_size()
+        alerts = check_database_limits()
+        
         return render_template('admin.html', 
                               available_chatbots=available_chatbots,
                               deleted_chatbots=deleted_chatbots,
+                              db_stats=db_stats,
+                              alerts=alerts,
                               message=request.args.get('message'),
                               message_type=request.args.get('message_type', 'info'))
     finally:
@@ -1733,6 +1739,9 @@ if __name__ == '__main__':
     
     # Add user site-packages to sys.path
     sys.path.append(site.getusersitepackages())
+    
+    # Setup database monitoring
+    setup_database_monitoring()
     
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

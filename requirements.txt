@@ -16,3 +16,5 @@ PyPDF2
 python-pptx
 python-docx
 textract
+
+APScheduler==3.10.1

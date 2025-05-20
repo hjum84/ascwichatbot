@@ -128,8 +128,8 @@ class ChatHistory(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=False, index=True)
     program_code = Column(String, nullable=False, index=True)
-    message = Column(Text, nullable=False)
-    sender = Column(String, nullable=False)  # 'user' or 'bot'
+    user_message = Column(Text, nullable=False)
+    bot_message = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     is_visible = Column(Boolean, nullable=False, default=True)  # New: for UI hiding
 

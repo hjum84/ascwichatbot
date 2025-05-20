@@ -577,7 +577,6 @@ def set_program(program):
         return redirect(url_for('program_select'))
 
 # Helper: fetch chat history for a user and program
-
 def get_chat_history(user_id, program_code, limit=50):
     db = get_db()
     try:
@@ -586,13 +585,21 @@ def get_chat_history(user_id, program_code, limit=50):
             ChatHistory.program_code == program_code,
             ChatHistory.is_visible == True
         ).order_by(ChatHistory.timestamp.asc()).limit(limit).all()
-        return [
-            {
-                'message': h.message,
-                'sender': h.sender,
+        result = []
+        for h in history:
+            # Add user message
+            result.append({
+                'message': h.user_message,
+                'sender': 'user',
                 'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
-            } for h in history
-        ]
+            })
+            # Add bot message
+            result.append({
+                'message': h.bot_message,
+                'sender': 'bot',
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
+            })
+        return result
     finally:
         close_db(db)
 
@@ -728,10 +735,10 @@ def chat():
         today_start = datetime.datetime.combine(today, datetime.time.min)
         today_end = datetime.datetime.combine(today, datetime.time.max)
         
+        # Count only unique conversations (each row has both user and bot messages)
         message_count = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == current_program,
-            ChatHistory.sender == 'user',
             ChatHistory.timestamp >= today_start,
             ChatHistory.timestamp <= today_end
         ).count()
@@ -739,16 +746,6 @@ def chat():
         # Check if quota exceeded
         if message_count >= quota:
             return jsonify({"reply": f"You have reached your daily quota of {quota} questions for the {chatbot.name} program. Please try again tomorrow."}), 200
-
-        # Save user message to chat history
-        user_history = ChatHistory(
-            user_id=user_id,
-            program_code=current_program,
-            message=user_message,
-            sender='user'
-        )
-        db.add(user_history)
-        db.commit()
 
         # Get content hash for the current program
         content_hash = content_hashes.get(current_program)
@@ -808,14 +805,14 @@ def chat():
             else:
                 chatbot_reply = truncated_text
 
-        # Save bot reply to chat history
-        bot_history = ChatHistory(
+        # Save to chat history (both user message and chatbot reply)
+        chat_entry = ChatHistory(
             user_id=user_id,
             program_code=current_program,
-            message=chatbot_reply,
-            sender='bot'
+            user_message=user_message,
+            bot_message=chatbot_reply
         )
-        db.add(bot_history)
+        db.add(chat_entry)
         db.commit()
 
         # Record conversation in Smartsheet asynchronously

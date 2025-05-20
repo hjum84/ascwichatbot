@@ -88,6 +88,10 @@
             border-top: 1px solid #dee2e6;
             margin: 2rem 0;
         }
+        /* 추가 스타일 - 프로그레스 바 관련 */
+        .progress-bar {
+            transition: width 0.6s ease;
+        }
     </style>
 </head>
 <body>
@@ -122,10 +126,120 @@
                                     <i class="bi bi-trash"></i> Deleted Chatbots
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats-content" type="button" role="tab" aria-controls="stats-content" aria-selected="false">
+                                    <i class="bi bi-database"></i> Database Statistics
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="data-mgmt-tab" data-bs-toggle="tab" data-bs-target="#data-mgmt-content" type="button" role="tab" aria-controls="data-mgmt-content" aria-selected="false">
+                                    <i class="bi bi-table"></i> Data Management
+                                </button>
+                            </li>
                         </ul>
                         
                         <!-- Tab Content -->
                         <div class="tab-content" id="adminTabsContent">
+                            <!-- DATABASE STATISTICS TAB -->
+                            <div class="tab-pane fade" id="stats-content" role="tabpanel" aria-labelledby="stats-tab">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-light">
+                                        <h4 class="mb-0">Database Statistics</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if alerts %}
+                                        <div class="alert alert-warning">
+                                            <h5><i class="bi bi-exclamation-triangle"></i> Database Alerts</h5>
+                                            <ul class="mb-0">
+                                                {% for alert in alerts %}
+                                                <li>{{ alert.message }}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                        {% endif %}
+                                        
+                                        {% if db_stats.percent_used > 80 %}
+                                        <div class="alert alert-danger">
+                                            <h5><i class="bi bi-exclamation-circle-fill"></i> Storage Capacity Warning</h5>
+                                            <p>Your database is currently at <strong>{{ db_stats.percent_used }}%</strong> of its maximum capacity ({{ db_stats.max_size_pretty }}).</p>
+                                            <p><strong>Recommended actions:</strong></p>
+                                            <ul>
+                                                <li>Consider upgrading your Render database plan to increase storage capacity</li>
+                                                <li>Archive or delete old chat histories</li>
+                                                <li>Optimize chatbot content size</li>
+                                            </ul>
+                                        </div>
+                                        {% endif %}
+                                        
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <h5>Storage Usage</h5>
+                                                <p><strong>Total Database Size:</strong> {{ db_stats.total_size }} <span class="text-muted">(of {{ db_stats.max_size_pretty }} allowed)</span></p>
+                                                <p><strong>Chat History Size:</strong> {{ db_stats.chat_history_size }}</p>
+                                                <p><strong>Chatbot Contents Size:</strong> {{ db_stats.chatbot_contents_size }}</p>
+                                                
+                                                <h6><i class="bi bi-bar-chart-fill"></i> Overall Database Usage (% of Maximum Capacity)</h6>
+                                                <p class="small text-muted">Shows how much of your total database capacity is currently being used</p>
+                                                <div class="progress mb-3">
+                                                    <div class="progress-bar {{ 'bg-danger' if db_stats.percent_used > 80 else 'bg-success' }}" role="progressbar"
+                                                         data-width="{{ db_stats.percent_used }}"
+                                                         aria-valuemin="0"
+                                                         aria-valuemax="100">
+                                                        {{ db_stats.percent_used }}% of {{ db_stats.max_size_pretty }} Used
+                                                    </div>
+                                                </div>
+
+                                                <h6><i class="bi bi-pie-chart-fill"></i> Storage Breakdown by Data Type (% of Maximum Capacity)</h6>
+                                                <p class="small text-muted">Shows how storage is distributed between chat history and other data</p>
+                                                <div class="progress mb-3">
+                                                    <div class="progress-bar bg-primary" role="progressbar"
+                                                         data-width="{{ (db_stats.chat_history_size_bytes / db_stats.max_size_bytes * 100) | round(1) }}"
+                                                         aria-valuemin="0" aria-valuemax="100">
+                                                        Chat History ({{ (db_stats.chat_history_size_bytes / db_stats.max_size_bytes * 100) | round(1) }}%)
+                                                    </div>
+                                                    <div class="progress-bar bg-info" role="progressbar"
+                                                         data-width="{{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}"
+                                                         aria-valuemin="0" aria-valuemax="100">
+                                                        Other Data ({{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}%)
+                                                    </div>
+                                                </div>
+
+                                                <p class="small text-muted">
+                                                    <i class="bi bi-info-circle"></i> Maximum database size is set to {{ db_stats.max_size_pretty }}. 
+                                                    <span class="{{ 'text-danger' if db_stats.percent_used > 80 else '' }}">
+                                                        Currently using {{ db_stats.percent_used }}% of available storage.
+                                                    </span>
+                                                </p>
+                                            </div>
+                                            
+                                            <div class="col-md-6">
+                                                <h5>Usage Statistics</h5>
+                                                <p><strong>Total Messages:</strong> {{ db_stats.total_messages }}</p>
+                                                <p><strong>Total Chatbots:</strong> {{ db_stats.total_chatbots }}</p>
+                                                <p><strong>Unique Users:</strong> {{ db_stats.unique_users }}</p>
+                                                <p><strong>Last Updated:</strong> {{ db_stats.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-4">
+                                            <h5><i class="bi bi-info-circle"></i> About Database Limits</h5>
+                                            <p>Your database is hosted on Render with a maximum capacity of {{ db_stats.max_size_pretty }}. Storage usage is monitored automatically, and alerts will be displayed when approaching capacity limits.</p>
+                                            
+                                            <h6>To increase database capacity:</h6>
+                                            <ol>
+                                                <li>Log in to your Render dashboard</li>
+                                                <li>Navigate to the database settings</li>
+                                                <li>Upgrade your database plan or increase storage capacity</li>
+                                            </ol>
+
+                                            <div class="alert alert-info">
+                                                <i class="bi bi-lightbulb"></i> <strong>Tip:</strong> Regular monitoring of database usage helps prevent unexpected service interruptions due to storage limits.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- MANAGE EXISTING CHATBOTS TAB -->
                             <div class="tab-pane fade show active" id="manage-content" role="tabpanel" aria-labelledby="manage-tab">
                                 <div class="card mb-4">
@@ -412,6 +526,172 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- DATA MANAGEMENT TAB -->
+                            <div class="tab-pane fade" id="data-mgmt-content" role="tabpanel" aria-labelledby="data-mgmt-tab">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-light">
+                                        <h4 class="mb-0">Data Management</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Subtabs -->
+                                        <ul class="nav nav-tabs mb-3" id="dataMgmtTabs" role="tablist">
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link active" id="users-mgmt-tab" data-bs-toggle="tab" data-bs-target="#users-mgmt" type="button" role="tab">User Management</button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link" id="convo-logs-tab" data-bs-toggle="tab" data-bs-target="#convo-logs" type="button" role="tab">Conversation Logs</button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link" id="download-tab" data-bs-toggle="tab" data-bs-target="#download-data" type="button" role="tab">Download</button>
+                                            </li>
+                                        </ul>
+                                        <div class="tab-content" id="dataMgmtTabsContent">
+                                            <!-- User Management -->
+                                            <div class="tab-pane fade show active" id="users-mgmt" role="tabpanel">
+                                                <div class="d-flex justify-content-between mb-2">
+                                                    <h5>User List</h5>
+                                                    <button class="btn btn-primary btn-sm">Add User</button>
+                                                </div>
+                                                <div class="table-responsive">
+                                                    <table class="table table-striped">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>ID</th>
+                                                                <th>Name</th>
+                                                                <th>Email</th>
+                                                                <th>Visit Count</th>
+                                                                <th>Current Program</th>
+                                                                <th>Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% for user in users %}
+                                                            <tr>
+                                                                <td>{{ user.id }}</td>
+                                                                <td>{{ user.last_name }}</td>
+                                                                <td>{{ user.email }}</td>
+                                                                <td>{{ user.visit_count }}</td>
+                                                                <td>{{ user.current_program }}</td>
+                                                                <td>
+                                                                    <button class="btn btn-sm btn-info">Edit</button>
+                                                                    <button class="btn btn-sm btn-danger">Delete</button>
+                                                                </td>
+                                                            </tr>
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <!-- Conversation Logs -->
+                                            <div class="tab-pane fade" id="convo-logs" role="tabpanel">
+                                                <div class="d-flex justify-content-between mb-2 align-items-center">
+                                                    <h5>Conversation Logs (Paired)</h5>
+                                                    <div class="d-flex gap-2">
+                                                        <input type="text" class="form-control form-control-sm" id="searchConvoInput" placeholder="Search messages..." value="{{ search_term if search_term else '' }}">
+                                                        <select class="form-select form-select-sm" id="chatbotConvoFilter">
+                                                            <option value="">All Chatbots</option>
+                                                            {% for chatbot in available_chatbots %}
+                                                            <option value="{{ chatbot.code }}" {% if chatbot.code == selected_chatbot_code %}selected{% endif %}>{{ chatbot.name }}</option>
+                                                            {% endfor %}
+                                                        </select>
+                                                        <button class="btn btn-sm btn-primary" onclick="applyConvoFilters()">Search</button>
+                                                    </div>
+                                                </div>
+                                                <div class="table-responsive">
+                                                    <table class="table table-striped table-bordered">
+                                                        <thead class="table-light">
+                                                            <tr>
+                                                                <th scope="col">User</th>
+                                                                <th scope="col">Chatbot</th>
+                                                                <th scope="col">User Question</th>
+                                                                <th scope="col">Bot Reply</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody id="convoLogsTable">
+                                                            {% if conversations %}
+                                                                {% for conv_pair in conversations %}
+                                                                <tr>
+                                                                    <td>
+                                                                        {{ conv_pair.user_name }} ({{ conv_pair.user_email }})
+                                                                        <br><small class="text-muted">{{ conv_pair.user_timestamp }}</small>
+                                                                    </td>
+                                                                    <td>{{ conv_pair.chatbot_name }}</td>
+                                                                    <td style="word-wrap: break-word; min-width: 250px; max-width: 350px;">
+                                                                        {{ conv_pair.user_message }}
+                                                                    </td>
+                                                                    <td style="word-wrap: break-word; min-width: 250px; max-width: 350px;">
+                                                                        {{ conv_pair.bot_message }}
+                                                                        {% if conv_pair.bot_timestamp != 'N/A' %}
+                                                                        <br><small class="text-muted">{{ conv_pair.bot_timestamp }}</small>
+                                                                        {% endif %}
+                                                                    </td>
+                                                                </tr>
+                                                                {% endfor %}
+                                                            {% else %}
+                                                                <tr><td colspan="4" class="text-center">No conversation logs found or matching current filters.</td></tr>
+                                                            {% endif %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <!-- Add pagination controls -->
+                                                {% if pagination %}
+                                                <nav aria-label="Conversation pages" class="mt-3">
+                                                    <ul class="pagination justify-content-center">
+                                                        <!-- Previous page button -->
+                                                        <li class="page-item {% if pagination.current_page == 1 %}disabled{% endif %}">
+                                                            <a class="page-link" href="{{ url_for('admin', page=pagination.current_page-1, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}#data-mgmt-content-convo-logs" aria-label="Previous">
+                                                                <span aria-hidden="true">&laquo;</span>
+                                                            </a>
+                                                        </li>
+                                                        
+                                                        <!-- Page numbers -->
+                                                        {% for page_num in range(1, pagination.total_pages + 1) %}
+                                                            {% if page_num == 1 or page_num == pagination.total_pages or (page_num >= pagination.current_page - 2 and page_num <= pagination.current_page + 2) %}
+                                                                <li class="page-item {% if page_num == pagination.current_page %}active{% endif %}">
+                                                                    <a class="page-link" href="{{ url_for('admin', page=page_num, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}#data-mgmt-content-convo-logs">{{ page_num }}</a>
+                                                                </li>
+                                                            {% elif page_num == pagination.current_page - 3 or page_num == pagination.current_page + 3 %}
+                                                                <li class="page-item disabled">
+                                                                    <span class="page-link">...</span>
+                                                                </li>
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                        
+                                                        <!-- Next page button -->
+                                                        <li class="page-item {% if pagination.current_page == pagination.total_pages %}disabled{% endif %}">
+                                                            <a class="page-link" href="{{ url_for('admin', page=pagination.current_page+1, per_page=pagination.per_page, search_term=search_term, chatbot_code=selected_chatbot_code) }}#data-mgmt-content-convo-logs" aria-label="Next">
+                                                                <span aria-hidden="true">&raquo;</span>
+                                                            </a>
+                                                        </li>
+                                                    </ul>
+                                                </nav>
+                                                <div class="text-center">
+                                                    <small class="text-muted">
+                                                        Showing page {{ pagination.current_page }} of {{ pagination.total_pages }}
+                                                    </small>
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                            <!-- Download -->
+                                            <div class="tab-pane fade" id="download-data" role="tabpanel">
+                                                <h5>Download Data</h5>
+                                                <p>Export user data or conversation logs in CSV or Excel format.</p>
+                                                <div class="mb-3">
+                                                    <h6>Users</h6>
+                                                    <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=users&format=csv'">Users (CSV)</button>
+                                                    <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=users&format=excel'">Users (Excel)</button>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <h6>Conversations (Raw Log)</h6>
+                                                    <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=conversations&format=csv'">Conversations (CSV)</button>
+                                                    <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=conversations&format=excel'">Conversations (Excel)</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
                         <div class="mt-4">
@@ -588,6 +868,17 @@
                     }
                 }
             }
+            
+            // Set aria-valuenow for accessibility
+            const progressBars = document.querySelectorAll('.progress-bar');
+            progressBars.forEach(function(bar) {
+                // Extract width percentage from the style attribute if it exists
+                const style = bar.getAttribute('style') || '';
+                const widthMatch = style.match(/width:\s*([\d.]+)%/);
+                if (widthMatch && widthMatch[1]) {
+                    bar.setAttribute('aria-valuenow', widthMatch[1]);
+                }
+            });
             
             // Upload form submission
             document.getElementById('submit-btn').addEventListener('click', function() {
@@ -1419,6 +1710,65 @@
                     }, 3000);
                 }
             }
+
+            // Set styles for progress bars that use data-width attribute
+            document.querySelectorAll('.progress-bar[data-width]').forEach(function(bar) {
+                const width = bar.getAttribute('data-width');
+                if (width) {
+                    bar.style.width = width + '%';
+                    bar.setAttribute('aria-valuenow', width);
+                }
+            });
+
+            // Auto-activate Data Management > Conversation Logs tab if anchor is present
+            if (window.location.hash) {
+                const hash = window.location.hash.replace('#', '');
+                if (hash === 'data-mgmt-content-convo-logs') {
+                    // Activate Data Management main tab
+                    var mainTab = document.querySelector('button[data-bs-target="#data-mgmt-content"]');
+                    if (mainTab) mainTab.click();
+                    // Activate Conversation Logs sub-tab after a short delay
+                    setTimeout(function() {
+                        var subTab = document.querySelector('button[data-bs-target="#convo-logs"]');
+                        if (subTab) subTab.click();
+                    }, 200);
+                }
+            }
+        });
+
+        function applyConvoFilters() {
+            const searchTerm = document.getElementById('searchConvoInput').value;
+            const chatbotCode = document.getElementById('chatbotConvoFilter').value;
+            
+            // Construct the query parameters for the current admin page, adding search filters
+            const url = new URL(window.location.href);
+            if (searchTerm) url.searchParams.set('search_term', searchTerm);
+            else url.searchParams.delete('search_term');
+            
+            if (chatbotCode) url.searchParams.set('chatbot_code', chatbotCode);
+            else url.searchParams.delete('chatbot_code');
+            
+            // Reload the page with new filters
+            window.location.href = url.toString();
+        }
+
+        // Function to parse URL parameters and apply filters on page load (optional, if you want to keep filters in URL)
+        // This would require modifying the 'admin' route in main.py to accept these parameters and filter data accordingly.
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const searchTerm = urlParams.get('search_term');
+            const chatbotCode = urlParams.get('chatbot_code');
+            
+            if (searchTerm) {
+                document.getElementById('searchConvoInput').value = searchTerm;
+            }
+            if (chatbotCode) {
+                document.getElementById('chatbotConvoFilter').value = chatbotCode;
+            }
+            
+            // If you implement server-side filtering based on these URL params,
+            // the table will be pre-filtered on load.
+            // Otherwise, this just sets the input values.
         });
     </script>
 </body>

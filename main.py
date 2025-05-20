@@ -23,6 +23,11 @@ import numpy as np
 from threading import Lock
 from sklearn.metrics.pairwise import cosine_similarity
 import time
+from database_monitor import get_database_size, check_database_limits, setup_database_monitoring
+from datetime import datetime, timedelta
+import pandas as pd
+from io import StringIO, BytesIO
+from sqlalchemy import func
 
 # For file content extraction - try to import, but don't fail if not available
 try:
@@ -99,7 +104,8 @@ def get_embedding(text):
             model="text-embedding-3-small",
             input=normalized_text
         )
-        embedding = response['data'][0]['embedding']
+        # Ensure embedding is a standard list to avoid method_descriptor errors
+        embedding = list(response['data'][0]['embedding'])
         
         # Store in cache
         with embedding_lock:
@@ -165,17 +171,18 @@ def find_similar_question(user_message, content_hash):
         if question_embedding is None:
             continue
         
-        # Calculate cosine similarity
-        similarity = cosine_similarity(
-            np.array([new_embedding]), 
-            np.array([question_embedding])
-        )[0][0]
-        
-        # If similarity exceeds threshold and is better than previous best, update
-        if similarity >= SIMILARITY_THRESHOLD and similarity > best_similarity:
-            best_similarity = similarity
-            best_question = question
-            logger.debug(f"Found similar question: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
+        try:
+            # Use custom cosine similarity function instead of scikit-learn's
+            similarity = custom_cosine_similarity(new_embedding, question_embedding)
+            
+            # If similarity exceeds threshold and is better than previous best, update
+            if similarity >= SIMILARITY_THRESHOLD and similarity > best_similarity:
+                best_similarity = similarity
+                best_question = question
+                logger.debug(f"Found similar question: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
+        except Exception as e:
+            logger.error(f"Error calculating similarity between embeddings: {str(e)}")
+            continue
     
     # Store in similar questions cache
     similar_questions_cache[cache_key] = best_question
@@ -373,7 +380,7 @@ def record_in_smartsheet(user_question, chatbot_reply):
     new_row.cells = [
         {
             'column_id': SMARTSHEET_TIMESTAMP_COLUMN,
-            'value': datetime.datetime.now().isoformat()
+            'value': datetime.now().isoformat()
         },
         {
             'column_id': SMARTSHEET_QUESTION_COLUMN,
@@ -492,7 +499,7 @@ def program_select():
             show_new = False
             if chatbot.created_at:
                 # Show NEW if created within the last 7 days
-                if (datetime.datetime.utcnow() - chatbot.created_at).days < 7:
+                if (datetime.now() - chatbot.created_at).days < 7:
                     show_new = True
             
             # Ensure predefined programs BCC, MI, Safety do not show 'NEW' badge
@@ -731,9 +738,9 @@ def chat():
         quota = chatbot.quota
 
         # Count today's messages for this user and program
-        today = datetime.datetime.utcnow().date()
-        today_start = datetime.datetime.combine(today, datetime.time.min)
-        today_end = datetime.datetime.combine(today, datetime.time.max)
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
         
         # Count only unique conversations (each row has both user and bot messages)
         message_count = db.query(ChatHistory).filter(
@@ -765,11 +772,16 @@ def chat():
         # If no exact match, try to find semantically similar question
         if not chatbot_reply:
             cache_result = "semantic_match"
-            similar_question = find_similar_question(user_message, content_hash)
-            if similar_question:
-                logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
-                chatbot_reply = get_cached_response(content_hash, similar_question)
-                logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
+            try:
+                similar_question = find_similar_question(user_message, content_hash)
+                if similar_question:
+                    logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
+                    chatbot_reply = get_cached_response(content_hash, similar_question)
+                    logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
+            except Exception as e:
+                logger.error(f"Error finding similar question: {str(e)}")
+                # Continue without similar questions if this fails
+                similar_question = None
         
         # If no cached response at all, get new response
         if not chatbot_reply:
@@ -830,7 +842,7 @@ def chat():
         if 'db' in locals():
             db.rollback()
         logger.error(f"Error in chat endpoint: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An error occurred while processing your request. Please try again."}), 500
     finally:
         close_db(db)
 
@@ -951,770 +963,969 @@ def export_page():
     # Add admin page to the routes available from export page
     return render_template('export.html', show_admin_link=True)
 
-# Admin page route
+def get_paired_conversations(db, page=1, per_page=10):
+    # 최신순 정렬
+    history_query = db.query(ChatHistory).order_by(ChatHistory.timestamp.desc())
+    total_count = history_query.count()
+    total_pages = (total_count + per_page - 1) // per_page
+    offset = (page - 1) * per_page
+    history = history_query.offset(offset).limit(per_page * 10).all()
+    paired_conversations = []
+    used_bot_ids = set()
+    i = 0
+    while i < len(history):
+        current_msg = history[i]
+        if current_msg.sender == 'user':
+            user_obj = db.query(User).filter(User.id == current_msg.user_id).first()
+            chatbot_obj = db.query(ChatbotContent).filter(ChatbotContent.code == current_msg.program_code).first()
+            user_name = user_obj.last_name if user_obj else 'Unknown'
+            user_email = user_obj.email if user_obj else 'Unknown'
+            chatbot_name_display = chatbot_obj.name if chatbot_obj else current_msg.program_code
+            pair_data = {
+                'user_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
+                'user_name': user_name,
+                'user_email': user_email,
+                'chatbot_name': chatbot_name_display,
+                'user_message': current_msg.message,
+                'bot_timestamp': 'N/A',
+                'bot_message': 'No reply found.'
+            }
+            for j in range(i+1, len(history)):
+                next_msg = history[j]
+                if (
+                    next_msg.sender == 'bot' and
+                    next_msg.user_id == current_msg.user_id and
+                    next_msg.program_code == current_msg.program_code and
+                    next_msg.id not in used_bot_ids
+                ):
+                    pair_data['bot_timestamp'] = next_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if next_msg.timestamp else 'N/A'
+                    pair_data['bot_message'] = next_msg.message
+                    used_bot_ids.add(next_msg.id)
+                    break
+            paired_conversations.append(pair_data)
+        i += 1
+        if len(paired_conversations) >= per_page:
+            break
+    return paired_conversations, total_pages, page
+
 @app.route('/admin')
 @requires_auth
 def admin():
-    # Get list of available and deleted chatbots from database
     db = get_db()
     try:
-        # Get active chatbots
-        active_chatbots = ChatbotContent.get_all_active(db)
-        available_chatbots = []
-        for chatbot in active_chatbots:
-            available_chatbots.append({
-                "name": chatbot.code,
+        available_chatbots = get_available_chatbots()
+        deleted_chatbots = get_deleted_chatbots()
+        db_stats = get_database_size()
+        alerts = check_database_limits()
+        
+        # For Data Management Tab - User List
+        users_list = get_all_users() 
+
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        # For Data Management Tab - Paired Conversation Logs
+        paired_conversations_log, total_pages, current_page = get_paired_conversations(
+            db, page=page, per_page=per_page
+        )
+
+        conversation_stats_overall = get_conversation_statistics() # General stats
+        top_users_list = get_top_users(limit=5)
+        top_chatbots_list = get_top_chatbots(limit=5)
+        
+        message = request.args.get('message')
+        message_type = request.args.get('message_type', 'info')
+        
+        # Search/filter parameters from URL for conversation logs
+        search_term_param = request.args.get('search_term', None)
+        chatbot_code_param = request.args.get('chatbot_code', None)
+
+        # If search parameters are present, filter the conversations
+        if search_term_param or chatbot_code_param:
+            temp_filtered_convos = []
+            for p_conv in paired_conversations_log:
+                match_search = True
+                if search_term_param and not (search_term_param.lower() in p_conv['user_message'].lower() or search_term_param.lower() in p_conv['bot_message'].lower()):
+                    match_search = False
+                
+                match_chatbot = True
+                if chatbot_code_param:
+                    is_correct_chatbot = False
+                    for cb in available_chatbots:
+                        if cb['code'] == chatbot_code_param and p_conv['chatbot_name'] == cb['name']:
+                            is_correct_chatbot = True
+                            break
+                    if not is_correct_chatbot:
+                         match_chatbot = False
+
+                if match_search and match_chatbot:
+                    temp_filtered_convos.append(p_conv)
+            paired_conversations_log = temp_filtered_convos
+            
+        return render_template('admin.html', 
+                              available_chatbots=available_chatbots, 
+                              deleted_chatbots=deleted_chatbots,
+                              message=message,
+                              message_type=message_type,
+                              db_stats=db_stats,
+                              alerts=alerts,
+                              users=users_list,
+                              conversations=paired_conversations_log,
+                              conversation_stats=conversation_stats_overall,
+                              top_users=top_users_list,
+                              top_chatbots=top_chatbots_list,
+                              search_term=search_term_param,
+                              selected_chatbot_code=chatbot_code_param,
+                              pagination={
+                                  'total_pages': total_pages,
+                                  'current_page': current_page,
+                                  'per_page': per_page
+                              })
+    finally:
+        close_db(db)
+
+@app.route('/admin/export_data')
+@requires_auth
+def admin_export_data():
+    export_type = request.args.get('type', 'users')
+    format_type = request.args.get('format', 'csv')
+    db = None # Initialize db to None
+    try:
+        db = get_db() # Get db session
+        data = []
+        filename_base = "data_export"
+        df_columns = []
+
+        if export_type == 'users':
+            users_data = get_all_users() # This function should use its own db session
+            if not users_data:
+                flash("No user data to export.", "warning")
+                return redirect(url_for('admin'))
+            data = users_data
+            filename_base = 'users_export'
+            if data: df_columns = list(data[0].keys())
+
+        elif export_type == 'conversations':
+            # For export, we use get_recent_conversations which returns individual messages
+            # and has its own db session management.
+            # Fetch all conversations for export
+            all_conversations_flat = get_recent_conversations(limit=db.query(ChatHistory).count())
+            if not all_conversations_flat:
+                flash("No conversation data to export.", "warning")
+                return redirect(url_for('admin'))
+            data = all_conversations_flat
+            filename_base = 'conversations_export'
+            if data: df_columns = list(data[0].keys())
+        
+        else:
+            flash(f"Invalid export type: {export_type}", "danger")
+            return redirect(url_for('admin'))
+
+        if not data: # Double check after specific type processing
+            flash(f"No data available to export for {export_type}.", "warning")
+            return redirect(url_for('admin'))
+            
+        df = pd.DataFrame(data, columns=df_columns)
+        
+        output_stream = BytesIO() # Use BytesIO for binary data like Excel
+        
+        if format_type == 'csv':
+            # For CSV, pandas can write to a text wrapper around BytesIO or directly to StringIO
+            # Using StringIO for to_csv for consistency with previous text-based output
+            csv_output = StringIO()
+            df.to_csv(csv_output, index=False)
+            output_stream = BytesIO(csv_output.getvalue().encode('utf-8')) # Encode to bytes for Response
+            mimetype = "text/csv"
+            filename = f"{filename_base}.csv"
+        elif format_type == 'excel':
+            df.to_excel(output_stream, index=False, sheet_name=export_type)
+            # output_stream.seek(0) # Not needed here as to_excel writes and BytesIO is ready
+            mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            filename = f"{filename_base}.xlsx"
+        else:
+            flash(f"Invalid export format: {format_type}", "danger")
+            return redirect(url_for('admin'))
+        
+        output_stream.seek(0) # Reset stream position to the beginning
+        
+        return Response(
+            output_stream.getvalue(), # getvalue() from BytesIO
+            mimetype=mimetype,
+            headers={"Content-disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error during data export ({export_type}, {format_type}): {str(e)}", exc_info=True)
+        flash(f"An error occurred during export: {str(e)}", "danger")
+        return redirect(url_for('admin')) # Redirect to admin on error
+    finally:
+        if db: # Only close if db was successfully obtained
+            close_db(db)
+
+@app.route('/admin/search_conversations', methods=['POST'])
+@requires_auth
+def admin_search_conversations():
+    """Search conversations with filters"""
+    search_term = request.form.get('search_term', '')
+    chatbot = request.form.get('chatbot', '')
+    user_email = request.form.get('user_email', '')
+    date_from = request.form.get('date_from', '')
+    date_to = request.form.get('date_to', '')
+    
+    db = get_db()
+    try:
+        query = db.query(ChatHistory)
+        
+        if search_term:
+            query = query.filter(ChatHistory.message.ilike(f'%{search_term}%'))
+        if chatbot:
+            query = query.filter(ChatHistory.program_code == chatbot)
+        if user_email:
+            user = db.query(User).filter(User.email == user_email).first()
+            if user:
+                query = query.filter(ChatHistory.user_id == user.id)
+        if date_from:
+            query = query.filter(ChatHistory.timestamp >= datetime.strptime(date_from, '%Y-%m-%d'))
+        if date_to:
+            query = query.filter(ChatHistory.timestamp <= datetime.strptime(date_to, '%Y-%m-%d'))
+        
+        conversations = query.order_by(ChatHistory.timestamp.desc()).limit(100).all()
+        
+        result = []
+        for conv in conversations:
+            user = db.query(User).filter(User.id == conv.user_id).first()
+            chatbot = db.query(ChatbotContent).filter(ChatbotContent.code == conv.program_code).first()
+            result.append({
+                'id': conv.id,
+                'user_name': user.last_name if user else 'Unknown',
+                'user_email': user.email if user else 'Unknown',
+                'chatbot_name': chatbot.name if chatbot else conv.program_code,
+                'message': conv.message,
+                'sender': conv.sender,
+                'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return jsonify({"success": True, "conversations": result})
+        
+    finally:
+        close_db(db)
+
+def get_available_chatbots():
+    """Get all active chatbots from the database."""
+    db = get_db()
+    try:
+        chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
+        return [
+            {
+                "code": chatbot.code,
+                "name": chatbot.name,
                 "display_name": chatbot.name,
                 "description": chatbot.description or "",
                 "quota": chatbot.quota,
-                "intro_message": chatbot.intro_message  # Add intro_message to the dictionary
-            })
-        
-        # Get inactive (deleted) chatbots
-        deleted_chatbots = []
-        deleted_bots = db.query(ChatbotContent).filter(ChatbotContent.is_active == False).all()
-        for chatbot in deleted_bots:
-            deleted_chatbots.append({
-                "name": chatbot.code,
-                "display_name": chatbot.name
-            })
-        
-        return render_template('admin.html', 
-                              available_chatbots=available_chatbots,
-                              deleted_chatbots=deleted_chatbots,
-                              message=request.args.get('message'),
-                              message_type=request.args.get('message_type', 'info'))
+                "intro_message": chatbot.intro_message
+            } for chatbot in chatbots
+        ]
     finally:
         close_db(db)
 
-def clean_text(text):
-    """Clean and normalize text content by removing unnecessary elements."""
-    # Remove multiple newlines
-    text = re.sub(r'\n\s*\n', '\n\n', text)
-    
-    # Remove page numbers (e.g., "Page 1 of 10")
-    text = re.sub(r'Page\s+\d+\s+of\s+\d+', '', text)
-    
-    # Remove headers and footers (common patterns)
-    text = re.sub(r'^.*?©.*?$', '', text, flags=re.MULTILINE)  # Copyright notices
-    text = re.sub(r'^.*?Confidential.*?$', '', text, flags=re.MULTILINE)  # Confidential notices
-    
-    # Remove repeated headers (e.g., "Chapter 1" appearing multiple times)
-    text = re.sub(r'(^.*?$)\n\1', r'\1', text, flags=re.MULTILINE)
-    
-    # Remove empty lines at the beginning and end
-    text = text.strip()
-    
-    # Remove multiple spaces
-    text = re.sub(r' +', ' ', text)
-    
-    # Remove special characters that might be artifacts from PDF/PPT conversion
-    text = re.sub(r'[^\S\n]+', ' ', text)  # Keep newlines but remove other whitespace
-    
-    return text
+def get_deleted_chatbots():
+    """Get all inactive/deleted chatbots from the database."""
+    db = get_db()
+    try:
+        chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == False).all()
+        return [
+            {
+                "code": chatbot.code,
+                "name": chatbot.name,
+                "display_name": chatbot.name,
+                "description": chatbot.description or "",
+                "quota": chatbot.quota,
+                "intro_message": chatbot.intro_message
+            } for chatbot in chatbots
+        ]
+    finally:
+        close_db(db)
 
-@app.route('/admin_upload', methods=['POST'])
+# Helper functions for admin page
+def get_all_users():
+    """Get all users from the database."""
+    db = get_db()
+    try:
+        users = db.query(User).all()
+        return [user.to_dict() for user in users]
+    finally:
+        close_db(db)
+
+def get_recent_conversations(limit=100):
+    """Get recent conversations from the database, formatting timestamp."""
+    db = get_db()
+    try:
+        conversations = db.query(ChatHistory).order_by(ChatHistory.timestamp.desc()).limit(limit).all()
+        result = []
+        for conv in conversations:
+            user = db.query(User).filter(User.id == conv.user_id).first()
+            chatbot_content = db.query(ChatbotContent).filter(ChatbotContent.code == conv.program_code).first() # Renamed for clarity
+            result.append({
+                'id': conv.id,
+                'user_id': conv.user_id,
+                'user_name': user.last_name if user else 'Unknown',
+                'user_email': user.email if user else 'Unknown',
+                'chatbot_name': chatbot_content.name if chatbot_content else conv.program_code,
+                'message': conv.message,
+                'sender': conv.sender,
+                'timestamp': conv.timestamp.strftime('%Y-%m-%d %H:%M:%S') if conv.timestamp else 'N/A' # Format timestamp
+            })
+        return result
+    finally:
+        close_db(db)
+
+def get_conversation_statistics():
+    """Get conversation statistics."""
+    db = get_db()
+    try:
+        total_conversations = db.query(ChatHistory).count()
+        unique_users = db.query(ChatHistory.user_id).distinct().count()
+        unique_chatbots = db.query(ChatHistory.program_code).distinct().count()
+        
+        # Find most active chatbot
+        chatbot_counts = db.query(
+            ChatHistory.program_code, 
+            func.count(ChatHistory.id).label('count')
+        ).group_by(ChatHistory.program_code).order_by(func.count(ChatHistory.id).desc()).first()
+        
+        most_active_chatbot = chatbot_counts[0] if chatbot_counts else "None"
+        
+        return {
+            "total_conversations": total_conversations,
+            "unique_users": unique_users,
+            "active_chatbots": unique_chatbots,
+            "most_active_chatbot": most_active_chatbot
+        }
+    finally:
+        close_db(db)
+
+def get_top_users(limit=5):
+    """Get the most active users."""
+    db = get_db()
+    try:
+        # Count messages per user
+        user_counts = db.query(
+            ChatHistory.user_id,
+            func.count(ChatHistory.id).label('message_count')
+        ).group_by(ChatHistory.user_id).order_by(func.count(ChatHistory.id).desc()).limit(limit).all()
+        
+        result = []
+        for user_id, message_count in user_counts:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                # Count distinct conversations
+                conversation_count = db.query(ChatHistory.program_code).filter(
+                    ChatHistory.user_id == user_id
+                ).distinct().count()
+                
+                result.append({
+                    "name": user.last_name,
+                    "email": user.email,
+                    "conversation_count": conversation_count,
+                    "message_count": message_count
+                })
+        
+        return result
+    finally:
+        close_db(db)
+
+def get_top_chatbots(limit=5):
+    """Get the most used chatbots."""
+    db = get_db()
+    try:
+        # Count messages per chatbot
+        chatbot_counts = db.query(
+            ChatHistory.program_code,
+            func.count(ChatHistory.id).label('message_count')
+        ).group_by(ChatHistory.program_code).order_by(func.count(ChatHistory.id).desc()).limit(limit).all()
+        
+        result = []
+        for program_code, message_count in chatbot_counts:
+            chatbot = db.query(ChatbotContent).filter(ChatbotContent.code == program_code).first()
+            
+            # Count distinct conversations
+            conversation_count = db.query(ChatHistory.user_id).filter(
+                ChatHistory.program_code == program_code
+            ).distinct().count()
+            
+            result.append({
+                "display_name": chatbot.name if chatbot else program_code,
+                "conversation_count": conversation_count,
+                "message_count": message_count
+            })
+        
+        return result
+    finally:
+        close_db(db)
+
+# Helper function to extract text from uploaded files
+def extract_text_from_file(file_storage):
+    """Extracts text from a FileStorage object."""
+    filename = secure_filename(file_storage.filename)
+    # file_storage.stream is a file-like object (e.g., SpooledTemporaryFile)
+    
+    logger.debug(f"Attempting to extract text from: {filename}")
+
+    content = ""
+    try:
+        if filename.endswith(".txt"):
+            content = file_storage.stream.read().decode("utf-8")
+        elif filename.endswith(".pdf"):
+            if PYPDF2_AVAILABLE:
+                pdf_reader = PyPDF2.PdfReader(file_storage.stream)
+                text_parts = [page.extract_text() or "" for page in pdf_reader.pages]
+                content = "\\n".join(text_parts)
+            else:
+                logger.warning("PyPDF2 not available for PDF extraction.")
+        elif filename.endswith(".docx"):
+            if DOCX_AVAILABLE:
+                doc = docx.Document(file_storage.stream)
+                content = "\\n".join([para.text for para in doc.paragraphs])
+            elif TEXTRACT_AVAILABLE: # Fallback to textract if python-docx not available
+                file_storage.stream.seek(0) # Reset stream for textract
+                content = textract.process(filename=filename, input_stream=file_storage.stream).decode('utf-8')
+            else:
+                logger.warning("Neither python-docx nor textract available for DOCX extraction.")
+        elif filename.endswith(".pptx"):
+            if PPTX_AVAILABLE:
+                prs = Presentation(file_storage.stream)
+                text_parts = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            text_parts.append(shape.text)
+                content = "\\n".join(text_parts)
+            elif TEXTRACT_AVAILABLE: # Fallback to textract
+                file_storage.stream.seek(0) # Reset stream for textract
+                content = textract.process(filename=filename, input_stream=file_storage.stream).decode('utf-8')
+            else:
+                logger.warning("Neither python-pptx nor textract available for PPTX extraction.")
+        else:
+            logger.warning(f"Unsupported file type for text extraction: {filename}")
+        
+        # Ensure stream is reset if it's going to be read again (e.g. multiple calls or other processing)
+        file_storage.stream.seek(0)
+        return content
+
+    except Exception as e:
+        logger.error(f"Error extracting text from {filename}: {e}", exc_info=True)
+        # Ensure stream is reset even on error if possible
+        try:
+            file_storage.stream.seek(0)
+        except:
+            pass # Stream might be closed or unseekable
+        return ""
+
+
+@app.route('/admin/preview_upload', methods=['POST'])
+@requires_auth
+def admin_preview_upload():
+    """Handles file uploads for previewing content before chatbot creation."""
+    if 'files' not in request.files:
+        return jsonify({"success": False, "error": "No files provided for preview."}), 400
+
+    files = request.files.getlist('files')
+    char_limit = int(request.form.get('char_limit', 50000))
+    
+    # For edit modal scenario
+    current_content_text = request.form.get('current_content', '')
+    append_content_flag = request.form.get('append_content', 'false').lower() == 'true'
+
+    extracted_files_data = []
+    combined_text_parts = []
+
+    if append_content_flag and current_content_text:
+        combined_text_parts.append(current_content_text)
+
+    for file_storage in files:
+        if file_storage and file_storage.filename:
+            text = extract_text_from_file(file_storage)
+            extracted_files_data.append({
+                "filename": secure_filename(file_storage.filename),
+                "content": text,
+                "char_count": len(text)
+            })
+            combined_text_parts.append(text)
+        else:
+            logger.warning("Empty file storage object received in preview_upload.")
+
+
+    combined_preview_content = "\\n\\n".join(combined_text_parts)
+    total_char_count = len(combined_preview_content)
+    exceeds_limit = total_char_count > char_limit
+    warning_message = ""
+    if exceeds_limit:
+        warning_message = f"Content ({total_char_count:,} chars) exceeds limit of {char_limit:,} chars."
+
+    return jsonify({
+        "success": True,
+        "files": extracted_files_data,
+        "combined_preview": combined_preview_content,
+        "total_char_count": total_char_count,
+        "char_limit": char_limit,
+        "exceeds_limit": exceeds_limit,
+        "warning": warning_message
+    })
+
+@app.route('/admin/upload', methods=['POST'])
 @requires_auth
 def admin_upload():
+    """Handles the creation of a new chatbot."""
+    db = get_db()
     try:
-        logger.info("Admin upload route called")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Content type: {request.content_type}")
-        logger.info(f"Form data: {request.form}")
-        logger.info(f"Files: {request.files}")
-        
-        # Get course name
-        course_name = request.form.get('course_name')
-        logger.info(f"Course name received: {course_name}")
-        
-        if not course_name:
-            logger.warning("No course name provided")
-            return jsonify({"error": "Please enter a course name"}), 400
-        
-        # Get display name (optional)
+        chatbot_code = request.form.get('course_name')
         display_name = request.form.get('display_name')
-        logger.info(f"Display name received: {display_name}")
-        
-        if not display_name:
-            display_name = course_name  # Default to course name if not provided
-            logger.info(f"Using course name as display name: {display_name}")
-        
-        # Get description (optional)
         description = request.form.get('description', '')
-        logger.info(f"Description received: {description[:30]}..." if description else "No description")
-        
-        # Get default quota (optional, default 3)
-        try:
-            quota = int(request.form.get('default_quota', 3))
-            if quota < 1:
-                quota = 1
-            elif quota > 20:
-                quota = 20
-        except ValueError:
-            quota = 3
-        logger.info(f"Default quota set to: {quota}")
-        
-        # Get intro message (optional)
-        intro_message = request.form.get('intro_message', "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.")
-        logger.info(f"Intro message: {intro_message[:50]}..." if intro_message else "Using default intro message")
-        
-        # Get character limit (optional, default 50,000)
-        try:
-            char_limit = int(request.form.get('char_limit', 50000))
-            if char_limit < 50000:
-                char_limit = 50000
-            elif char_limit > 100000:
-                char_limit = 100000
-        except ValueError:
-            char_limit = 50000
-        
-        # Check if we're using edited content from preview
-        use_edited_content = request.form.get('use_edited_content', 'false').lower() == 'true'
-        combined_content = ""
-        
-        if use_edited_content and 'combined_content' in request.form:
-            # Use the edited content directly
-            combined_content = request.form.get('combined_content', '')
-            logger.info("Using edited content from preview")
-        else:
-            # Check if files were uploaded
-            files = request.files.getlist('files')
-            if not files or not files[0]:
-                logger.warning("No files part in the request")
-                return jsonify({"error": "Please upload at least one file"}), 400
-            
-            logger.info(f"Files received: {[f.filename for f in files]}")
-            
-            # Save and extract text from each file
-            for file in files:
-                filename = secure_filename(file.filename)
-                file_ext = os.path.splitext(filename)[1].lower()
-                temp_path = os.path.join('temp', filename)
-                os.makedirs('temp', exist_ok=True)
-                file.save(temp_path)
-                logger.info(f"File saved temporarily at: {temp_path}")
-                try:
-                    file_content = ""
-                    if file_ext == '.txt':
-                        with open(temp_path, 'r', encoding='utf-8') as f:
-                            file_content = f.read()
-                    elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
-                        with open(temp_path, 'rb') as f:
-                            pdf_reader = PyPDF2.PdfReader(f)
-                            for page_num in range(len(pdf_reader.pages)):
-                                page = pdf_reader.pages[page_num]
-                                file_content += (page.extract_text() or "") + "\n"
-                    elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
-                        presentation = Presentation(temp_path)
-                        for slide in presentation.slides:
-                            for shape in slide.shapes:
-                                if hasattr(shape, "text"):
-                                    file_content += shape.text + "\n"
-                    elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
-                        doc = docx.Document(temp_path)
-                        for para in doc.paragraphs:
-                            file_content += para.text + "\n"
-                    elif TEXTRACT_AVAILABLE:
-                        file_content = textract.process(temp_path).decode('utf-8')
-                    else:
-                        logger.warning(f"No library available to process {file_ext} files")
-                        return jsonify({"error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
-                    
-                    # Clean the extracted content
-                    cleaned_content = clean_text(file_content)
-                    combined_content += cleaned_content + "\n\n"
-                    
-                except Exception as e:
-                    logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
-                    return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
-                finally:
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
-        
-        if not combined_content.strip():
-            logger.warning("Extracted content is empty")
-            return jsonify({"error": "The extracted content is empty"}), 400
-        
-        # Check character limit
-        content_length = len(combined_content)
-        if content_length > char_limit:
-            # Calculate costs using GPT-4o-mini pricing
-            estimated_tokens = content_length // 4  # Rough estimate of tokens
-            input_cost = (estimated_tokens * 0.0000005)  # $0.0005 per 1K tokens for input
-            output_cost = 100 * 0.0000015  # Assuming ~100 output tokens, $0.0015 per 1K tokens
-            total_cost = input_cost + output_cost
-            
-            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {estimated_tokens:,} input tokens, costing about ${total_cost:.5f} per conversation based on GPT-4o-mini pricing."
-            logger.warning(warning_message)
-            return jsonify({
-                "error": "Content too long",
-                "warning": warning_message,
-                "content_length": content_length,
-                "char_limit": char_limit,
-                "exceeds_by": content_length - char_limit,
-                "exceeds_by_percent": round((content_length / char_limit - 1) * 100, 1)
-            }), 400
-        
-        # Store content in database
-        course_name_upper = course_name.upper()
-        logger.info(f"Storing content for {course_name_upper} in database")
-        try:
-            db = get_db()
-            chatbot = ChatbotContent.create_or_update(
-                db,
-                code=course_name_upper,
-                name=display_name,
-                content=combined_content,
-                description=description
-            )
-            
-            # Set additional properties after creation/update
-            chatbot.quota = quota
-            chatbot.char_limit = char_limit
-            chatbot.intro_message = intro_message
-            
-            # Make sure chatbot is active
-            if not chatbot.is_active:
-                chatbot.is_active = True
-                
-            db.commit()
-            close_db(db)
-            load_program_content()
-            logger.info("Upload completed successfully")
-            return jsonify({"success": True, "message": f"The {display_name} chatbot has been successfully updated"}), 200
-        except Exception as e:
-            if 'db' in locals():
-                db.rollback()
-                close_db(db)
-            logger.error(f"Database error: {str(e)}", exc_info=True)
-            return jsonify({"error": f"Database error: {str(e)}"}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-# Update description route
-@app.route('/admin_update_description', methods=['POST'])
-@requires_auth
-def admin_update_description():
-    try:
-        chatbot_name = request.form.get('chatbot_name')
-        description = request.form.get('description', '')
-        
-        if not chatbot_name:
-            return redirect(url_for('admin', 
-                                    message='Chatbot name was not provided', 
-                                    message_type='danger'))
-        
-        # Update description in the database
-        chatbot_name_upper = chatbot_name.upper()
-        db = get_db()
-        try:
-            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
-            if not chatbot:
-                return redirect(url_for('admin', 
-                                        message=f'Chatbot {chatbot_name} not found in database', 
-                                        message_type='danger'))
-            
-            chatbot.description = description
-            db.commit()
-            
-            # Update memory cache
-            program_descriptions[chatbot_name_upper] = description
-            
-            return redirect(url_for('admin', 
-                                    message=f'Description for {chatbot.name} has been updated', 
-                                    message_type='success'))
-        finally:
-            close_db(db)
-    except Exception as e:
-        return redirect(url_for('admin', 
-                                message=f'An error occurred: {str(e)}', 
-                                message_type='danger'))
-
-# Delete chatbot route
-@app.route('/admin_delete_chatbot', methods=['POST'])
-@requires_auth
-def admin_delete_chatbot():
-    try:
-        chatbot_name = request.form.get('chatbot_name')
-        if not chatbot_name:
-            return redirect(url_for('admin', 
-                                    message='Chatbot name was not provided', 
-                                    message_type='danger'))
-        
-        # Mark as inactive in database instead of deleting the file
-        chatbot_name_upper = chatbot_name.upper()
-        db = get_db()
-        try:
-            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
-            if not chatbot:
-                return redirect(url_for('admin', 
-                                        message=f'Could not find {chatbot_name} chatbot in database', 
-                                        message_type='danger'))
-            
-            # Mark as inactive
-            chatbot.is_active = False
-            db.commit()
-            
-            # Remove from program_content dictionary
-            if chatbot_name_upper in program_content:
-                del program_content[chatbot_name_upper]
-            
-            # Reload program content
-            load_program_content()
-            
-            return redirect(url_for('admin', 
-                                    message=f'The {chatbot.name} chatbot has been successfully deleted', 
-                                    message_type='success'))
-        finally:
-            close_db(db)
-        
-    except Exception as e:
-        return redirect(url_for('admin', 
-                                message=f'An error occurred: {str(e)}', 
-                                message_type='danger'))
-
-# Restore chatbot route
-@app.route('/admin_restore_chatbot', methods=['POST'])
-@requires_auth
-def admin_restore_chatbot():
-    try:
-        chatbot_name = request.form.get('chatbot_name')
-        if not chatbot_name:
-            return redirect(url_for('admin', 
-                                    message='Chatbot name was not provided', 
-                                    message_type='danger'))
-        
-        # Reactivate in database
-        chatbot_name_upper = chatbot_name.upper()
-        db = get_db()
-        try:
-            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
-            if not chatbot:
-                return redirect(url_for('admin', 
-                                        message=f'Could not find {chatbot_name} chatbot in database', 
-                                        message_type='danger'))
-            
-            # Mark as active
-            chatbot.is_active = True
-            db.commit()
-            
-            # Reload program content
-            load_program_content()
-            
-            return redirect(url_for('admin', 
-                                    message=f'The {chatbot.name} chatbot has been successfully restored', 
-                                    message_type='success'))
-        finally:
-            close_db(db)
-    except Exception as e:
-        return redirect(url_for('admin', 
-                                message=f'An error occurred: {str(e)}', 
-                                message_type='danger'))
-
-# Permanent delete chatbot route
-@app.route('/admin_permanent_delete_chatbot', methods=['POST'])
-@requires_auth
-def admin_permanent_delete_chatbot():
-    try:
-        chatbot_name = request.form.get('chatbot_name')
-        if not chatbot_name:
-            return redirect(url_for('admin', 
-                                    message='Chatbot name was not provided', 
-                                    message_type='danger'))
-        
-        # Permanently delete from database
-        chatbot_name_upper = chatbot_name.upper()
-        db = get_db()
-        try:
-            chatbot = ChatbotContent.get_by_code(db, chatbot_name_upper)
-            if not chatbot:
-                return redirect(url_for('admin', 
-                                        message=f'Could not find {chatbot_name} chatbot in database', 
-                                        message_type='danger'))
-            
-            # Get display name before deletion for the success message
-            display_name = chatbot.name
-            
-            # Permanently delete from database
-            db.delete(chatbot)
-            db.commit()
-            
-            # Reload program content
-            load_program_content()
-            
-            return redirect(url_for('admin', 
-                                    message=f'The {display_name} chatbot has been permanently deleted', 
-                                    message_type='success'))
-        finally:
-            close_db(db)
-    except Exception as e:
-        return redirect(url_for('admin', 
-                                message=f'An error occurred: {str(e)}', 
-                                message_type='danger'))
-
-# Route to get chatbot content
-@app.route('/admin_get_chatbot_content/<chatbot_code>')
-@requires_auth
-def admin_get_chatbot_content(chatbot_code):
-    db = get_db()
-    try:
-        chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
-        if chatbot and chatbot.is_active:
-            return jsonify({
-                "success": True, 
-                "content": chatbot.content,
-                "display_name": chatbot.name,
-                "code": chatbot.code,
-                "char_limit": chatbot.char_limit or 50000  # Add character limit
-            })
-        elif chatbot and not chatbot.is_active:
-            return jsonify({"success": False, "error": "Chatbot is currently deleted (inactive). Restore it to view content."}), 404
-        else:
-            return jsonify({"success": False, "error": "Chatbot not found."}), 404
-    except Exception as e:
-        logger.error(f"Error fetching chatbot content for {chatbot_code}: {str(e)}")
-        return jsonify({"success": False, "error": "Server error occurred."}), 500
-    finally:
-        close_db(db)
-
-# Route to update chatbot content
-@app.route('/admin_update_chatbot_content', methods=['POST'])
-@requires_auth
-def admin_update_chatbot_content():
-    db = get_db()
-    try:
-        chatbot_code = request.form.get('chatbot_code')
-        new_content = request.form.get('content')
+        intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.')
+        default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
-        should_append = request.form.get('append_content', 'false').lower() == 'true'
-        use_edited_content = request.form.get('use_edited_content', 'false').lower() == 'true'
-
-        if not chatbot_code or new_content is None: # new_content can be empty string
-            return jsonify({"success": False, "error": "Chatbot code and content are required."}), 400
-
-        # Validate character limit
-        if char_limit < 50000:
-            char_limit = 50000
-        elif char_limit > 100000:
-            char_limit = 100000
-
-        chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
-        if not chatbot:
-            return jsonify({"success": False, "error": "Chatbot not found."}), 404
         
-        if not chatbot.is_active:
-            return jsonify({"success": False, "error": "Cannot update content of an inactive (deleted) chatbot. Please restore it first."}), 400
+        use_edited_content = request.form.get('use_edited_content', 'false').lower() == 'true'
+        final_content = ""
 
-        # If using edited content from the preview, we already have it in new_content
-        # Only process files if not using edited content
-        if not use_edited_content:
-            # Check if files were uploaded
-            files = request.files.getlist('files')
-            if files and files[0]:
-                combined_content = ""
-                for file in files:
-                    filename = secure_filename(file.filename)
-                    file_ext = os.path.splitext(filename)[1].lower()
-                    temp_path = os.path.join('temp', filename)
-                    os.makedirs('temp', exist_ok=True)
-                    file.save(temp_path)
-                    try:
-                        file_content = ""
-                        if file_ext == '.txt':
-                            with open(temp_path, 'r', encoding='utf-8') as f:
-                                file_content = f.read()
-                        elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
-                            with open(temp_path, 'rb') as f:
-                                pdf_reader = PyPDF2.PdfReader(f)
-                                for page_num in range(len(pdf_reader.pages)):
-                                    page = pdf_reader.pages[page_num]
-                                    file_content += (page.extract_text() or "") + "\n"
-                        elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
-                            presentation = Presentation(temp_path)
-                            for slide in presentation.slides:
-                                for shape in slide.shapes:
-                                    if hasattr(shape, "text"):
-                                        file_content += shape.text + "\n"
-                        elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
-                            doc = docx.Document(temp_path)
-                            for para in doc.paragraphs:
-                                file_content += para.text + "\n"
-                        elif TEXTRACT_AVAILABLE:
-                            file_content = textract.process(temp_path).decode('utf-8')
-                        else:
-                            return jsonify({"success": False, "error": f"The required libraries to process {file_ext} files are not installed. Supported: .txt, .pdf, .ppt, .pptx"}), 400
-                        
-                        # Clean the extracted content
-                        cleaned_content = clean_text(file_content)
-                        combined_content += cleaned_content + "\n\n"
-                        
-                    except Exception as e:
-                        logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
-                        return jsonify({"success": False, "error": f"Error extracting content from {filename}: {str(e)}"}), 500
-                    finally:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                
-                if combined_content:
-                    # If should_append is true, append the new content to the existing content
-                    # Otherwise, replace the content with the new content
-                    if should_append and new_content:
-                        new_content = new_content + "\n\n" + combined_content
-                    else:
-                        new_content = combined_content
+        if not chatbot_code or not display_name:
+            return jsonify({"success": False, "error": "Chatbot ID (course_name) and Display Name are required."}), 400
+        
+        # Check if chatbot code already exists
+        existing_chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+        if existing_chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with ID '{chatbot_code}' already exists. Please use a unique ID."}), 400
 
-        # Check character limit
-        content_length = len(new_content)
-        if content_length > char_limit:
-            # Calculate costs using GPT-4o-mini pricing
-            estimated_tokens = content_length // 4  # Rough estimate of tokens
-            input_cost = (estimated_tokens * 0.0000005)  # $0.0005 per 1K tokens for input
-            output_cost = 100 * 0.0000015  # Assuming ~100 output tokens, $0.0015 per 1K tokens
-            total_cost = input_cost + output_cost
+        if use_edited_content:
+            final_content = request.form.get('combined_content', '')
+        else:
+            files = request.files.getlist('files') # Changed from 'file' to 'files' based on JS
+            if not files or all(not f.filename for f in files):
+                 return jsonify({"success": False, "error": "No files uploaded."}), 400
             
-            warning_message = f"Warning: Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {estimated_tokens:,} input tokens, costing about ${total_cost:.5f} per conversation based on GPT-4o-mini pricing."
+            content_parts = []
+            for file_storage in files:
+                if file_storage and file_storage.filename:
+                    text = extract_text_from_file(file_storage)
+                    content_parts.append(text)
+            final_content = "\\n\\n".join(content_parts)
+
+        if len(final_content) > char_limit:
             return jsonify({
-                "success": False,
+                "success": False, 
                 "error": "Content too long",
-                "warning": warning_message,
-                "content_length": content_length,
+                "warning": f"Content length ({len(final_content):,} characters) exceeds the specified limit ({char_limit:,} characters).",
+                "content_length": len(final_content),
                 "char_limit": char_limit
             }), 400
 
-        chatbot.content = new_content
-        chatbot.char_limit = char_limit  # Update character limit
+        if not final_content.strip():
+             return jsonify({"success": False, "error": "Extracted content is empty. Please check your files."}), 400
+
+        # Create new chatbot
+        new_chatbot = ChatbotContent.create_or_update(
+            db=db,
+            code=chatbot_code.upper(),
+            name=display_name,
+            content=final_content,
+            description=description,
+            quota=default_quota,
+            intro_message=intro_message,
+            char_limit=char_limit,
+            is_active=True # New chatbots are active by default
+        )
         db.commit()
         
-        # Reload content into memory
-        load_program_content()
+        # Reload program content in memory to include the new chatbot
+        load_program_content() 
         
-        logger.info(f"Content for chatbot {chatbot.name} (Code: {chatbot_code}) updated successfully.")
-        return jsonify({
-            "success": True, 
-            "message": f"Content for {chatbot.name} updated successfully.",
-            "display_name": chatbot.name 
-        }), 200
+        logger.info(f"Successfully created chatbot: {chatbot_code.upper()} - {display_name}")
+        return jsonify({"success": True, "message": "Chatbot created successfully!"})
 
     except Exception as e:
-        if db:
-            db.rollback()
-        logger.error(f"Error updating chatbot content for {request.form.get('chatbot_code')}: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "error": "Server error occurred during content update."}), 500
+        if db: db.rollback()
+        logger.error(f"Error in admin_upload: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
     finally:
-        if db:
-            close_db(db)
+        if db: close_db(db)
 
-# Route to update chatbot quota
-@app.route('/update_quota', methods=['POST'])
+@app.route('/admin/delete_chatbot', methods=['POST'])
 @requires_auth
-def update_quota():
+def admin_delete_chatbot():
+    """Delete a chatbot by setting its is_active flag to False."""
     try:
-        data = request.json
-        chatbot_code = data.get('chatbot_code')
-        quota = int(data.get('quota', 3))
-        
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
         if not chatbot_code:
             return jsonify({"success": False, "error": "Chatbot code is required"}), 400
-        
-        if quota < 1:
-            return jsonify({"success": False, "error": "Quota must be at least 1"}), 400
-        
+
         db = get_db()
         try:
-            chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
+            chatbot = ChatbotContent.get_by_code(db, chatbot_code)
             if not chatbot:
                 return jsonify({"success": False, "error": "Chatbot not found"}), 404
-            
-            chatbot.quota = quota
+
+            # Set is_active to False instead of actually deleting
+            chatbot.is_active = False
             db.commit()
-            return jsonify({"success": True, "message": "Quota updated successfully"})
+
+            # Reload program content in memory
+            load_program_content()
+
+            return jsonify({
+                "success": True,
+                "message": f"Chatbot {chatbot_code} has been deactivated successfully"
+            })
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error deleting chatbot: {str(e)}")
+            return jsonify({"success": False, "error": str(e)}), 500
         finally:
             close_db(db)
-            
+
     except Exception as e:
-        logger.error(f"Error updating quota: {str(e)}")
+        logger.error(f"Error in admin_delete_chatbot: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-# Route to update chatbot intro message
+@app.route('/admin/update_description', methods=['POST'])
+@requires_auth
+def admin_update_description():
+    """Update the description of an existing chatbot."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        new_description = request.form.get('description')
+
+        if not chatbot_code or new_description is None: # Description can be an empty string
+            return jsonify({"success": False, "error": "Chatbot code and description are required."}), 400
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found."}), 404
+
+        chatbot.description = new_description
+        db.commit()
+        load_program_content() # Reload content to reflect changes
+
+        logger.info(f"Successfully updated description for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Description updated successfully!"})
+
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_update_description: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/admin/restore_chatbot', methods=['POST'])
+@requires_auth
+def admin_restore_chatbot():
+    """Restore a chatbot by setting its is_active flag to True."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found."}), 404
+
+        chatbot.is_active = True
+        db.commit()
+        load_program_content()  # Reload content to reflect changes
+
+        logger.info(f"Successfully restored chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Chatbot restored successfully!"})
+
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_restore_chatbot: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/admin/permanent_delete_chatbot', methods=['POST'])
+@requires_auth
+def admin_permanent_delete_chatbot():
+    """Permanently delete a chatbot from the database."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found."}), 404
+
+        # Permanently delete the chatbot
+        db.delete(chatbot)
+        db.commit()
+        
+        # Also update the in-memory program content
+        load_program_content()
+
+        logger.info(f"Successfully permanently deleted chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Chatbot permanently deleted successfully!"})
+
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_permanent_delete_chatbot: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
+    finally:
+        if db: close_db(db)
+
 @app.route('/update_intro_message', methods=['POST'])
 @requires_auth
 def update_intro_message():
-    try:
-        data = request.json
-        chatbot_code = data.get('chatbot_code')
-        intro_message = data.get('intro_message')
-        
-        if not chatbot_code:
-            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
-        
-        if not intro_message:
-            return jsonify({"success": False, "error": "Intro message is required"}), 400
-        
-        db = get_db()
-        try:
-            chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
-            if not chatbot:
-                return jsonify({"success": False, "error": "Chatbot not found"}), 404
-            
-            chatbot.intro_message = intro_message
-            db.commit()
-            return jsonify({"success": True, "message": "Intro message updated successfully"})
-        finally:
-            close_db(db)
-            
-    except Exception as e:
-        logger.error(f"Error updating intro message: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/clear_chat_history', methods=['POST'])
-@login_required
-def clear_chat_history():
-    user_id = session['user_id']
-    program_code = session.get('current_program', 'BCC')
+    """Update the intro message of a chatbot."""
     db = get_db()
     try:
-        # Hide all today's messages (set is_visible=False)
-        today = datetime.datetime.utcnow().date()
-        today_start = datetime.datetime.combine(today, datetime.time.min)
-        today_end = datetime.datetime.combine(today, datetime.time.max)
-        db.query(ChatHistory).filter(
-            ChatHistory.user_id == user_id,
-            ChatHistory.program_code == program_code,
-            ChatHistory.timestamp >= today_start,
-            ChatHistory.timestamp <= today_end,
-            ChatHistory.is_visible == True
-        ).update({ChatHistory.is_visible: False}, synchronize_session=False)
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+            
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = data.get('chatbot_code') or data.get('chatbot_name')
+        intro_message = data.get('intro_message')
+        
+        if not chatbot_code or intro_message is None:
+            return jsonify({"success": False, "error": "Chatbot code and intro message are required"}), 400
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+            
+        chatbot.intro_message = intro_message
         db.commit()
-        return jsonify({'success': True})
+        
+        # Reload content to reflect changes
+        load_program_content()
+        
+        logger.info(f"Successfully updated intro message for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Intro message updated successfully"})
+        
     except Exception as e:
-        db.rollback()
-        logger.error(f"Error clearing chat history: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
+        if db: db.rollback()
+        logger.error(f"Error in update_intro_message: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
-        close_db(db)
+        if db: close_db(db)
 
-@app.route('/admin_preview_upload', methods=['POST'])
+@app.route('/update_quota', methods=['POST'])
 @requires_auth
-def admin_preview_upload():
-    """Preview uploaded files before creating or updating a chatbot"""
+def update_quota():
+    """Update the daily question quota of a chatbot."""
+    db = get_db()
     try:
-        # Get files from request
-        files = request.files.getlist('files')
-        if not files or not files[0]:
-            return jsonify({"error": "Please upload at least one file"}), 400
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
             
-        logger.info(f"Preview request received: {[f.filename for f in files]}")
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = data.get('chatbot_code') or data.get('chatbot_name')
+        quota = data.get('quota')
         
-        # Check if this is for appending to existing content
-        current_content = request.form.get('current_content', '')
-        append_content = request.form.get('append_content', 'false').lower() == 'true'
-        
-        # Save and extract text from each file
-        combined_content = ""
-        file_contents = []
-        
-        for file in files:
-            filename = secure_filename(file.filename)
-            file_ext = os.path.splitext(filename)[1].lower()
-            temp_path = os.path.join('temp', filename)
-            os.makedirs('temp', exist_ok=True)
-            file.save(temp_path)
+        if not chatbot_code or quota is None:
+            return jsonify({"success": False, "error": "Chatbot code and quota are required"}), 400
             
-            try:
-                file_content = ""
-                if file_ext == '.txt':
-                    with open(temp_path, 'r', encoding='utf-8') as f:
-                        file_content = f.read()
-                elif file_ext == '.pdf' and PYPDF2_AVAILABLE:
-                    with open(temp_path, 'rb') as f:
-                        pdf_reader = PyPDF2.PdfReader(f)
-                        for page_num in range(len(pdf_reader.pages)):
-                            page = pdf_reader.pages[page_num]
-                            file_content += (page.extract_text() or "") + "\n"
-                elif file_ext in ['.ppt', '.pptx'] and PPTX_AVAILABLE:
-                    presentation = Presentation(temp_path)
-                    for slide in presentation.slides:
-                        for shape in slide.shapes:
-                            if hasattr(shape, "text"):
-                                file_content += shape.text + "\n"
-                elif file_ext in ['.doc', '.docx'] and DOCX_AVAILABLE:
-                    doc = docx.Document(temp_path)
-                    for para in doc.paragraphs:
-                        file_content += para.text + "\n"
-                elif TEXTRACT_AVAILABLE:
-                    file_content = textract.process(temp_path).decode('utf-8')
-                else:
-                    return jsonify({"error": f"No library available to process {file_ext} files"}), 400
-                
-                # Clean the extracted content
-                cleaned_content = clean_text(file_content)
-                
-                # Add to file contents array with metadata
-                file_contents.append({
-                    "filename": filename,
-                    "content": cleaned_content,
-                    "char_count": len(cleaned_content)
-                })
-                
-                combined_content += cleaned_content + "\n\n"
-                
-            except Exception as e:
-                logger.error(f"Error extracting content from {filename}: {str(e)}", exc_info=True)
-                return jsonify({"error": f"Error extracting content from {filename}: {str(e)}"}), 500
-            finally:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-        
-        if not combined_content.strip():
-            return jsonify({"error": "The extracted content is empty"}), 400
-        
-        # If appending to existing content, include that in the preview
-        preview_content = combined_content
-        if append_content and current_content:
-            preview_content = current_content + "\n\n" + combined_content
-            # Add a note about existing content
-            file_contents.insert(0, {
-                "filename": "Existing Content",
-                "content": current_content,
-                "char_count": len(current_content)
-            })
-        
-        # Check character limit
-        content_length = len(preview_content)
-        char_limit = 50000  # Default limit, would normally come from the form
-        
+        # Validate quota
         try:
-            char_limit = int(request.form.get('char_limit', 50000))
-        except:
-            pass
+            quota = int(quota)
+            if quota < 1 or quota > 100:
+                return jsonify({"success": False, "error": "Quota must be between 1 and 100"}), 400
+        except ValueError:
+            return jsonify({"success": False, "error": "Quota must be a valid number"}), 400
             
-        # Prepare response with preview data
-        response = {
-            "success": True,
-            "files": file_contents,
-            "total_char_count": content_length,
-            "char_limit": char_limit,
-            "exceeds_limit": content_length > char_limit,
-            "combined_preview": preview_content,
-            "append_mode": append_content
-        }
-        
-        # Add specific warning if limit exceeded
-        if content_length > char_limit:
-            # Calculate costs using GPT-4o-mini pricing
-            estimated_tokens = content_length // 4  # Rough estimate of tokens
-            input_cost = (estimated_tokens * 0.0000005)  # $0.0005 per 1K tokens for input
-            output_cost = 100 * 0.0000015  # Assuming ~100 output tokens, $0.0015 per 1K tokens
-            total_cost = input_cost + output_cost
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
             
-            response["warning"] = f"Content exceeds {char_limit:,} characters (current: {content_length:,}). This will increase API costs. Each conversation will use approximately {estimated_tokens:,} input tokens, costing about ${total_cost:.5f} per conversation based on GPT-4o-mini pricing."
+        chatbot.quota = quota
+        db.commit()
         
-        return jsonify(response)
+        # Reload content to reflect changes
+        load_program_content()
+        
+        logger.info(f"Successfully updated quota for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Quota updated successfully"})
         
     except Exception as e:
-        logger.error(f"Unexpected error in preview: {str(e)}", exc_info=True)
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+        if db: db.rollback()
+        logger.error(f"Error in update_quota: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/get_chatbot_content', methods=['POST'])
+@requires_auth
+def get_chatbot_content():
+    """Get the content of a chatbot for editing."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+            
+        return jsonify({
+            "success": True,
+            "content": chatbot.content,
+            "char_count": len(chatbot.content)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in get_chatbot_content: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/admin/get_chatbot_content', methods=['GET'])
+@requires_auth
+def admin_get_chatbot_content():
+    """Get the content of a chatbot for editing (admin route)."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.args.get('chatbot_code') or request.args.get('chatbot_name')
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+            
+        return jsonify({
+            "success": True,
+            "content": chatbot.content,
+            "char_count": len(chatbot.content)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in admin_get_chatbot_content: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/update_chatbot_content', methods=['POST'])
+@requires_auth
+def update_chatbot_content():
+    """Update the content of an existing chatbot."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        content = request.form.get('content')
+        
+        if not chatbot_code or content is None:
+            return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+            
+        # Check if content exceeds character limit
+        char_limit = chatbot.char_limit or 50000
+        if len(content) > char_limit:
+            return jsonify({
+                "success": False,
+                "error": f"Content exceeds character limit of {char_limit}",
+                "char_count": len(content),
+                "char_limit": char_limit
+            }), 400
+            
+        chatbot.content = content
+        db.commit()
+        
+        # Update in-memory content and hash
+        load_program_content()
+        
+        logger.info(f"Successfully updated content for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Chatbot content updated successfully"})
+        
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in update_chatbot_content: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/admin/update_chatbot_content', methods=['POST'])
+@requires_auth
+def admin_update_chatbot_content():
+    """Update the content of an existing chatbot through admin interface."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        content = request.form.get('content')
+        
+        if not chatbot_code or content is None:
+            return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+            
+        # Check if content exceeds character limit
+        char_limit = chatbot.char_limit or 50000
+        if len(content) > char_limit:
+            return jsonify({
+                "success": False,
+                "error": f"Content exceeds character limit of {char_limit}",
+                "char_count": len(content),
+                "char_limit": char_limit
+            }), 400
+            
+        chatbot.content = content
+        db.commit()
+        
+        # Update in-memory content and hash
+        load_program_content()
+        
+        logger.info(f"Successfully updated content for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Chatbot content updated successfully"})
+        
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_update_chatbot_content: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+# Custom cosine similarity function to avoid scikit-learn dependency issues
+def custom_cosine_similarity(a, b):
+    """Calculate cosine similarity between two vectors"""
+    # Convert inputs to numpy arrays if they aren't already
+    a = np.array(a, dtype=np.float64)
+    b = np.array(b, dtype=np.float64)
+    
+    # Ensure vectors are flattened
+    a = a.flatten()
+    b = b.flatten()
+    
+    # Calculate dot product
+    dot_product = np.dot(a, b)
+    
+    # Calculate magnitudes
+    magnitude_a = np.sqrt(np.sum(np.square(a)))
+    magnitude_b = np.sqrt(np.sum(np.square(b)))
+    
+    # Calculate cosine similarity
+    if magnitude_a == 0 or magnitude_b == 0:
+        return 0  # Avoid division by zero
+    else:
+        return dot_product / (magnitude_a * magnitude_b)
 
 if __name__ == '__main__':
     # Only migrate content if database is empty
@@ -1730,6 +1941,9 @@ if __name__ == '__main__':
     
     # Add user site-packages to sys.path
     sys.path.append(site.getusersitepackages())
+    
+    # Setup database monitoring
+    setup_database_monitoring()
     
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

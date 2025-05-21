@@ -343,6 +343,23 @@
                                                                         <div class="form-text">Maximum questions a user can ask per day</div>
                                                                     </div>
                                                                 </div>
+                                                                
+                                                                <!-- Category Selection -->
+                                                                <div class="update-category-form mb-3">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="mb-2">
+                                                                        <label for="category_{{ chatbot.name }}" class="form-label">Program Category:</label>
+                                                                        <div class="input-group">
+                                                                            <select class="form-select form-select-sm category-field" id="category_{{ chatbot.name }}">
+                                                                                <option value="standard" {% if chatbot.category == 'standard' or not chatbot.category %}selected{% endif %}>Standard Programs</option>
+                                                                                <option value="tap" {% if chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
+                                                                                <option value="elearning" {% if chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
+                                                                            </select>
+                                                                            <button type="button" class="btn btn-sm btn-secondary update-category-btn"><i class="bi bi-arrow-clockwise"></i> Update</button>
+                                                                        </div>
+                                                                        <div class="form-text">Category determines how the program is grouped</div>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                         
@@ -430,6 +447,16 @@
                                                 <label for="description" class="form-label">Program Description</label>
                                                 <textarea class="form-control" id="description" name="description" rows="3"></textarea>
                                                 <div class="form-text">Brief description of the program (will appear on selection page)</div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label for="category" class="form-label">Program Category</label>
+                                                <select class="form-select" id="category" name="category">
+                                                    <option value="standard">Standard Programs</option>
+                                                    <option value="tap">TAP Programs</option>
+                                                    <option value="elearning">eLearning</option>
+                                                </select>
+                                                <div class="form-text">Category determines how the program is grouped on the selection page</div>
                                             </div>
                                             
                                             <div class="mb-3">
@@ -2378,6 +2405,86 @@
                     });
                 });
             }
+
+            // Handle description updates
+            document.querySelectorAll('.update-desc-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const form = this.closest('.update-desc-form');
+                    const chatbot = form.querySelector('.chatbot-name').value;
+                    const description = form.querySelector('.description-field').value;
+                    
+                    const formData = new FormData();
+                    formData.append('chatbot_code', chatbot);
+                    formData.append('description', description);
+                    
+                    this.disabled = true;
+                    this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+                    
+                    fetch("{{ url_for('admin_update_description') }}", {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            this.innerHTML = '<i class="bi bi-check-circle"></i> Done!';
+                            setTimeout(() => {
+                                this.innerHTML = '<i class="bi bi-check-circle"></i> Update Description';
+                                this.disabled = false;
+                            }, 2000);
+                        } else {
+                            alert('Error: ' + data.error);
+                            this.innerHTML = '<i class="bi bi-check-circle"></i> Update Description';
+                            this.disabled = false;
+                        }
+                    })
+                    .catch(error => {
+                        alert('Network error: ' + error);
+                        this.innerHTML = '<i class="bi bi-check-circle"></i> Update Description';
+                        this.disabled = false;
+                    });
+                });
+            });
+            
+            // Handle category updates
+            document.querySelectorAll('.update-category-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const form = this.closest('.update-category-form');
+                    const chatbot = form.querySelector('.chatbot-name').value;
+                    const category = form.querySelector('.category-field').value;
+                    
+                    const formData = new FormData();
+                    formData.append('chatbot_code', chatbot);
+                    formData.append('category', category);
+                    
+                    this.disabled = true;
+                    this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+                    
+                    fetch("{{ url_for('admin_update_category') }}", {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            this.innerHTML = '<i class="bi bi-check-circle"></i> Done!';
+                            setTimeout(() => {
+                                this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Update';
+                                this.disabled = false;
+                            }, 2000);
+                        } else {
+                            alert('Error: ' + data.error);
+                            this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Update';
+                            this.disabled = false;
+                        }
+                    })
+                    .catch(error => {
+                        alert('Network error: ' + error);
+                        this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Update';
+                        this.disabled = false;
+                    });
+                });
+            });
         });
 
         function applyConvoFilters() {

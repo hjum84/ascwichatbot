@@ -77,6 +77,7 @@ class ChatbotContent(Base):
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     quota = Column(Integer, nullable=False, default=3)  # Max questions quota
     intro_message = Column(Text, nullable=False, default="Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.")  # Customizable intro message
+    category = Column(String(50), nullable=False, default="standard")  # Program category: standard, tap, elearning
     
     @classmethod
     def get_by_code(cls, db, code):
@@ -92,7 +93,7 @@ class ChatbotContent(Base):
     @classmethod
     def create_or_update(cls, db, code, name, content, description=None, quota=3, 
                         intro_message="Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.",
-                        char_limit=50000, is_active=True):
+                        char_limit=50000, is_active=True, category="standard"):
         """Create or update chatbot content"""
         existing = cls.get_by_code(db, code)
         if existing:
@@ -104,6 +105,7 @@ class ChatbotContent(Base):
             existing.intro_message = intro_message
             existing.char_limit = char_limit
             existing.is_active = is_active
+            existing.category = category
             existing.updated_at = datetime.datetime.utcnow()
             return existing
         else:
@@ -115,7 +117,8 @@ class ChatbotContent(Base):
                 quota=quota,
                 intro_message=intro_message,
                 char_limit=char_limit,
-                is_active=is_active
+                is_active=is_active,
+                category=category
             )
             db.add(new_content)
             return new_content
@@ -131,7 +134,8 @@ class ChatbotContent(Base):
             "is_active": self.is_active,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "intro_message": self.intro_message
+            "intro_message": self.intro_message,
+            "category": self.category
         }
 
 # Chat history model

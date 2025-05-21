@@ -494,12 +494,14 @@ def program_select():
         chatbots = ChatbotContent.get_all_active(db)
         
         available_programs = []
+        available_program_codes = []
+        
         for chatbot in chatbots:
             # Determine if NEW badge should be shown
             show_new = False
             if chatbot.created_at:
-                # Show NEW if created within the last 7 days
-                if (datetime.now() - chatbot.created_at).days < 7:
+                # Show NEW if created within the last 14 days (changed from 7 days)
+                if (datetime.now() - chatbot.created_at).days < 14:
                     show_new = True
             
             # Ensure predefined programs BCC, MI, Safety do not show 'NEW' badge
@@ -510,15 +512,18 @@ def program_select():
                 "code": chatbot.code,
                 "name": chatbot.name,
                 "description": chatbot.description or f"Learn about the {chatbot.name} program content.",
-                "show_new_badge": show_new 
+                "show_new_badge": show_new,
+                "category": chatbot.category or "standard"  # Include category, default to standard
             }
             available_programs.append(program_info)
+            available_program_codes.append(chatbot.code)
         
         available_programs.sort(key=lambda x: x["name"])
         
         logger.debug(f"Program select page for user: {session.get('user_id')}, showing {len(available_programs)} programs")
         return render_template('program_select.html', 
-                                available_programs=available_programs)
+                              available_programs=available_programs,
+                              available_program_codes=available_program_codes)
     finally:
         close_db(db)
 
@@ -1675,6 +1680,7 @@ def admin_upload():
         chatbot_code = request.form.get('course_name')
         display_name = request.form.get('display_name')
         description = request.form.get('description', '')
+        category = request.form.get('category', 'standard')
         intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.')
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
@@ -1684,7 +1690,7 @@ def admin_upload():
         
         # Log what we received for debugging
         logger.info(f"Admin upload - chatbot_code: {chatbot_code}, display_name: {display_name}")
-        logger.info(f"Admin upload - char_limit: {char_limit}, auto_summarize: {auto_summarize}")
+        logger.info(f"Admin upload - char_limit: {char_limit}, auto_summarize: {auto_summarize}, category: {category}")
         logger.info(f"Request form keys: {list(request.form.keys())}")
         if 'files' in request.files:
             logger.info(f"Request has {len(request.files.getlist('files'))} files")
@@ -1775,7 +1781,8 @@ def admin_upload():
             quota=default_quota,
             intro_message=intro_message,
             char_limit=char_limit,
-            is_active=True # New chatbots are active by default
+            is_active=True, # New chatbots are active by default
+            category=category
         )
         db.commit()
         
@@ -2174,6 +2181,42 @@ def admin_update_chatbot_content():
         if db: db.rollback()
         logger.error(f"Error in admin_update_chatbot_content: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/admin/update_category', methods=['POST'])
+@requires_auth
+def admin_update_category():
+    """Update the category of an existing chatbot."""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        new_category = request.form.get('category')
+
+        if not chatbot_code or not new_category:
+            return jsonify({"success": False, "error": "Chatbot code and category are required."}), 400
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found."}), 404
+
+        # Validate category
+        valid_categories = ['standard', 'tap', 'elearning']
+        if new_category not in valid_categories:
+            return jsonify({"success": False, "error": f"Invalid category. Must be one of: {', '.join(valid_categories)}"}), 400
+
+        chatbot.category = new_category
+        db.commit()
+        load_program_content() # Reload content to reflect changes
+
+        logger.info(f"Successfully updated category to '{new_category}' for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Category updated successfully!"})
+
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_update_category: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
     finally:
         if db: close_db(db)
 

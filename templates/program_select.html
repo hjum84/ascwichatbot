@@ -2,117 +2,558 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Select a Learning Program</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
     <style>
-        .program-container {
-            background-color: #ffffff;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 500px;
-            margin: 50px auto;
-            text-align: center;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-
-        .program-container h2 {
-            margin-bottom: 20px;
-            font-size: 24px;
+        
+        html, body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f5f7fa;
             color: #333;
+            height: 100%;
+            line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
-
-        .program-list {
+        
+        .page-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            gap: 15px;
-            margin: 30px 0;
         }
-
-        .program-item {
-            background-color: #f8f8f8;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 20px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-align: left;
-            text-decoration: none;
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e1e5eb;
         }
-
-        .program-item:hover {
-            background-color: #e8f4f8;
-            border-color: #0073b1;
-        }
-
-        .program-item h3 {
-            margin: 0 0 5px 0;
-            color: #0073b1;
-            text-decoration: none;
-        }
-
-        .program-item p {
-            margin: 0;
+        
+        .user-info {
             font-size: 14px;
-            color: #666;
+            color: #64748b;
+        }
+        
+        .user-info a {
+            color: #0073e6;
             text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .user-info a:hover {
+            text-decoration: underline;
+        }
+        
+        .title-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .title-section h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 10px;
+        }
+        
+        .title-section p {
+            font-size: 16px;
+            color: #64748b;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .programs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+            width: 100%;
+            overflow-y: auto;
+            padding: 5px;
+        }
+        
+        .program-card {
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.08);
+            transition: all 0.25s ease;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            height: 100%;
+            position: relative;
+        }
+        
+        .program-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.05), 0 4px 6px rgba(0, 0, 0, 0.08);
+        }
+        
+        .program-card:active {
+            transform: translateY(0);
+        }
+        
+        .program-header {
+            padding: 20px;
+            border-bottom: 1px solid #f0f0f5;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .program-icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #ebf5ff;
+            border-radius: 10px;
+            margin-right: 15px;
+        }
+        
+        .program-icon svg {
+            width: 24px;
+            height: 24px;
+            fill: #0073e6;
+        }
+        
+        .program-title-wrapper {
+            flex: 1;
+        }
+        
+        .program-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: #1a202c;
+            margin: 0;
+            display: flex;
+            align-items: center;
         }
         
         .program-badge {
-            display: inline-block;
-            margin-left: 8px;
-            font-size: 12px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            vertical-align: middle;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 20px;
+            padding: 0 8px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border-radius: 12px;
+            margin-left: 10px;
         }
         
         .badge-new {
-            background-color: #28a745;
+            background-color: #22c55e;
             color: white;
+        }
+        
+        .program-body {
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .program-description {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 20px;
+            flex: 1;
+        }
+        
+        .program-footer {
+            padding: 15px 20px;
+            background-color: #f9fafc;
+            border-top: 1px solid #f0f0f5;
+            text-align: right;
+        }
+        
+        .program-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #0073e6;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+        }
+        
+        .program-button:hover {
+            background-color: #0059b3;
+        }
+        
+        .program-button svg {
+            width: 18px;
+            height: 18px;
+            margin-left: 6px;
+        }
+        
+        .search-bar {
+            display: flex;
+            margin-bottom: 25px;
+            position: relative;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 12px 20px;
+            padding-left: 45px;
+            border: 1px solid #e1e5eb;
+            border-radius: 8px;
+            font-size: 15px;
+            background-color: #fff;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #0073e6;
+            box-shadow: 0 0 0 3px rgba(0, 115, 230, 0.15);
+        }
+        
+        .search-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+        }
+        
+        .category-tabs {
+            display: flex;
+            margin-bottom: 25px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            white-space: nowrap;
+            padding-bottom: 5px;
+        }
+        
+        .category-tabs::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .category-tab {
+            padding: 8px 16px;
+            margin-right: 10px;
+            border-radius: 100px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #64748b;
+            background-color: #f1f5f9;
+            white-space: nowrap;
+            border: none;
+        }
+        
+        .category-tab.active {
+            background-color: #0073e6;
+            color: #fff;
+        }
+        
+        .category-tab:hover:not(.active) {
+            background-color: #e2e8f0;
+            color: #1e293b;
+        }
+        
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+        
+        .empty-state-icon {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            color: #94a3b8;
+        }
+        
+        .empty-state-text {
+            font-size: 18px;
+            font-weight: 500;
+            color: #1a202c;
+            margin-bottom: 10px;
+        }
+        
+        .empty-state-subtext {
+            font-size: 14px;
+            color: #64748b;
+            max-width: 300px;
+        }
+        
+        .flash-messages {
+            margin-bottom: 20px;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .alert-info {
+            background-color: #e0f2fe;
+            color: #0369a1;
+            border: 1px solid #bae6fd;
+        }
+        
+        .alert-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+        
+        .alert-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+        
+        .alert-success {
+            background-color: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(-10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        @media (max-width: 768px) {
+            .programs-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .program-card {
+                max-width: 100%;
+            }
+            
+            .title-section h1 {
+                font-size: 24px;
+            }
+            
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .user-info {
+                margin-top: 10px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="program-container">
+    <div class="page-container">
+        <div class="header">
+            <div>
+                <h2 style="font-size: 22px; color: #0073e6;">Learning Programs</h2>
+            </div>
+            {% if session.user_email %}
+            <div class="user-info">
+                Logged in as: <strong>{{ session.user_email }}</strong> | 
+                <a href="{{ url_for('logout') }}">Logout</a>
+            </div>
+            {% endif %}
+        </div>
+        
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <div style="padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center;">
+                <div class="flash-messages">
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category if category else 'info' }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem;">{{ message }}</div>
+                    <div class="alert alert-{{ category if category else 'info' }}">{{ message }}</div>
                 {% endfor %}
                 </div>
             {% endif %}
         {% endwith %}
-
-        {% if session.user_email %}
-            <div style="text-align: right; margin-bottom: 15px; font-size: 0.9em;">
-                Logged in as: <strong>{{ session.user_email }}</strong> | 
-                <a href="{{ url_for('logout') }}" style="color: #007bff;">Logout</a>
-            </div>
-        {% endif %}
-
-        <h2>Select a Learning Program</h2>
-        <p>Choose which program's chatbot you would like to access:</p>
         
-        <div class="program-list">
-            {% for program in available_programs %}
-                <a href="{{ url_for('set_program', program=program.code) }}" class="program-item">
-                    <h3>
-                        {{ program.name }}
-                        {% if program.show_new_badge %}
-                            <span class="program-badge badge-new">NEW</span>
-                        {% endif %}
-                    </h3>
-                    <p>{{ program.description }}</p>
-                </a>
-            {% endfor %}
-            
+        <div class="title-section">
+            <h1>Select a Learning Program</h1>
+            <p>Choose which program's chatbot you would like to access. Each program provides interactive AI assistance based on specific learning content.</p>
+        </div>
+        
+        <div class="search-bar">
+            <input type="text" id="programSearch" class="search-input" placeholder="Search programs...">
+            <div class="search-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+            </div>
+        </div>
+        
+        <div class="category-tabs">
+            <button class="category-tab active" data-category="all">All Programs</button>
+            <button class="category-tab" data-category="new">New</button>
+            <button class="category-tab" data-category="standard">Standard Programs</button>
+            <button class="category-tab" data-category="tap">TAP Programs</button>
+            <button class="category-tab" data-category="elearning">eLearning</button>
+        </div>
+        
+        <div class="programs-grid">
             {% if available_programs|length == 0 %}
-                <div class="alert alert-info">No chatbot programs are currently available.</div>
+                <div class="empty-state">
+                    <div class="empty-state-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div class="empty-state-text">No programs available</div>
+                    <div class="empty-state-subtext">There are currently no chatbot programs available for your account.</div>
+                </div>
+            {% else %}
+                {% for program in available_programs %}
+                <a href="{{ url_for('set_program', program=program.code) }}" class="program-card" 
+                   data-name="{{ program.name.lower() }}" 
+                   data-description="{{ program.description.lower() }}"
+                   data-category="{% if program.show_new_badge %}new{% endif %} {% if program.category %}{{ program.category | lower }}{% else %}standard{% endif %} all">
+                    <div class="program-header">
+                        <div style="display: flex; align-items: center;">
+                            <div class="program-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                                    <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
+                                </svg>
+                            </div>
+                            <div class="program-title-wrapper">
+                                <h3 class="program-title">
+                                    {{ program.name }}
+                                    {% if program.show_new_badge %}
+                                        <span class="program-badge badge-new">NEW</span>
+                                    {% endif %}
+                                </h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="program-body">
+                        <p class="program-description">{{ program.description }}</p>
+                    </div>
+                    <div class="program-footer">
+                        <div class="program-button">
+                            Start Chatting
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
             {% endif %}
         </div>
     </div>
+
+    <script>
+        // Filter programs by search text
+        const programSearch = document.getElementById('programSearch');
+        const programCards = document.querySelectorAll('.program-card');
+        
+        programSearch.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase().trim();
+            
+            programCards.forEach(card => {
+                const name = card.getAttribute('data-name');
+                const description = card.getAttribute('data-description');
+                
+                if (name.includes(searchTerm) || description.includes(searchTerm)) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            
+            checkEmptyState();
+        });
+        
+        // Filter programs by category
+        const categoryTabs = document.querySelectorAll('.category-tab');
+        
+        categoryTabs.forEach(tab => {
+            tab.addEventListener('click', function() {
+                // Remove active class from all tabs
+                categoryTabs.forEach(t => t.classList.remove('active'));
+                
+                // Add active class to clicked tab
+                this.classList.add('active');
+                
+                const category = this.getAttribute('data-category');
+                
+                // Filter cards by category
+                programCards.forEach(card => {
+                    const categories = card.getAttribute('data-category').split(' ');
+                    
+                    if (categories.includes(category)) {
+                        card.style.display = '';
+                    } else {
+                        card.style.display = 'none';
+                    }
+                });
+                
+                checkEmptyState();
+            });
+        });
+        
+        // Check if no programs are visible and show empty state
+        function checkEmptyState() {
+            const visibleCards = document.querySelectorAll('.program-card[style=""]').length;
+            const emptyState = document.querySelector('.empty-state');
+            
+            if (visibleCards === 0 && !emptyState) {
+                const grid = document.querySelector('.programs-grid');
+                
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'empty-state';
+                emptyDiv.innerHTML = `
+                    <div class="empty-state-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div class="empty-state-text">No matching programs</div>
+                    <div class="empty-state-subtext">Try adjusting your search or filter criteria.</div>
+                `;
+                
+                grid.appendChild(emptyDiv);
+            } else if (visibleCards > 0 && emptyState) {
+                emptyState.remove();
+            }
+        }
+    </script>
 </body>
 </html> 

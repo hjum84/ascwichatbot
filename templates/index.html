@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>{{ program_display_name }} Chatbot</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <!-- Optional: Include marked.js if you are using Markdown formatting -->
@@ -100,9 +100,9 @@
 <body>
   {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-          <div style="padding: 10px; margin-bottom: 10px; border-radius: 5px; text-align: center; max-width: 800px; margin-left:auto; margin-right:auto;">
+          <div style="padding: 10px; margin-bottom: 10px; border-radius: 5px; text-align: center; max-width: 800px; margin-left:auto; margin-right:auto; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100;">
           {% for category, message in messages %}
-              <div class="alert alert-{{ category if category else 'info' }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem; margin-bottom: 5px;">{{ message }}</div>
+              <div class="alert alert-{{ category if category else 'info' }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem; margin-bottom: 5px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">{{ message }}</div>
           {% endfor %}
           </div>
       {% endif %}
@@ -118,16 +118,16 @@
           {% endif %}
         </div>
         {% if session.user_email %}
-        <div class="user-status" style="font-size: 0.85em; color: #333; margin-top: 5px;">
+        <div class="user-status" style="font-size: 0.85em; color: #64748b; margin-top: 5px;">
             Logged in as: <strong>{{ session.user_email }}</strong> | 
-            <a href="{{ url_for('logout') }}" style="color: #007bff; text-decoration: none;">Logout</a>
+            <a href="{{ url_for('logout') }}" style="color: #0073e6; text-decoration: none;">Logout</a>
         </div>
         {% endif %}
       </div>
       <a href="{{ url_for('switch_program') }}" class="switch-program-btn">Switch Program</a>
     </div>
     <div style="text-align:right; margin: 5px 10px 0 0;">
-      <button id="clear-history-btn" class="btn btn-sm btn-danger" style="font-size:13px;">Delete Conversation</button>
+      <button id="clear-history-btn">Delete Conversation</button>
     </div>
     <div id="chat-box" class="chat-box">
       <div class="message bot system-welcome-message">
@@ -146,12 +146,16 @@
       <textarea id="userInput" placeholder="Type your message here..." rows="1"></textarea>
       <button id="micBtn" class="mic-btn" type="button" aria-label="Start voice input">
         <span class="mic-wave"></span>
-        <svg id="micIcon" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="12" fill="#f5f5f5"/>
-          <path d="M12 17c1.66 0 3-1.34 3-3V8a3 3 0 0 0-6 0v6c0 1.66 1.34 3 3 3zm5-3v-1a1 1 0 1 0-2 0v1a5 5 0 0 1-10 0v-1a1 1 0 1 0-2 0v1c0 3.07 2.13 5.64 5 6.32V21h2v-1.68c2.87-.68 5-3.25 5-6.32z" fill="#333"/>
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5a3 3 0 0 0-6 0v6c0 1.66 1.34 3 3 3zm-1-9a1 1 0 0 1 2 0v6a1 1 0 0 1-2 0V5z" fill="currentColor"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="currentColor"/>
         </svg>
       </button>
-      <button id="sendBtn" class="send-btn" onclick="sendMessage()">Send</button>
+      <button id="sendBtn" class="send-btn" aria-label="Send message">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+        </svg>
+      </button>
     </div>
   </div>
 
@@ -171,6 +175,52 @@
       }
     });
 
+    // Add click event to send button
+    document.getElementById('sendBtn').addEventListener('click', sendMessage);
+
+    // Typing animation function for bot messages
+    function typeMessage(element, text, speed = 10) {
+      return new Promise((resolve) => {
+        let i = 0;
+        element.classList.add('typing');
+        
+        function type() {
+          if (i < text.length) {
+            // Add character by character
+            element.textContent += text.charAt(i);
+            i++;
+            setTimeout(type, speed);
+          } else {
+            element.classList.remove('typing');
+            resolve();
+          }
+        }
+        
+        element.textContent = '';
+        type();
+      });
+    }
+
+    // Add the typing indicator
+    function showTypingIndicator() {
+      const chatBox = document.getElementById('chat-box');
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'typing-indicator';
+      typingDiv.id = 'typing-indicator';
+      typingDiv.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+      chatBox.appendChild(typingDiv);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      return typingDiv;
+    }
+
+    // Remove the typing indicator
+    function removeTypingIndicator() {
+      const typingIndicator = document.getElementById('typing-indicator');
+      if (typingIndicator) {
+        typingIndicator.remove();
+      }
+    }
+
     // Function to send the message to the backend
     function sendMessage() {
       const userInput = document.getElementById('userInput');
@@ -182,6 +232,9 @@
       userInput.value = '';  // Clear the textarea
       userInput.style.height = 'auto';  // Reset height after clearing
 
+      // Show typing indicator
+      const typingIndicator = showTypingIndicator();
+
       // Send the message to the backend
       fetch('/chat', {
         method: 'POST',
@@ -192,30 +245,53 @@
       })
       .then(response => response.json())
       .then(data => {
-        if (data.reply) {
-          addMessage(data.reply, 'bot');
-        } else {
-          addMessage("Error: " + data.error, 'bot');
-        }
+        // Remove typing indicator after a slight delay to simulate thinking
+        setTimeout(() => {
+          removeTypingIndicator();
+          if (data.reply) {
+            addMessage(data.reply, 'bot', true);
+          } else {
+            addMessage("Error: " + data.error, 'bot', true);
+          }
+        }, 500 + Math.random() * 1000); // Random delay between 500ms and 1.5s
       })
       .catch(error => {
-        addMessage("Network error: " + error, 'bot');
+        removeTypingIndicator();
+        addMessage("Network error: " + error, 'bot', true);
       });
     }
 
     // Function to add a message to the chat box
-    function addMessage(message, sender) {
+    function addMessage(message, sender, animate = false) {
       const chatBox = document.getElementById('chat-box');
       const messageDiv = document.createElement('div');
       messageDiv.classList.add('message', sender);
+      
       // Process the message for Markdown formatting and newline conversion
       const formattedMessage = marked.parseInline ? marked.parseInline(message).replace(/\n/g, '<br>') : message.replace(/\n/g, '<br>');
-      messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
-      chatBox.appendChild(messageDiv);
-      chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+      
+      if (sender === 'bot' && animate) {
+        // Create a span for the text that will be animated
+        const textSpan = document.createElement('span');
+        textSpan.className = 'bot-text';
+        messageDiv.innerHTML = `<p></p>`;
+        messageDiv.querySelector('p').appendChild(textSpan);
+        chatBox.appendChild(messageDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        
+        // Animate the text after adding to DOM
+        typeMessage(textSpan, message, 5).then(() => {
+          // Replace with fully formatted text after typing animation
+          messageDiv.querySelector('p').innerHTML = formattedMessage;
+        });
+      } else {
+        messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
+        chatBox.appendChild(messageDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
     }
 
-    // 페이지 로드 시, 서버에서 전달된 chat_history를 JS로 마크다운 파싱해서 렌더링
+    // On page load, render chat history with markdown
     window.onload = function() {
       const chatBox = document.getElementById('chat-box');
       const welcomeMessageDiv = chatBox.querySelector('.system-welcome-message'); // Get the welcome message div
@@ -238,7 +314,7 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // 대화 내용 지우기 버튼 이벤트
+    // Delete conversation history button
     document.getElementById('clear-history-btn').onclick = function() {
       if (!confirm('Are you sure you want to delete all conversation history?')) return;
       fetch('/clear_chat_history', {method: 'POST'})

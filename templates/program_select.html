@@ -23,6 +23,13 @@
             -moz-osx-font-smoothing: grayscale;
         }
         
+        :root {
+            --acs-green: #4CB848;
+            --acs-dark-green: #38A635;
+            --acs-light-green: #62C55F;
+            --acs-accent: #333333;
+        }
+        
         .page-container {
             max-width: 1200px;
             margin: 0 auto;
@@ -41,19 +48,54 @@
             border-bottom: 1px solid #e1e5eb;
         }
         
+        .logo-container {
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo-image {
+            height: 60px;
+            margin-right: 10px;
+        }
+        
+        .logo-banner {
+            height: auto;
+            max-width: 360px;
+        }
+        
+        .organization-name {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .organization-name h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--acs-green);
+            margin: 0;
+            line-height: 1.2;
+        }
+        
+        .organization-name p {
+            font-size: 14px;
+            color: var(--acs-accent);
+            margin: 0;
+        }
+        
         .user-info {
             font-size: 14px;
             color: #64748b;
         }
         
         .user-info a {
-            color: #0073e6;
+            color: var(--acs-green);
             text-decoration: none;
             font-weight: 500;
         }
         
         .user-info a:hover {
             text-decoration: underline;
+            color: var(--acs-dark-green);
         }
         
         .title-section {
@@ -121,7 +163,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #ebf5ff;
+            background-color: rgba(76, 184, 72, 0.1);
             border-radius: 10px;
             margin-right: 15px;
         }
@@ -129,7 +171,7 @@
         .program-icon svg {
             width: 24px;
             height: 24px;
-            fill: #0073e6;
+            fill: var(--acs-green);
         }
         
         .program-title-wrapper {
@@ -160,7 +202,7 @@
         }
         
         .badge-new {
-            background-color: #22c55e;
+            background-color: var(--acs-green);
             color: white;
         }
         
@@ -189,7 +231,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background-color: #0073e6;
+            background-color: var(--acs-green);
             color: #fff;
             font-size: 14px;
             font-weight: 500;
@@ -202,7 +244,7 @@
         }
         
         .program-button:hover {
-            background-color: #0059b3;
+            background-color: var(--acs-dark-green);
         }
         
         .program-button svg {
@@ -275,13 +317,13 @@
         }
         
         .category-tab.active {
-            background-color: #0073e6;
+            background-color: var(--acs-green);
             color: #fff;
         }
         
         .category-tab:hover:not(.active) {
-            background-color: #e2e8f0;
-            color: #1e293b;
+            background-color: rgba(76, 184, 72, 0.1);
+            color: var(--acs-dark-green);
         }
         
         .empty-state {
@@ -384,8 +426,8 @@
 <body>
     <div class="page-container">
         <div class="header">
-            <div>
-                <h2 style="font-size: 22px; color: #0073e6;">Learning Programs</h2>
+            <div class="logo-container">
+                <img src="{{ url_for('static', filename='images/logo-banner.png') }}" alt="Logo" class="logo-banner">
             </div>
             {% if session.user_email %}
             <div class="user-info">
@@ -425,6 +467,7 @@
             <button class="category-tab" data-category="new">New</button>
             <button class="category-tab" data-category="standard">Standard Programs</button>
             <button class="category-tab" data-category="tap">TAP Programs</button>
+            <button class="category-tab" data-category="jsa">JSA Programs</button>
             <button class="category-tab" data-category="elearning">eLearning</button>
         </div>
         
@@ -556,4 +599,4 @@
         }
     </script>
 </body>
-</html> 
+</html>

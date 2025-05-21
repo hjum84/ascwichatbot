@@ -2202,7 +2202,7 @@ def admin_update_category():
             return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found."}), 404
 
         # Validate category
-        valid_categories = ['standard', 'tap', 'elearning']
+        valid_categories = ['standard', 'tap', 'jsa', 'elearning']
         if new_category not in valid_categories:
             return jsonify({"success": False, "error": f"Invalid category. Must be one of: {', '.join(valid_categories)}"}), 400
 

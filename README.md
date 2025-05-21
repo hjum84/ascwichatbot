@@ -92,4 +92,93 @@ To access the admin interface, go to:
 - `/export` - Export user data
 - `/delete_registration` - Remove user registrations
 
-Use the admin credentials configured in the `.env` file to log in. 
+Use the admin credentials configured in the `.env` file to log in.
+
+# ASCWI Chatbot System
+
+An AI-powered chatbot system for the Association for Supervisors in Child Welfare Institute (ASCWI), designed to answer questions about various training programs.
+
+## Functionality Preservation Guidelines
+
+### IMPORTANT: Ensuring Existing Functionality Is Not Lost
+
+When making code changes to this system, it's critical to ensure that existing functionality is not inadvertently disabled or removed. Follow these guidelines to prevent regression:
+
+#### Before Making Changes:
+
+1. **Document Current Behavior**: Thoroughly understand the current functionality before modifying it.
+   - Test all relevant features and document their behavior
+   - Take note of edge cases that are currently handled correctly
+
+2. **Understand Dependencies**: Recognize how components interact before changing them.
+   - Identify which parts of the code depend on the component you're modifying
+   - Note any shared resources or global variables affected by your changes
+
+#### During Implementation:
+
+3. **Incremental Changes**: Make small, focused changes rather than large rewrites.
+   - Test each incremental change before moving to the next one
+   - Commit changes in logical units with clear descriptions
+
+4. **Preserve Functionality First, Optimize Later**: When fixing a bug or adding a feature, first make sure existing functionality works, then optimize.
+   - Add new functionality alongside existing code before removing the old code
+   - Use feature flags to control enabling/disabling new functionality during testing
+
+5. **Comment Temporary Changes**: Clearly mark temporary modifications.
+   - Add "TODO" comments to note incomplete implementations
+   - Document any workarounds that will need to be revisited
+
+#### Testing Requirements:
+
+6. **Comprehensive Testing**: Test all affected features, not just the changed functionality.
+   - Test on different browsers and devices if relevant
+   - Test with various input types, especially file uploads with different formats/sizes
+
+7. **Verify Multi-File Uploads**: Specifically ensure that multi-file upload functionality continues to work.
+   - Test uploading various combinations of file types (txt, pdf, docx, pptx)
+   - Verify that files are properly processed and combined
+   - Check that PowerPoint files are processed correctly on both local and deployed environments
+
+8. **Test Edge Cases**: Make sure your changes don't break existing edge case handling.
+   - Test with empty files or invalid input
+   - Test with very large files or extremely long content
+   - Test with special characters or unusual formatting
+
+#### After Implementation:
+
+9. **Document Changes**: Update documentation to reflect your changes.
+   - Note any changes to behavior, API, or interface
+   - Explain new functionality and how it integrates with existing systems
+
+10. **Monitor After Deployment**: Watch for unexpected issues after deployment.
+    - Check logs for errors or warnings
+    - Monitor performance metrics to ensure your changes don't negatively impact system performance
+
+### Additional Guidelines for Specific Components
+
+#### File Processing:
+
+- The system processes multiple files and combines their content
+- Maintain support for all currently supported file types: txt, pdf, docx, pptx
+- Preserve temporary file management for PowerPoint files
+- Maintain error handling for file processing failures
+
+#### User Interface:
+
+- Maintain all existing interaction patterns unless explicitly redesigning
+- Preserve accessibility features
+- Keep consistent error messaging and feedback
+
+Remember that lost functionality is often more frustrating to users than delayed features. Always prioritize preserving existing capabilities when making changes.
+
+## Installation
+
+[Installation instructions...]
+
+## Usage
+
+[Usage instructions...]
+
+## Configuration
+
+[Configuration details...] 

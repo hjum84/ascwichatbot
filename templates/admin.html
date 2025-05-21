@@ -54,6 +54,134 @@
             margin-right: auto;
         }
 
+        /* 파일 업로드 관련 스타일 */
+        .file-upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .file-upload-area:hover, .file-upload-area.dragover {
+            border-color: var(--acs-green);
+            background-color: rgba(76, 184, 72, 0.05);
+        }
+        
+        .file-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+        }
+        
+        .file-item:hover {
+            border-color: var(--acs-green);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .file-info {
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .file-name {
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .file-size {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .file-actions {
+            margin-left: 15px;
+        }
+        
+        .remove-file {
+            color: #dc3545;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: color 0.2s;
+        }
+        
+        .remove-file:hover {
+            color: #bd2130;
+        }
+        
+        .file-counter {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 10px;
+        }
+        
+        .file-preview-panel {
+            margin-top: 30px;
+        }
+        
+        /* 수정 가능한 파일 내용 관련 스타일 */
+        .file-content-editor {
+            width: 100%;
+            min-height: 200px;
+            font-family: monospace;
+            resize: vertical;
+            white-space: pre-wrap;
+        }
+        
+        .char-counter {
+            text-align: right;
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .char-counter.over-limit {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        
+        /* 드래그앤드롭 메시지 */
+        .drag-message {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .drag-message i {
+            font-size: 2rem;
+            color: var(--acs-green);
+            margin-bottom: 10px;
+        }
+        
+        /* 요약 버튼 스타일 */
+        .summarize-btn {
+            margin-top: 10px;
+            background-color: var(--acs-green);
+            border-color: var(--acs-green);
+        }
+        
+        .summarize-btn:hover {
+            background-color: var(--acs-dark-green);
+            border-color: var(--acs-dark-green);
+        }
+        
+        /* 드래그앤드롭 영역 스타일 */
         .drag-area {
             border: 2px dashed #ccc;
             border-radius: 8px;
@@ -545,7 +673,7 @@
                                 </div>
                             </div>
                             
-                            <!-- CREATE NEW CHATBOT TAB -->
+                            <!-- Create New Chatbot Tab -->
                             <div class="tab-pane fade" id="create-content" role="tabpanel" aria-labelledby="create-tab">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
@@ -553,7 +681,7 @@
                                     </div>
                                     <div class="card-body">
                                         <div class="alert alert-info">
-                                            <strong>Note:</strong> You can upload multiple files. Supported file types: <strong>.txt, .pdf, .ppt, .pptx, .docx</strong>.<br>
+                                            <strong>Note:</strong> You can upload multiple files at once. Supported file types: <strong>.txt, .pdf, .ppt, .pptx, .docx</strong>.<br>
                                             The text will be extracted from each file and combined for the chatbot content.
                                         </div>
                                         
@@ -632,10 +760,30 @@
                                                 </div>
                                             </div>
                                             
-                                            <div class="mb-3">
-                                                <label for="file" class="form-label">Upload Files</label>
-                                                <input type="file" class="form-control" id="file" name="file" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple required>
-                                                <div class="form-text">You can upload multiple files. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
+                                            <!-- 개선된 파일 업로드 영역 -->
+                                            <div class="mb-4">
+                                                <label class="form-label">Upload Files</label>
+                                                <div class="file-upload-area" id="dropArea">
+                                                    <div class="drag-message">
+                                                        <i class="bi bi-cloud-arrow-up-fill d-block"></i>
+                                                        <p>Drag and drop files here, or click below to select files</p>
+                                                        <input type="file" class="form-control" id="file" name="file" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple style="display: none;">
+                                                        <button type="button" id="browseFilesBtn" class="btn btn-outline-primary mt-2">
+                                                            <i class="bi bi-folder2-open"></i> Browse Files
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    <div class="file-list mt-3" id="fileList" style="display: none;">
+                                                        <!-- 파일 목록이 여기에 표시됩니다 -->
+                                                    </div>
+                                                    
+                                                    <div class="d-flex justify-content-between mt-2" id="fileActions" style="display: none !important;">
+                                                        <button type="button" class="btn btn-sm btn-outline-danger" id="clearAllFilesBtn">
+                                                            <i class="bi bi-trash"></i> Clear All
+                                                        </button>
+                                                        <div class="file-counter" id="fileCounter"></div>
+                                                    </div>
+                                                </div>
                                             </div>
                                             
                                             <div class="d-flex justify-content-start mt-3">
@@ -661,23 +809,29 @@
                                             <div id="character-count-info" class="mb-3">
                                                 <div class="card">
                                                     <div class="card-body">
-                                                        <h5 class="card-title">Content Statistics</h5>
-                                                        <p>Total Character Count: <strong id="total-char-count">0</strong></p>
-                                                        <p>Character Limit: <strong id="char-limit">50,000</strong></p>
-                                                        <div id="limit-warning" class="alert alert-danger" style="display: none;">
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <h5 class="card-title mb-0">Content Statistics</h5>
+                                                            <div id="total-char-counter" class="char-counter">
+                                                                <span id="total-char-count">0</span> / <span id="char-limit">50,000</span> characters
+                                                            </div>
+                                                        </div>
+                                                        <div class="progress mt-2">
+                                                            <div class="progress-bar" role="progressbar" id="char-progress-bar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                                        </div>
+                                                        <div id="limit-warning" class="alert alert-danger mt-3" style="display: none;">
                                                             <p><strong>Warning: Content exceeds the character limit!</strong></p>
                                                             <p id="limit-warning-message"></p>
-                                                            <p>Options:</p>
-                                                            <ul>
-                                                                <li>Reduce content by editing the text below</li>
-                                                                <li>Increase the character limit (will increase API costs)</li>
-                                                                <li>
+                                                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                                                <div>
                                                                     <button id="summarize-now-btn" class="btn btn-warning btn-sm">
                                                                         <span class="summarize-btn-text"><i class="bi bi-magic"></i> Summarize Now</span>
                                                                         <span class="spinner-border spinner-border-sm summarize-spinner" role="status" style="display: none;"></span>
                                                                     </button>
-                                                                </li>
-                                                            </ul>
+                                                                </div>
+                                                                <div>
+                                                                    <button id="increase-limit-btn" class="btn btn-outline-secondary btn-sm">Increase Limit</button>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -702,8 +856,13 @@
                                                     <div class="mb-4">
                                                         <div class="card">
                                                             <div class="card-body">
-                                                                <label for="combined-preview" class="form-label">Full Content (Editable)</label>
-                                                                <textarea id="combined-preview" class="form-control" style="white-space: pre-wrap; min-height: 300px; max-height: 600px; resize: vertical; font-family: monospace;"></textarea>
+                                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                    <label for="combined-preview" class="form-label mb-0">Full Content (Editable)</label>
+                                                                    <div class="char-counter">
+                                                                        <span id="combined-char-count">0</span> characters
+                                                                    </div>
+                                                                </div>
+                                                                <textarea id="combined-preview" class="form-control file-content-editor" style="min-height: 400px;"></textarea>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -986,7 +1145,27 @@
                         <div class="tab-pane fade" id="upload-files-panel" role="tabpanel" aria-labelledby="upload-files-tab">
                             <div class="mb-3">
                                 <label for="editFiles" class="form-label">Upload New Files</label>
-                                <input type="file" class="form-control" id="editFiles" name="files" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple>
+                                <div class="file-upload-area" id="editDropArea">
+                                    <div class="drag-message">
+                                        <i class="bi bi-cloud-arrow-up-fill d-block"></i>
+                                        <p>Drag and drop files here, or click below to select files</p>
+                                        <input type="file" class="form-control" id="editFiles" name="files" accept=".txt,.pdf,.ppt,.pptx,.docx" multiple style="display: none;">
+                                        <button type="button" id="editBrowseFilesBtn" class="btn btn-outline-primary mt-2">
+                                            <i class="bi bi-folder2-open"></i> Browse Files
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="file-list mt-3" id="editFileList" style="display: none;">
+                                        <!-- 파일 목록이 여기에 표시됩니다 -->
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-between mt-2" id="editFileActions" style="display: none !important;">
+                                        <button type="button" class="btn btn-sm btn-outline-danger" id="editClearAllFilesBtn">
+                                            <i class="bi bi-trash"></i> Clear All
+                                        </button>
+                                        <div class="file-counter" id="editFileCounter"></div>
+                                    </div>
+                                </div>
                                 <div class="form-text">Upload new files to replace or add to the current content. Supported: .txt, .pdf, .ppt, .pptx, .docx</div>
                                 <div class="form-check mt-2">
                                     <input class="form-check-input" type="checkbox" id="appendContent" checked>
@@ -1010,20 +1189,20 @@
                                 
                                 <div class="card mb-3">
                                     <div class="card-body">
-                                        <h6>Content Statistics</h6>
-                                        <p>Total Character Count: <strong id="edit-total-char-count">0</strong></p>
-                                        <p>Character Limit: <strong id="edit-char-limit">50000</strong></p>
-                                        <div id="edit-limit-warning" class="alert alert-danger" style="display: none;">
-                                            <p><strong>Warning: Content exceeds the character limit!</strong></p>
-                                            <p id="edit-limit-warning-message"></p>
-                                            <div class="mt-2">
-                                                <button id="edit-summarize-now-btn" class="btn btn-warning btn-sm">
-                                                    <span class="summarize-btn-text"><i class="bi bi-magic"></i> Summarize Now</span>
-                                                    <span class="spinner-border spinner-border-sm summarize-spinner" role="status" style="display: none;"></span>
-                                                </button>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <h6 class="mb-0">Content Statistics</h6>
+                                            <div id="edit-total-char-counter" class="char-counter">
+                                                <span id="edit-total-char-count">0</span> / <span id="edit-char-limit">50000</span> characters
                                             </div>
                                         </div>
-                                    </div>
+                                        <div class="progress mt-2">
+                                            <div class="progress-bar" role="progressbar" id="edit-char-progress-bar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                        </div>
+                                        <div id="edit-limit-warning" class="alert alert-danger mt-3" style="display: none;">
+                                            <p><strong>Warning: Content exceeds the character limit!</strong></p>
+                                            <p id="edit-limit-warning-message"></p>
+                                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                                <button id="edit-summarize-now-btn" class="btn btn-warning btn-sm">
                                 </div>
                                 
                                 <ul class="nav nav-tabs mb-3" id="editPreviewTabs" role="tablist">
@@ -1118,6 +1297,80 @@
                 }
             }
             
+            // =============================================
+            // 파일 업로드 관련 변수와 요소들
+            // =============================================
+            const fileInput = document.getElementById('file');
+            const browseFilesBtn = document.getElementById('browseFilesBtn');
+            const dropArea = document.getElementById('dropArea');
+            const fileList = document.getElementById('fileList');
+            const fileCounter = document.getElementById('fileCounter');
+            const fileActions = document.getElementById('fileActions');
+            const clearAllFilesBtn = document.getElementById('clearAllFilesBtn');
+            
+            // 파일 저장을 위한 배열
+            let uploadedFiles = [];
+            
+            // File size formatter
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            // 중복 파일 체크 함수
+            function isDuplicateFile(file, filesArray) {
+                return filesArray.some(f => 
+                    f.name === file.name && 
+                    f.size === file.size && 
+                    f.lastModified === file.lastModified
+                );
+            }
+            
+            // 파일 목록 업데이트 함수
+            function updateFileList() {
+                if (uploadedFiles.length > 0) {
+                    fileList.innerHTML = '';
+                    fileList.style.display = 'block';
+                    fileActions.style.display = 'flex !important';
+                    
+                    uploadedFiles.forEach((file, index) => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item';
+                        fileItem.innerHTML = `
+                            <div class="file-info">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-size">${formatFileSize(file.size)}</div>
+                            </div>
+                            <div class="file-actions">
+                                <button type="button" class="remove-file" data-index="${index}">
+                                    <i class="bi bi-x-circle"></i>
+                                </button>
+                            </div>
+                        `;
+                        fileList.appendChild(fileItem);
+                    });
+                    
+                    fileCounter.textContent = `${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''} selected`;
+                } else {
+                    fileList.style.display = 'none';
+                    fileActions.style.display = 'none !important';
+                    fileCounter.textContent = '';
+                }
+            }
+            
+            // 파일 추가 함수
+            function addFiles(files) {
+                Array.from(files).forEach(file => {
+                    if (!isDuplicateFile(file, uploadedFiles)) {
+                        uploadedFiles.push(file);
+                    }
+                });
+                updateFileList();
+            }
+            
             // Set aria-valuenow for accessibility
             const progressBars = document.querySelectorAll('.progress-bar');
             progressBars.forEach(function(bar) {
@@ -1133,8 +1386,8 @@
             document.getElementById('submit-btn').addEventListener('click', function() {
                 const form = document.getElementById('upload-form');
                 const formData = new FormData(form);
-                const fileInput = document.getElementById('file');
-                if (!fileInput.files.length) {
+                
+                if (uploadedFiles.length === 0) {
                     alert('Please select at least one file');
                     return;
                 }
@@ -1153,7 +1406,7 @@
                 // Always remove original file fields from form data to avoid duplication
                 formData.delete('file');
                 
-                // CRITICAL APPROACH: When preview is visible, ALWAYS use the combined preview content
+                // When preview is visible, use the combined preview content
                 if (isPreviewVisible) {
                     const combinedPreview = document.getElementById('combined-preview');
                     if (combinedPreview && combinedPreview.value) {
@@ -1175,8 +1428,8 @@
                 } else {
                     // Only use the original files if no preview content exists
                     console.log("No preview section found, using original files");
-                    for (let i = 0; i < fileInput.files.length; i++) {
-                        formData.append('files', fileInput.files[i]);
+                    for (let i = 0; i < uploadedFiles.length; i++) {
+                        formData.append('files', uploadedFiles[i]);
                     }
                 }
                 
@@ -1226,21 +1479,21 @@
             
             // Preview button handler
             document.getElementById('preview-btn').addEventListener('click', function() {
-                const form = document.getElementById('upload-form');
-                const formData = new FormData(form);
-                const fileInput = document.getElementById('file');
-                if (!fileInput.files.length) {
+                if (uploadedFiles.length === 0) {
                     alert('Please select at least one file');
                     return;
                 }
+                
+                const form = document.getElementById('upload-form');
+                const formData = new FormData(form);
                 
                 // Get auto-summarize option and add it to form data
                 const autoSummarize = document.getElementById('auto_summarize').checked;
                 formData.append('auto_summarize', autoSummarize.toString());
                 
-                // Add files to form data
-                for (let i = 0; i < fileInput.files.length; i++) {
-                    formData.append('files', fileInput.files[i]);
+                // Add files from uploadedFiles array
+                for (let i = 0; i < uploadedFiles.length; i++) {
+                    formData.append('files', uploadedFiles[i]);
                 }
                 // Remove the single 'file' field to avoid duplication
                 formData.delete('file');
@@ -1265,16 +1518,34 @@
                         // Update character counts
                         document.getElementById('total-char-count').textContent = data.total_char_count.toLocaleString();
                         document.getElementById('char-limit').textContent = data.char_limit.toLocaleString();
+                        document.getElementById('combined-char-count').textContent = data.total_char_count.toLocaleString();
+                        
+                        // Update progress bar
+                        const charLimit = parseInt(data.char_limit);
+                        const percentage = Math.min((data.total_char_count / charLimit) * 100, 100);
+                        const progressBar = document.getElementById('char-progress-bar');
+                        progressBar.style.width = percentage + '%';
+                        progressBar.setAttribute('aria-valuenow', percentage);
+                        progressBar.textContent = Math.round(percentage) + '%';
+                        
+                        // Color the progress bar based on percentage
+                        if (percentage > 90) {
+                            progressBar.className = 'progress-bar bg-danger';
+                        } else if (percentage > 75) {
+                            progressBar.className = 'progress-bar bg-warning';
+                        } else {
+                            progressBar.className = 'progress-bar bg-success';
+                        }
                         
                         // Show warning or success message based on summarization result
                         const limitWarning = document.getElementById('limit-warning');
                         if (data.exceeds_limit) {
                             limitWarning.style.display = 'block';
-                            limitWarning.className = 'alert alert-danger';
+                            limitWarning.className = 'alert alert-danger mt-3';
                             document.getElementById('limit-warning-message').textContent = data.warning;
                         } else if (data.was_summarized) {
                             limitWarning.style.display = 'block';
-                            limitWarning.className = 'alert alert-success';
+                            limitWarning.className = 'alert alert-success mt-3';
                             document.getElementById('limit-warning-message').textContent = data.warning;
                         } else {
                             limitWarning.style.display = 'none';
@@ -1296,100 +1567,120 @@
                                     <span class="badge bg-secondary">${file.char_count.toLocaleString()} characters</span>
                                 </div>
                                 <div class="card-body">
-                                    <label for="file-content-${index}" class="form-label">Extracted text:</label>
-                                    <textarea id="file-content-${index}" class="form-control" style="white-space: pre-wrap; min-height: 300px; max-height: 600px; resize: vertical; font-family: monospace;">${file.content}</textarea>
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <label for="file-content-${index}" class="form-label mb-0">Extracted text:</label>
+                                        <div class="char-counter file-char-counter" id="file-char-counter-${index}">
+                                            <span id="file-char-count-${index}">${file.char_count.toLocaleString()}</span> characters
+                                        </div>
+                                    </div>
+                                    <textarea id="file-content-${index}" class="form-control file-content-editor" data-original-length="${file.char_count}">${file.content}</textarea>
                                 </div>
                             `;
                             filePreviewsContainer.appendChild(fileCard);
+                            
+                            // Add event listener to update character count for this file
+                            const textarea = fileCard.querySelector(`#file-content-${index}`);
+                            const charCounter = fileCard.querySelector(`#file-char-count-${index}`);
+                            
+                            textarea.addEventListener('input', function() {
+                                const newCount = this.value.length;
+                                charCounter.textContent = newCount.toLocaleString();
+                                
+                                // Update badge in header
+                                const badge = fileCard.querySelector('.badge');
+                                badge.textContent = newCount.toLocaleString() + ' characters';
+                                
+                                // Check if exceeding original length significantly
+                                const originalLength = parseInt(this.dataset.originalLength);
+                                if (newCount > originalLength * 1.5) {
+                                    badge.className = 'badge bg-warning';
+                                } else if (newCount < originalLength * 0.5) {
+                                    badge.className = 'badge bg-info';
+                                } else {
+                                    badge.className = 'badge bg-secondary';
+                                }
+                            });
+                        });
+                        
+                        // Add input event listener for live character count on combined-preview
+                        const combinedPreviewTextarea = document.getElementById('combined-preview');
+                        combinedPreviewTextarea.addEventListener('input', function() {
+                            const newCount = this.value.length;
+                            document.getElementById('combined-char-count').textContent = newCount.toLocaleString();
+                            
+                            // Update total count as well
+                            document.getElementById('total-char-count').textContent = newCount.toLocaleString();
+                            
+                            // Update progress bar
+                            const percentage = Math.min((newCount / charLimit) * 100, 100);
+                            progressBar.style.width = percentage + '%';
+                            progressBar.setAttribute('aria-valuenow', percentage);
+                            progressBar.textContent = Math.round(percentage) + '%';
+                            
+                            // Color the progress bar based on percentage
+                            if (percentage > 90) {
+                                progressBar.className = 'progress-bar bg-danger';
+                            } else if (percentage > 75) {
+                                progressBar.className = 'progress-bar bg-warning';
+                            } else {
+                                progressBar.className = 'progress-bar bg-success';
+                            }
+                            
+                            // Check if exceeds limit and update warning
+                            if (newCount > charLimit) {
+                                limitWarning.style.display = 'block';
+                                limitWarning.className = 'alert alert-danger mt-3';
+                                document.getElementById('limit-warning-message').innerHTML = 
+                                    `Content exceeds the ${charLimit.toLocaleString()} character limit (currently ${newCount.toLocaleString()} characters). 
+                                    You may need to reduce the content or increase the limit.`;
+                            } else {
+                                if (limitWarning.classList.contains('alert-danger')) {
+                                    limitWarning.style.display = 'none';
+                                }
+                            }
                         });
                         
                         // Add event listener to update combined content
                         document.getElementById('update-combined-content').addEventListener('click', function() {
-                            console.log("Apply Changes button clicked");
-                            
-                            // Determine which tab is active - file-content or combined-preview
+                            // Determine which tab is active
                             const isFilesTabActive = document.getElementById('files-tab').classList.contains('active');
-                            const isCombinedTabActive = document.getElementById('combined-tab').classList.contains('active');
-                            
-                            // Based on tab, get content appropriately
-                            let updatedContent = '';
                             
                             if (isFilesTabActive) {
                                 // Collect all individual file contents
-                                console.log("Files tab active - collecting content from individual textareas");
                                 const contentParts = [];
                                 data.files.forEach((file, index) => {
                                     const textarea = document.getElementById(`file-content-${index}`);
                                     if (textarea) {
                                         contentParts.push(textarea.value);
-                                        console.log(`File ${index} (${file.filename}): ${textarea.value.length} chars`);
                                     }
                                 });
-                                updatedContent = contentParts.join('\n\n');
-                            } 
-                            else if (isCombinedTabActive) {
-                                // Just use the combined preview content directly
-                                console.log("Combined tab active - using combined textarea directly");
-                                const combinedTextarea = document.getElementById('combined-preview');
-                                if (combinedTextarea) {
-                                    updatedContent = combinedTextarea.value;
-                                }
-                            }
-                            
-                            if (!updatedContent) {
-                                console.error("No content found to update");
-                                alert("Error: No content found to update. Please try again.");
-                                return;
-                            }
-                            
-                            console.log(`Combined content updated to ${updatedContent.length} characters`);
-                            
-                            // Update BOTH views - always keep them in sync
-                            // 1. Update combined view
-                            const combinedPreview = document.getElementById('combined-preview');
-                            if (combinedPreview) {
-                                combinedPreview.value = updatedContent;
-                            }
-                            
-                            // 2. Update individual files view 
-                            // Only if the update came from combined view and there's a substantial change
-                            if (isCombinedTabActive && data.files.length > 0) {
-                                // This would require content splitting logic to redistribute
-                                // For this fix, we're focusing on ensuring the combined content is correct
-                                console.log("Note: Individual file textareas not updated from combined content");
-                            }
-                            
-                            // Update character count info
-                            const newCount = updatedContent.length;
-                            document.getElementById('total-char-count').textContent = newCount.toLocaleString();
-                            
-                            // Check if exceeds limit
-                            const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
-                            const limitWarning = document.getElementById('limit-warning');
-                            
-                            console.log(`Checking limits: ${newCount} chars vs ${charLimit} limit`);
-                            
-                            if (newCount > charLimit) {
-                                console.log("Content exceeds limit after changes applied");
-                                limitWarning.style.display = 'block';
-                                limitWarning.className = 'alert alert-danger';
-                                document.getElementById('limit-warning-message').textContent = 
-                                    `Content exceeds ${charLimit.toLocaleString()} characters (current: ${newCount.toLocaleString()}). Consider using "Summarize Now" or manual editing.`;
+                                const updatedContent = contentParts.join('\n\n');
                                 
-                                // Ensure summarize button is visible since we're over limit again
-                                const summarizeBtn = document.getElementById('summarize-now-btn');
-                                if (summarizeBtn) {
-                                    summarizeBtn.style.display = 'inline-block';
-                                }
-                                const optionsUl = limitWarning.querySelector('ul');
-                                if (optionsUl) { 
-                                    optionsUl.style.display = 'block';
-                                }
-                            } else {
-                                console.log("Content is within limit after changes applied");
-                                // Only hide warning if it was a danger warning, keep success messages
-                                if (limitWarning.classList.contains('alert-danger')) {
-                                    limitWarning.style.display = 'none';
+                                // Update combined preview
+                                document.getElementById('combined-preview').value = updatedContent;
+                                
+                                // Update character counts
+                                const newCount = updatedContent.length;
+                                document.getElementById('combined-char-count').textContent = newCount.toLocaleString();
+                                document.getElementById('total-char-count').textContent = newCount.toLocaleString();
+                                
+                                // Update progress bar
+                                const percentage = Math.min((newCount / charLimit) * 100, 100);
+                                progressBar.style.width = percentage + '%';
+                                progressBar.setAttribute('aria-valuenow', percentage);
+                                progressBar.textContent = Math.round(percentage) + '%';
+                                
+                                // Check if exceeds limit
+                                if (newCount > charLimit) {
+                                    limitWarning.style.display = 'block';
+                                    limitWarning.className = 'alert alert-danger mt-3';
+                                    document.getElementById('limit-warning-message').innerHTML = 
+                                        `Content exceeds the ${charLimit.toLocaleString()} character limit (currently ${newCount.toLocaleString()} characters). 
+                                        Consider using "Summarize Now" or manually edit to reduce content.`;
+                                } else {
+                                    if (limitWarning.classList.contains('alert-danger')) {
+                                        limitWarning.style.display = 'none';
+                                    }
                                 }
                             }
                             
@@ -1399,53 +1690,14 @@
                                 document.getElementById('update-combined-content-status').style.display = 'none';
                             }, 2000);
                             
-                            // Highlight the Create Chatbot button to guide the user to the next step
+                            // Highlight the Create Chatbot button
                             document.getElementById('submit-btn').classList.add('btn-success');
                             document.getElementById('submit-btn').classList.remove('btn-primary');
-                            document.getElementById('submit-btn').innerHTML = '<i class="bi bi-plus-circle"></i> <strong>Create Chatbot</strong> <i class="bi bi-arrow-right"></i>';
-                            document.getElementById('submit-btn').classList.add('shadow-pulse');
-                            // Scroll to make the button visible
-                            document.getElementById('submit-btn').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            document.getElementById('submit-btn').innerHTML = '<i class="bi bi-plus-circle"></i> <strong>Create Chatbot</strong>';
                         });
                         
                         // Scroll to preview section
                         document.getElementById('preview-section').scrollIntoView({ behavior: 'smooth' });
-
-                        // NEW: Add input event listener for live character count on combined-preview
-                        const combinedPreviewTextarea = document.getElementById('combined-preview');
-                        if (combinedPreviewTextarea) {
-                            combinedPreviewTextarea.addEventListener('input', function() {
-                                const newCount = this.value.length;
-                                document.getElementById('total-char-count').textContent = newCount.toLocaleString();
-                                
-                                const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
-                                const limitWarningDiv = document.getElementById('limit-warning');
-                                const limitWarningMessageP = document.getElementById('limit-warning-message');
-                                const summarizeBtn = document.getElementById('summarize-now-btn');
-                                const optionsUl = limitWarningDiv.querySelector('ul');
-
-                                if (newCount > charLimit) {
-                                    // If content goes over limit due to direct editing
-                                    limitWarningDiv.style.display = 'block';
-                                    limitWarningDiv.className = 'alert alert-danger'; // Show danger state
-                                    limitWarningMessageP.innerHTML = `<p><strong>Warning: Content exceeds the character limit!</strong></p>` +
-                                                                  `<p>Current length: ${newCount.toLocaleString()} characters. Limit: ${charLimit.toLocaleString()} characters.</p>` +
-                                                                  `<p>You may need to use the \'Summarize Now\' button or manually reduce content.</p>`;
-                                    // Ensure options are visible if they were hidden by a previous success
-                                    if (optionsUl) optionsUl.style.display = 'block';
-                                    if (summarizeBtn) summarizeBtn.style.display = 'inline-block';
-                                } else {
-                                    // Content is within limit
-                                    // If the warning was previously a danger (due to exceeding limit) and now it's fine, hide it.
-                                    // If it was showing success, leave it as success.
-                                    if (limitWarningDiv.classList.contains('alert-danger')) {
-                                        limitWarningDiv.style.display = 'none';
-                                    }
-                                    // If it was success (alert-success), it should remain visible with its success message
-                                    // and the options should remain hidden as per previous successful summarization.
-                                }
-                            });
-                        }
                     } else {
                         alert('Error: ' + (data.error || 'Could not generate preview.'));
                     }
@@ -2618,6 +2870,234 @@
                         this.disabled = false;
                     });
                 });
+            });
+
+            // =============================================
+            // 파일 업로드 이벤트 핸들러
+            // =============================================
+            
+            // 브라우즈 버튼 클릭 시 파일 선택 다이얼로그 오픈
+            browseFilesBtn.addEventListener('click', () => {
+                fileInput.click();
+            });
+            
+            // 파일 선택 시 처리
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length > 0) {
+                    addFiles(fileInput.files);
+                }
+                // 파일 선택 후 input 초기화 (같은 파일 다시 선택 가능하게)
+                fileInput.value = '';
+            });
+            
+            // 드래그 앤 드롭 이벤트 처리
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, false);
+            });
+            
+            // 드래그 오버 스타일링
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => {
+                    dropArea.classList.add('dragover');
+                }, false);
+            });
+            
+            // 드래그 리브/드롭 스타일링 제거
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => {
+                    dropArea.classList.remove('dragover');
+                }, false);
+            });
+            
+            // 파일 드롭 처리
+            dropArea.addEventListener('drop', (e) => {
+                if (e.dataTransfer.files.length > 0) {
+                    addFiles(e.dataTransfer.files);
+                }
+            }, false);
+            
+            // 파일 삭제 처리
+            fileList.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('.remove-file');
+                if (removeBtn) {
+                    const index = parseInt(removeBtn.dataset.index);
+                    if (!isNaN(index) && index >= 0 && index < uploadedFiles.length) {
+                        uploadedFiles.splice(index, 1);
+                        updateFileList();
+                    }
+                }
+            });
+            
+            // 모든 파일 삭제
+            clearAllFilesBtn.addEventListener('click', () => {
+                uploadedFiles = [];
+                updateFileList();
+            });
+            
+            // =============================================
+            // 편집 모달의 파일 업로드 기능
+            // =============================================
+            const editFileInput = document.getElementById('editFiles');
+            const editBrowseFilesBtn = document.getElementById('editBrowseFilesBtn');
+            const editDropArea = document.getElementById('editDropArea');
+            const editFileList = document.getElementById('editFileList');
+            const editFileCounter = document.getElementById('editFileCounter');
+            const editFileActions = document.getElementById('editFileActions');
+            const editClearAllFilesBtn = document.getElementById('editClearAllFilesBtn');
+            
+            // 편집 모달용 파일 배열
+            let editUploadedFiles = [];
+            
+            // 편집 모달의 파일 목록 업데이트
+            function updateEditFileList() {
+                if (editUploadedFiles.length > 0) {
+                    editFileList.innerHTML = '';
+                    editFileList.style.display = 'block';
+                    editFileActions.style.display = 'flex !important';
+                    
+                    editUploadedFiles.forEach((file, index) => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item';
+                        fileItem.innerHTML = `
+                            <div class="file-info">
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-size">${formatFileSize(file.size)}</div>
+                            </div>
+                            <div class="file-actions">
+                                <button type="button" class="remove-file" data-index="${index}">
+                                    <i class="bi bi-x-circle"></i>
+                                </button>
+                            </div>
+                        `;
+                        editFileList.appendChild(fileItem);
+                    });
+                    
+                    editFileCounter.textContent = `${editUploadedFiles.length} file${editUploadedFiles.length > 1 ? 's' : ''} selected`;
+                } else {
+                    editFileList.style.display = 'none';
+                    editFileActions.style.display = 'none !important';
+                    editFileCounter.textContent = '';
+                }
+            }
+            
+            // 편집 모달에 파일 추가
+            function addEditFiles(files) {
+                Array.from(files).forEach(file => {
+                    if (!isDuplicateFile(file, editUploadedFiles)) {
+                        editUploadedFiles.push(file);
+                    }
+                });
+                updateEditFileList();
+            }
+
+            // 편집 모달의 파일 업로드 이벤트 핸들러
+            if(editBrowseFilesBtn) {
+                // 편집 모달의 브라우즈 버튼 클릭 시 파일 선택 다이얼로그 오픈
+                editBrowseFilesBtn.addEventListener('click', () => {
+                    editFileInput.click();
+                });
+                
+                // 편집 모달의 파일 선택 시 처리
+                editFileInput.addEventListener('change', () => {
+                    if (editFileInput.files.length > 0) {
+                        addEditFiles(editFileInput.files);
+                    }
+                    // 파일 선택 후 input 초기화 (같은 파일 다시 선택 가능하게)
+                    editFileInput.value = '';
+                });
+                
+                // 편집 모달의 드래그 앤 드롭 이벤트 처리
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                    editDropArea.addEventListener(eventName, (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }, false);
+                });
+                
+                // 편집 모달의 드래그 오버 스타일링
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    editDropArea.addEventListener(eventName, () => {
+                        editDropArea.classList.add('dragover');
+                    }, false);
+                });
+                
+                // 편집 모달의 드래그 리브/드롭 스타일링 제거
+                ['dragleave', 'drop'].forEach(eventName => {
+                    editDropArea.addEventListener(eventName, () => {
+                        editDropArea.classList.remove('dragover');
+                    }, false);
+                });
+                
+                // 편집 모달의 파일 드롭 처리
+                editDropArea.addEventListener('drop', (e) => {
+                    if (e.dataTransfer.files.length > 0) {
+                        addEditFiles(e.dataTransfer.files);
+                    }
+                }, false);
+                
+                // 편집 모달의 파일 삭제 처리
+                editFileList.addEventListener('click', (e) => {
+                    const removeBtn = e.target.closest('.remove-file');
+                    if (removeBtn) {
+                        const index = parseInt(removeBtn.dataset.index);
+                        if (!isNaN(index) && index >= 0 && index < editUploadedFiles.length) {
+                            editUploadedFiles.splice(index, 1);
+                            updateEditFileList();
+                        }
+                    }
+                });
+                
+                // 편집 모달의 모든 파일 삭제
+                editClearAllFilesBtn.addEventListener('click', () => {
+                    editUploadedFiles = [];
+                    updateEditFileList();
+                });
+            }
+
+            // "Increase Limit" 버튼 처리
+            document.getElementById('increase-limit-btn').addEventListener('click', function() {
+                const charLimitElem = document.getElementById('char-limit');
+                const currentLimit = parseInt(charLimitElem.textContent.replace(/,/g, ''));
+                const charLimitInput = document.getElementById('char_limit');
+                
+                // 최대 100,000까지 10,000씩 증가
+                const newLimit = Math.min(currentLimit + 10000, 100000);
+                
+                // 입력 필드와 표시 값 모두 업데이트
+                charLimitInput.value = newLimit;
+                charLimitElem.textContent = newLimit.toLocaleString();
+                
+                // 프로그레스 바 업데이트
+                const totalCharCount = parseInt(document.getElementById('total-char-count').textContent.replace(/,/g, ''));
+                const percentage = Math.min((totalCharCount / newLimit) * 100, 100);
+                const progressBar = document.getElementById('char-progress-bar');
+                progressBar.style.width = percentage + '%';
+                progressBar.setAttribute('aria-valuenow', percentage);
+                progressBar.textContent = Math.round(percentage) + '%';
+                
+                // 경고 메시지 처리
+                const limitWarning = document.getElementById('limit-warning');
+                if (totalCharCount <= newLimit) {
+                    limitWarning.style.display = 'none';
+                } else {
+                    document.getElementById('limit-warning-message').innerHTML = 
+                        `Content still exceeds the ${newLimit.toLocaleString()} character limit (currently ${totalCharCount.toLocaleString()} characters). 
+                        Consider using "Summarize Now" or manually edit to reduce content.`;
+                }
+                
+                // 버튼에 시각적 피드백
+                this.textContent = `Increased to ${newLimit.toLocaleString()}`;
+                this.classList.add('btn-success');
+                this.classList.remove('btn-outline-secondary');
+                
+                setTimeout(() => {
+                    this.textContent = 'Increase Limit';
+                    this.classList.remove('btn-success');
+                    this.classList.add('btn-outline-secondary');
+                }, 2000);
             });
         });
 

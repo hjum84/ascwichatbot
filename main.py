@@ -1752,14 +1752,37 @@ def admin_upload():
             
             logger.info(f"Processing {len(files)} files for content extraction")
             content_parts = []
+            failed_files = []
+            
             for file_storage in files:
                 if file_storage and file_storage.filename:
-                    logger.info(f"Extracting text from {file_storage.filename}")
-                    text = extract_text_from_file(file_storage)
-                    content_parts.append(text)
+                    try:
+                        logger.info(f"Extracting text from {file_storage.filename}")
+                        text = extract_text_from_file(file_storage)
+                        if text.strip():
+                            content_parts.append(text)
+                            logger.info(f"Successfully extracted {len(text)} characters from {file_storage.filename}")
+                        else:
+                            logger.warning(f"No content extracted from {file_storage.filename}")
+                            failed_files.append(file_storage.filename)
+                    except Exception as e:
+                        logger.error(f"Error processing {file_storage.filename}: {str(e)}")
+                        failed_files.append(file_storage.filename)
+            
+            if not content_parts:
+                return jsonify({
+                    "success": False, 
+                    "error": "No content could be extracted from any of the uploaded files.",
+                    "failed_files": failed_files
+                }), 400
+                
             final_content = "\n\n".join(content_parts)
             logger.info(f"Extracted content from files, total length: {len(final_content)}")
             content_source = "files"
+            
+            if failed_files:
+                logger.warning(f"Some files failed to process: {failed_files}")
+        
         
         # 3. No valid content source found
         else:

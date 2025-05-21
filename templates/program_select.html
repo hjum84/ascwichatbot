@@ -433,6 +433,7 @@
             <div class="user-info">
                 Logged in as: <strong>{{ session.user_email }}</strong> | 
                 <a href="{{ url_for('logout') }}">Logout</a>
+                <a href="{{ url_for('admin') }}" style="font-size: 0.9em; color: #666; padding-left:8px;">Go to Admin Page</a>
             </div>
             {% endif %}
         </div>

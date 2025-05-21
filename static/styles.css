@@ -122,6 +122,51 @@ body {
     }
 }
 
+/* Input area container to wrap attachment bar and input field */
+.input-area-container {
+    display: flex;
+    flex-direction: column;
+    background-color: #fff; /* Match input-container background */
+    border-top: 1px solid rgba(0, 0, 0, 0.05); /* Match input-container border */
+}
+
+/* Attachment bar styling */
+.attachment-bar {
+    display: none; /* Hidden by default */
+    padding: 8px 16px;
+    background-color: #f9f9f9; /* Slightly different background */
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+    align-items: center;
+    gap: 10px; /* Spacing between items */
+}
+
+.attachment-bar.visible {
+    display: flex;
+}
+
+.attach-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    font-size: 12px; /* Smaller text */
+}
+
+.attach-btn svg {
+    width: 20px; /* Slightly larger icons */
+    height: 20px;
+    fill: currentColor;
+    margin-right: 5px;
+}
+
+.attach-btn:hover {
+    color: var(--acs-green);
+}
+
 /* Text auto-typing animation for bot messages */
 .bot-text {
     visibility: hidden;
@@ -139,7 +184,7 @@ body {
     align-items: center;
     padding: 12px 16px;
     background-color: #fff;
-    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    /* border-top: 1px solid rgba(0, 0, 0, 0.05); Removed as it's now on input-area-container */
     position: relative;
     z-index: 10;
 }
@@ -325,40 +370,118 @@ textarea#userInput:focus {
     background-color: rgba(255, 77, 79, 0.2);
 }
 
+/* Toggle Attachment Bar Button */
+#toggleAttachBarBtn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    margin-right: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#toggleAttachBarBtn svg {
+    width: 22px;
+    height: 22px;
+    fill: #555;
+    transition: transform 0.3s ease;
+}
+
+#toggleAttachBarBtn.active svg {
+    transform: rotate(45deg); /* Rotates the plus to an X */
+}
+
+#toggleAttachBarBtn:hover svg {
+    fill: var(--acs-green);
+}
+
 /* Mobile optimizations */
 @media (max-width: 767px) {
     body {
-        align-items: flex-start;
-        background-color: #fff;
+        /* overflow: hidden; Already set globally */
+        height: 100%; /* Ensure body takes full viewport height */
     }
-    
+
     .chat-container {
         width: 100%;
-        height: 100vh;
+        height: 100vh; /* Full viewport height */
+        max-height: 100vh; /* Ensure it doesn't exceed viewport */
         border-radius: 0;
         box-shadow: none;
+        display: flex; /* Already flex, ensure it works as expected */
+        flex-direction: column; /* Already set, ensure it works */
     }
-    
+
     .program-header {
-        padding: 12px 16px;
+        padding: 10px 12px; /* Slightly reduce padding */
     }
-    
+
     .chat-box {
-        padding: 12px;
+        padding: 10px 12px; /* Match program header */
+        flex-grow: 1; /* Crucial for taking available space */
+        min-height: 0; /* Allows shrinking if content is small, works with flex-grow */
+        overflow-y: auto; /* Ensure scrolling is enabled */
     }
-    
+
     .message {
-        max-width: 85%;
+        max-width: 90%; /* Allow slightly wider messages */
+        padding: 10px 14px; /* Adjust padding */
     }
-    
+
+    .input-area-container {
+        /* Styles for input-area-container on mobile if needed */
+        /* e.g., to ensure it sticks to the bottom */
+        position: sticky; /* Experimental, might need JS adjustment with virtual keyboard */
+        bottom: 0;
+        width: 100%;
+    }
+
     .input-container {
         padding: 10px 12px;
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: #fff;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+        /* Additional mobile specific input container styles if any */
+    }
+
+    textarea#userInput {
+        padding: 10px 14px; /* Adjust padding */
+        font-size: 15px; /* Slightly larger font for mobile */
+        max-height: 100px; /* Adjust max height for mobile */
+    }
+
+    .send-btn, .mic-btn { /* Apply to mic-btn as well */
+        width: 38px;
+        height: 38px;
+    }
+    .send-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .mic-btn svg {
+        width: 18px; /* Consistent icon sizes */
+        height: 18px;
+    }
+
+    #toggleAttachBarBtn {
+        padding: 6px; /* Adjust padding for mobile */
+        margin-right: 6px;
+    }
+    #toggleAttachBarBtn svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .attachment-bar {
+        padding: 6px 12px;
+        gap: 8px;
+    }
+    .attach-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+    .attach-btn {
+        font-size: 11px;
     }
 }
 

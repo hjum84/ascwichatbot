@@ -631,7 +631,7 @@ def index_bcc():
     finally:
         close_db(db)
     # Format the intro message by replacing placeholders
-    formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
+    formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
     return render_template('index.html',
                          program='BCC',
                          program_display_name=program_display_name,
@@ -655,7 +655,7 @@ def index_mi():
     finally:
         close_db(db)
     # Format the intro message by replacing placeholders
-    formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
+    formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
     return render_template('index.html',
                          program='MI',
                          program_display_name=program_display_name,
@@ -679,7 +679,7 @@ def index_safety():
     finally:
         close_db(db)
     # Format the intro message by replacing placeholders
-    formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
+    formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
     return render_template('index.html',
                          program='Safety',
                          program_display_name=program_display_name,
@@ -708,7 +708,7 @@ def index_generic(program):
         close_db(db)
         
         # Format the intro message by replacing placeholders
-        formatted_intro = intro_message.replace("{program}", program_display_name).replace("{quota}", str(quota))
+        formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
         
         return render_template('index.html',
                             program=program_upper,
@@ -854,6 +854,39 @@ def chat():
             db.rollback()
         logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({"error": "An error occurred while processing your request. Please try again."}), 500
+    finally:
+        close_db(db)
+
+@app.route('/clear_chat_history', methods=['POST'])
+@login_required
+def clear_chat_history():
+    user_id = session['user_id']
+    # Ensure program_code is fetched from the request body, not session, for robustness
+    data = request.get_json()
+    program_code = data.get('program')
+
+    if not program_code:
+        logger.error("Program code not provided in clear_chat_history request.")
+        return jsonify({'success': False, 'error': 'Program code is required.'}), 400
+
+    db = get_db()
+    try:
+        # Hide all messages for the given user_id and program_code by setting is_visible=False
+        # This version clears all history for the program, not just today's.
+        # If only today's history should be cleared, revert to the date-based logic.
+        updated_rows = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code,
+            ChatHistory.is_visible == True
+        ).update({ChatHistory.is_visible: False}, synchronize_session=False)
+        
+        db.commit()
+        logger.info(f"Cleared {updated_rows} chat history entries for user {user_id} in program {program_code}.")
+        return jsonify({'success': True})
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error clearing chat history for user {user_id}, program {program_code}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         close_db(db)
 

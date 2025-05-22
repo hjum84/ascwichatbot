@@ -280,32 +280,23 @@
 
     function addMessage(text, sender, isHTML = true) {
         const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message', sender);
-        
+        // 여러 클래스 지원: sender가 공백 포함 문자열이면 분리해서 각각 class로 추가
+        if (Array.isArray(sender)) {
+            messageDiv.classList.add('message');
+            sender.forEach(cls => messageDiv.classList.add(cls));
+        } else if (typeof sender === 'string' && sender.includes(' ')) {
+            messageDiv.classList.add('message');
+            sender.split(' ').forEach(cls => messageDiv.classList.add(cls));
+        } else {
+            messageDiv.classList.add('message', sender);
+        }
         const p = document.createElement('p');
         if (isHTML) {
-            // Always use marked.js for parsing Markdown when isHTML is true
             if (typeof marked !== 'undefined') {
-                // Configure marked for better output
-                marked.setOptions({
-                    breaks: true,        // Add line breaks
-                    gfm: true,           // Use GitHub Flavored Markdown
-                    headerIds: false,    // Don't add IDs to headers
-                    mangle: false        // Don't mangle email links
-                });
-                
-                // Parse with marked and sanitize with DOMPurify if available
                 const parsedContent = marked.parse(text);
-                p.innerHTML = typeof DOMPurify !== 'undefined' ? 
-                             DOMPurify.sanitize(parsedContent) : 
-                             parsedContent;
+                p.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(parsedContent) : parsedContent;
             } else {
-                // Basic fallback for bold, italics and links if marked isn't available
-                let processedText = text
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
-                p.innerHTML = processedText;
+                p.textContent = text;
             }
         } else {
             p.textContent = text;
@@ -506,12 +497,9 @@
                 micBtn.classList.remove("active");
             } else {
                 try {
-                    // Only reset appendedTranscript if double-clicked
-                    if (Date.now() - lastClickTime < 500) { // Double click within 500ms
-                        appendedTranscript = "";
-                        userInput.value = "";
-                    }
-                    lastClickTime = Date.now();
+                    // Clear previous content when starting new voice input
+                    appendedTranscript = "";
+                    userInput.value = "";
                     
                     recognition.start();
                     isListening = true;

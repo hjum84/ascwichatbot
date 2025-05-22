@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO, BytesIO
 from sqlalchemy import func
+import markdown2  # Add markdown2 for markdown parsing
 
 # For file content extraction - try to import, but don't fail if not available
 try:
@@ -729,7 +730,32 @@ def index():
     logger.debug("Redirecting from legacy index route to program selection")
     return redirect(url_for('program_select'))
 
-# Chat endpoint for processing user messages
+def parse_markdown(text):
+    """
+    Convert markdown text to HTML with additional features.
+    """
+    extras = [
+        'fenced-code-blocks',  # Support for ```code blocks```
+        'tables',              # Support for markdown tables
+        'break-on-newline',    # Convert newlines to <br>
+        'header-ids',          # Add IDs to headers
+        'markdown-in-html',    # Allow markdown inside HTML
+        'target-blank-links',  # Open links in new tab
+        'task_list',          # Support for GitHub-style task lists
+        'footnotes',          # Support for footnotes
+        'strike',             # Support for ~~strikethrough~~
+        'underline',          # Support for _underline_
+        'highlight',          # Support for ==highlighted text==
+    ]
+    
+    # Convert markdown to HTML
+    html = markdown2.markdown(text, extras=extras)
+    
+    # Add custom styling for code blocks
+    html = html.replace('<pre><code>', '<pre><code class="language-plaintext">')
+    
+    return html
+
 @app.route('/chat', methods=['POST'])
 @login_required
 def chat():
@@ -753,7 +779,6 @@ def chat():
         today_start = datetime.combine(today, datetime.min.time())
         today_end = datetime.combine(today, datetime.max.time())
         
-        # Count only unique conversations (each row has both user and bot messages)
         message_count = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == current_program,
@@ -761,11 +786,9 @@ def chat():
             ChatHistory.timestamp <= today_end
         ).count()
 
-        # Check if quota exceeded
         if message_count >= quota:
             return jsonify({"reply": f"You have reached your daily quota of {quota} questions for the {chatbot.name} program. Please try again tomorrow."}), 200
 
-        # Get content hash for the current program
         content_hash = content_hashes.get(current_program)
         if not content_hash:
             content = program_content.get(current_program, "")
@@ -773,14 +796,11 @@ def chat():
             content_hashes[current_program] = content_hash
             logger.debug(f"Generated new content hash for {current_program}")
 
-        # Track cache performance
         start_time = time.time()
         cache_result = "exact_match"
         
-        # Try to get cached response first (exact match)
         chatbot_reply = get_cached_response(content_hash, user_message)
         
-        # If no exact match, try to find semantically similar question
         if not chatbot_reply:
             cache_result = "semantic_match"
             try:
@@ -791,10 +811,8 @@ def chat():
                     logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
             except Exception as e:
                 logger.error(f"Error finding similar question: {str(e)}")
-                # Continue without similar questions if this fails
                 similar_question = None
         
-        # If no cached response at all, get new response
         if not chatbot_reply:
             cache_result = "cache_miss"
             try:
@@ -812,21 +830,11 @@ def chat():
                 logger.error(f"Error getting new response: {str(e)}")
                 return jsonify({"error": str(e)}), 500
         
-        # Log cache performance
         total_time = time.time() - start_time
         logger.info(f"Cache performance: {cache_result} in {total_time:.3f} seconds")
 
-        # Truncate response to 300 words if necessary
-        words = chatbot_reply.split()
-        if len(words) > 500:
-            truncated_text = ' '.join(words[:300])
-            end_index = chatbot_reply.find(truncated_text) + len(truncated_text)
-            rest_text = chatbot_reply[end_index:]
-            sentence_end = re.search(r'[.?!]', rest_text)
-            if sentence_end:
-                chatbot_reply = chatbot_reply[:end_index + sentence_end.end()]
-            else:
-                chatbot_reply = truncated_text
+        # Parse markdown in the response
+        html_reply = parse_markdown(chatbot_reply)
 
         # Save to chat history (both user message and chatbot reply)
         chat_entry = ChatHistory(
@@ -847,7 +855,10 @@ def chat():
 
         threading.Thread(target=record_smartsheet_async, args=(user_message, chatbot_reply, current_program)).start()
 
-        return jsonify({"reply": chatbot_reply})
+        return jsonify({
+            "reply": chatbot_reply,
+            "html_reply": html_reply
+        })
 
     except Exception as e:
         if 'db' in locals():

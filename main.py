@@ -1038,6 +1038,7 @@ def get_paired_conversations(db, page=1, per_page=10):
         chatbot_name_display = chatbot_obj.name if chatbot_obj else current_msg.program_code
         
         pair_data = {
+            'user_id': current_msg.user_id,  # Include user_id for filtering
             'user_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
             'user_name': user_name,
             'user_email': user_email,
@@ -1083,9 +1084,10 @@ def admin():
         # Search/filter parameters from URL for conversation logs
         search_term_param = request.args.get('search_term', None)
         chatbot_code_param = request.args.get('chatbot_code', None)
+        user_id_param = request.args.get('user_id', None)
 
         # If search parameters are present, filter the conversations
-        if search_term_param or chatbot_code_param:
+        if search_term_param or chatbot_code_param or user_id_param:
             temp_filtered_convos = []
             for p_conv in paired_conversations_log:
                 match_search = True
@@ -1101,8 +1103,14 @@ def admin():
                             break
                     if not is_correct_chatbot:
                          match_chatbot = False
+                
+                match_user = True
+                if user_id_param:
+                    # Match by user ID
+                    if str(p_conv['user_id']) != str(user_id_param):
+                        match_user = False
 
-                if match_search and match_chatbot:
+                if match_search and match_chatbot and match_user:
                     temp_filtered_convos.append(p_conv)
             paired_conversations_log = temp_filtered_convos
             
@@ -1120,6 +1128,7 @@ def admin():
                               top_chatbots=top_chatbots_list,
                               search_term=search_term_param,
                               selected_chatbot_code=chatbot_code_param,
+                              selected_user_id=user_id_param,
                               pagination={
                                   'total_pages': total_pages,
                                   'current_page': current_page,
@@ -1270,6 +1279,76 @@ def admin_search_conversations():
         
         return jsonify({"success": True, "conversations": result})
         
+    finally:
+        close_db(db)
+
+@app.route('/admin/delete_conversations', methods=['POST'])
+@requires_auth
+def admin_delete_conversations():
+    """Delete conversations based on specified criteria"""
+    delete_type = request.form.get('delete_type')
+    
+    if not delete_type:
+        flash('Invalid request: delete type not specified', 'danger')
+        return redirect(url_for('admin', message='Invalid request: delete type not specified', message_type='danger'))
+    
+    db = get_db()
+    try:
+        # Count number of records before deletion for reporting
+        total_records_before = db.query(ChatHistory).count()
+        
+        if delete_type == 'all':
+            # Delete all conversations from database
+            db.query(ChatHistory).delete()
+            db.commit()
+            deleted_count = total_records_before
+            message = f'All {deleted_count} conversation records have been permanently deleted'
+            
+        elif delete_type == 'by_chatbot':
+            chatbot_code = request.form.get('chatbot_code')
+            if not chatbot_code:
+                flash('Please select a chatbot', 'warning')
+                return redirect(url_for('admin', message='Please select a chatbot', message_type='warning'))
+            
+            # Get chatbot name for reporting
+            chatbot = db.query(ChatbotContent).filter(ChatbotContent.code == chatbot_code).first()
+            chatbot_name = chatbot.name if chatbot else chatbot_code
+            
+            # Delete matching records
+            deleted_count = db.query(ChatHistory).filter(ChatHistory.program_code == chatbot_code).count()
+            db.query(ChatHistory).filter(ChatHistory.program_code == chatbot_code).delete()
+            db.commit()
+            message = f'All {deleted_count} conversation records for "{chatbot_name}" have been permanently deleted'
+            
+        elif delete_type == 'by_user':
+            user_id = request.form.get('user_id')
+            if not user_id:
+                flash('Please select a user', 'warning')
+                return redirect(url_for('admin', message='Please select a user', message_type='warning'))
+            
+            # Get user info for reporting
+            user = db.query(User).filter(User.id == user_id).first()
+            user_name = f"{user.last_name} ({user.email})" if user else f"User ID {user_id}"
+            
+            # Delete matching records
+            deleted_count = db.query(ChatHistory).filter(ChatHistory.user_id == user_id).count()
+            db.query(ChatHistory).filter(ChatHistory.user_id == user_id).delete()
+            db.commit()
+            message = f'All {deleted_count} conversation records for "{user_name}" have been permanently deleted'
+            
+        else:
+            flash(f'Invalid delete type: {delete_type}', 'danger')
+            return redirect(url_for('admin', message=f'Invalid delete type: {delete_type}', message_type='danger'))
+        
+        # Success message
+        flash(message, 'success')
+        return redirect(url_for('admin', message=message, message_type='success') + '#data-mgmt-content-convo-logs')
+        
+    except Exception as e:
+        logger.error(f"Error deleting conversations ({delete_type}): {str(e)}", exc_info=True)
+        db.rollback()
+        flash(f'An error occurred while deleting conversations: {str(e)}', 'danger')
+        return redirect(url_for('admin', message=f'Error: {str(e)}', message_type='danger'))
     finally:
         close_db(db)
 

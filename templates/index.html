@@ -497,9 +497,9 @@
                 micBtn.classList.remove("active");
             } else {
                 try {
-                    // Clear previous content when starting new voice input
-                    appendedTranscript = "";
-                    userInput.value = "";
+                    // Update appendedTranscript to current input value 
+                    // This ensures manually deleted text doesn't reappear
+                    appendedTranscript = userInput.value;
                     
                     recognition.start();
                     isListening = true;

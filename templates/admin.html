@@ -794,7 +794,12 @@
                                         
                                         <!-- Preview section will be dynamically shown here -->
                                         <div id="preview-section" class="mt-4" style="display: none;">
-                                            <h4>Content Preview</h4>
+                                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                                <h4 class="mb-0">Content Preview</h4>
+                                                <button type="button" id="cancel-preview-btn" class="btn btn-outline-secondary">
+                                                    <i class="bi bi-arrow-left"></i> Back to Upload
+                                                </button>
+                                            </div>
                                             <div class="alert alert-info mb-3">
                                                 <p>Review the extracted content below. You can edit the content before uploading if needed.</p>
                                                 <p><strong>Instructions:</strong></p>
@@ -869,9 +874,14 @@
                                                 </div>
                                             </div>
                                             
-                                            <div class="d-flex justify-content-end mt-3">
-                                                <button type="button" id="update-combined-content" class="btn btn-primary me-2"><i class="bi bi-check2-all"></i> Apply Changes</button>
-                                                <span id="update-combined-content-status" class="text-success align-self-center" style="display: none;">Changes applied successfully!</span>
+                                            <div class="d-flex justify-content-between mt-3">
+                                                <button type="button" id="cancel-preview-btn-bottom" class="btn btn-outline-secondary">
+                                                    <i class="bi bi-arrow-left"></i> Back to Upload
+                                                </button>
+                                                <div class="d-flex">
+                                                    <button type="button" id="update-combined-content" class="btn btn-primary me-2"><i class="bi bi-check2-all"></i> Apply Changes & Create</button>
+                                                    <span id="update-combined-content-status" class="text-success align-self-center" style="display: none;">Changes applied successfully!</span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -1177,7 +1187,12 @@
                             </div>
                             
                             <div id="edit-preview-section" class="mt-4" style="display: none;">
-                                <h5>File Preview</h5>
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">File Preview</h5>
+                                    <button type="button" id="edit-cancel-preview-btn" class="btn btn-outline-secondary">
+                                        <i class="bi bi-arrow-left"></i> Back to Upload
+                                    </button>
+                                </div>
                                 <div class="alert alert-info">
                                     <p>Review and edit the extracted content before saving changes.</p>
                                     <ol>
@@ -1203,6 +1218,12 @@
                                             <p id="edit-limit-warning-message"></p>
                                             <div class="d-flex justify-content-between align-items-center mt-2">
                                                 <button id="edit-summarize-now-btn" class="btn btn-warning btn-sm">
+                                                    <span class="summarize-btn-text"><i class="bi bi-magic"></i> Summarize Now</span>
+                                                    <span class="spinner-border spinner-border-sm summarize-spinner" role="status" style="display: none;"></span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 
                                 <ul class="nav nav-tabs mb-3" id="editPreviewTabs" role="tablist">
@@ -1224,17 +1245,27 @@
                                         <div class="mb-3">
                                             <div class="card">
                                                 <div class="card-body">
-                                                    <label for="edit-combined-preview" class="form-label">Combined Content (Editable)</label>
-                                                    <textarea id="edit-combined-preview" class="form-control" style="white-space: pre-wrap; min-height: 300px; max-height: 600px; resize: vertical; font-family: monospace;"></textarea>
+                                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                                        <label for="edit-combined-preview" class="form-label mb-0">Combined Content (Editable)</label>
+                                                        <div class="char-counter">
+                                                            <span id="edit-combined-char-count">0</span> characters
+                                                        </div>
+                                                    </div>
+                                                    <textarea id="edit-combined-preview" class="form-control file-content-editor" style="min-height: 400px;"></textarea>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <div class="d-flex justify-content-end mt-3 mb-3">
-                                    <button type="button" id="update-edit-combined-content" class="btn btn-primary"><i class="bi bi-check2-all"></i> Apply Changes</button>
-                                    <span id="update-edit-combined-content-status" class="ms-2 text-success align-self-center" style="display: none;">Changes applied!</span>
+                                <div class="d-flex justify-content-between mt-3 mb-3">
+                                    <button type="button" id="edit-cancel-preview-btn-bottom" class="btn btn-outline-secondary">
+                                        <i class="bi bi-arrow-left"></i> Back to Upload
+                                    </button>
+                                    <div class="d-flex">
+                                        <button type="button" id="update-edit-combined-content" class="btn btn-primary"><i class="bi bi-check2-all"></i> Apply Changes & Save</button>
+                                        <span id="update-edit-combined-content-status" class="ms-2 text-success align-self-center" style="display: none;">Changes applied!</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3099,6 +3130,207 @@
                     this.classList.add('btn-outline-secondary');
                 }, 2000);
             });
+
+            // Cancel Preview 버튼 처리
+            document.querySelectorAll('#cancel-preview-btn, #cancel-preview-btn-bottom').forEach(button => {
+                button.addEventListener('click', function() {
+                    // 프리뷰 섹션 숨기기
+                    document.getElementById('preview-section').style.display = 'none';
+                    
+                    // Submit 버튼 비활성화
+                    document.getElementById('submit-btn').disabled = true;
+                    document.getElementById('submit-btn').classList.remove('btn-success');
+                    document.getElementById('submit-btn').classList.add('btn-primary');
+                    document.getElementById('submit-btn').innerHTML = '<i class="bi bi-plus-circle"></i> Create Chatbot';
+                    
+                    // 스크롤을 업로드 영역으로 이동
+                    document.getElementById('dropArea').scrollIntoView({ behavior: 'smooth' });
+                });
+            });
+            
+            // Apply Changes & Create 버튼 처리 - 수정된 내용을 적용하고 바로 챗봇 생성
+            document.getElementById('update-combined-content').addEventListener('click', function() {
+                console.log("Apply Changes & Create 버튼 클릭됨");
+                
+                // 1. 변경사항 적용
+                const isFilesTabActive = document.getElementById('files-tab').classList.contains('active');
+                const charLimit = parseInt(document.getElementById('char-limit').textContent.replace(/,/g, ''));
+                const progressBar = document.getElementById('char-progress-bar');
+                const limitWarning = document.getElementById('limit-warning');
+                
+                let updatedContent = "";
+                
+                if (isFilesTabActive) {
+                    // 개별 파일 내용 수집
+                    const contentParts = [];
+                    const filePreviews = document.getElementById('file-previews');
+                    const fileCards = filePreviews.querySelectorAll('.card');
+                    
+                    fileCards.forEach((card) => {
+                        const textarea = card.querySelector('textarea');
+                        if (textarea) {
+                            contentParts.push(textarea.value);
+                        }
+                    });
+                    
+                    updatedContent = contentParts.join('\n\n');
+                    
+                    // Combined Preview 업데이트
+                    document.getElementById('combined-preview').value = updatedContent;
+                } else {
+                    // Combined 탭에서는 해당 내용 그대로 사용
+                    updatedContent = document.getElementById('combined-preview').value;
+                }
+                
+                // 캐릭터 수 계산 및 표시 업데이트
+                const newCount = updatedContent.length;
+                document.getElementById('combined-char-count').textContent = newCount.toLocaleString();
+                document.getElementById('total-char-count').textContent = newCount.toLocaleString();
+                
+                // 프로그레스 바 업데이트
+                const percentage = Math.min((newCount / charLimit) * 100, 100);
+                progressBar.style.width = percentage + '%';
+                progressBar.setAttribute('aria-valuenow', percentage);
+                progressBar.textContent = Math.round(percentage) + '%';
+                
+                // 내용이 제한을 초과하는지 확인
+                if (newCount > charLimit) {
+                    limitWarning.style.display = 'block';
+                    limitWarning.className = 'alert alert-danger mt-3';
+                    document.getElementById('limit-warning-message').innerHTML = 
+                        `Content exceeds the ${charLimit.toLocaleString()} character limit (currently ${newCount.toLocaleString()} characters). 
+                        Consider using "Summarize Now" or manually edit to reduce content.`;
+                    
+                    // 제한 초과 시 생성 막기
+                    document.getElementById('update-combined-content-status').textContent = 'Changes applied, but cannot create chatbot due to character limit';
+                    document.getElementById('update-combined-content-status').className = 'text-danger align-self-center';
+                    document.getElementById('update-combined-content-status').style.display = 'inline';
+                    
+                    setTimeout(() => {
+                        document.getElementById('update-combined-content-status').style.display = 'none';
+                    }, 3000);
+                    
+                    return;
+                } else {
+                    if (limitWarning.classList.contains('alert-danger')) {
+                        limitWarning.style.display = 'none';
+                    }
+                }
+                
+                // 2. 상태 메시지 표시
+                document.getElementById('update-combined-content-status').textContent = 'Creating chatbot...';
+                document.getElementById('update-combined-content-status').className = 'text-info align-self-center';
+                document.getElementById('update-combined-content-status').style.display = 'inline';
+                
+                // 3. Submit 버튼 클릭하여 챗봇 생성 진행
+                setTimeout(() => {
+                    console.log("Submit 버튼 자동 클릭");
+                    document.getElementById('submit-btn').click();
+                }, 500);
+            });
+
+            // 편집 모달에서 Cancel Preview 버튼 처리
+            document.querySelectorAll('#edit-cancel-preview-btn, #edit-cancel-preview-btn-bottom').forEach(button => {
+                if (button) {
+                    button.addEventListener('click', function() {
+                        // 편집 미리보기 섹션 숨기기
+                        document.getElementById('edit-preview-section').style.display = 'none';
+                        
+                        // 파일 업로드 영역으로 이동
+                        document.getElementById('editDropArea').scrollIntoView({ behavior: 'smooth' });
+                    });
+                }
+            });
+            
+            // 편집 모달의 Update 버튼 수정
+            const updateEditContentBtn = document.getElementById('update-edit-combined-content');
+            if (updateEditContentBtn) {
+                updateEditContentBtn.addEventListener('click', function() {
+                    console.log("Apply Changes & Save 버튼 클릭됨");
+                    
+                    // 1. 변경사항 적용
+                    const isEditFilesTabActive = document.getElementById('edit-files-tab').classList.contains('active');
+                    const editCharLimit = parseInt(document.getElementById('edit-char-limit').textContent.replace(/,/g, ''));
+                    
+                    let updatedContent = "";
+                    
+                    if (isEditFilesTabActive) {
+                        // 개별 파일 내용 수집
+                        const contentParts = [];
+                        const filePreviews = document.getElementById('edit-file-previews');
+                        const fileCards = filePreviews.querySelectorAll('.card');
+                        
+                        fileCards.forEach((card) => {
+                            const textarea = card.querySelector('textarea');
+                            if (textarea) {
+                                contentParts.push(textarea.value);
+                            }
+                        });
+                        
+                        updatedContent = contentParts.join('\n\n');
+                        
+                        // Combined Preview 업데이트
+                        document.getElementById('edit-combined-preview').value = updatedContent;
+                    } else {
+                        // Combined 탭에서는 해당 내용 그대로 사용
+                        updatedContent = document.getElementById('edit-combined-preview').value;
+                    }
+                    
+                    // 메인 contentTextarea에도 내용 반영
+                    document.getElementById('chatbotContentTextarea').value = updatedContent;
+                    
+                    // 캐릭터 수 업데이트
+                    const newCount = updatedContent.length;
+                    if (document.getElementById('edit-combined-char-count')) {
+                        document.getElementById('edit-combined-char-count').textContent = newCount.toLocaleString();
+                    }
+                    if (document.getElementById('edit-total-char-count')) {
+                        document.getElementById('edit-total-char-count').textContent = newCount.toLocaleString();
+                    }
+                    if (document.getElementById('currentCharCount')) {
+                        document.getElementById('currentCharCount').textContent = newCount.toLocaleString();
+                    }
+                    
+                    // 내용이 제한을 초과하는지 확인
+                    if (newCount > editCharLimit) {
+                        document.getElementById('edit-limit-warning').style.display = 'block';
+                        document.getElementById('edit-limit-warning').className = 'alert alert-danger mt-3';
+                        document.getElementById('edit-limit-warning-message').innerHTML = 
+                            `Content exceeds the ${editCharLimit.toLocaleString()} character limit (currently ${newCount.toLocaleString()} characters). 
+                            Consider using "Summarize Now" or manually edit to reduce content.`;
+                            
+                        // 제한 초과 시 저장 막기
+                        document.getElementById('update-edit-combined-content-status').textContent = 'Changes applied, but cannot save due to character limit';
+                        document.getElementById('update-edit-combined-content-status').className = 'text-danger';
+                        document.getElementById('update-edit-combined-content-status').style.display = 'inline';
+                        
+                        setTimeout(() => {
+                            document.getElementById('update-edit-combined-content-status').style.display = 'none';
+                        }, 3000);
+                        
+                        return;
+                    }
+                    
+                    // 2. 메인 탭으로 전환
+                    document.getElementById('current-content-tab').click();
+                    
+                    // 3. Save Changes 버튼 강조 표시
+                    document.getElementById('saveContentChangesBtn').classList.add('btn-success');
+                    document.getElementById('saveContentChangesBtn').classList.remove('btn-primary');
+                    document.getElementById('saveContentChangesBtn').innerHTML = '<i class="bi bi-save"></i> <strong>Save Changes</strong>';
+                    
+                    // 4. 상태 메시지 표시
+                    document.getElementById('update-edit-combined-content-status').textContent = 'Saving changes...';
+                    document.getElementById('update-edit-combined-content-status').className = 'text-info';
+                    document.getElementById('update-edit-combined-content-status').style.display = 'inline';
+                    
+                    // 5. Save 버튼 자동 클릭
+                    setTimeout(() => {
+                        console.log("Save Changes 버튼 자동 클릭");
+                        document.getElementById('saveContentChangesBtn').click();
+                    }, 500);
+                });
+            }
         });
 
         function applyConvoFilters() {

@@ -1618,11 +1618,36 @@ def admin_preview_upload():
             
             # Store the original content length before summarization
             original_content_length = total_char_count
+
+            # Calculate tokens and cost first
+            estimated_tokens = original_content_length / 4  # Rough estimate: 4 chars per token
+            output_tokens = original_content_length / 4  # Rough estimate: 4 chars per token
+            input_cost = (estimated_tokens / 1_000_000) * 0.15  # $0.15 per 1M input tokens
+            output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
+            estimated_cost = input_cost + output_cost
+
+            # Show API usage cost warning to the admin BEFORE summarization
+            pre_warning = ""
+            if original_content_length > 10000:
+                pre_warning = f"Warning: Summarizing this content with GPT-4o-mini may cost approximately ${estimated_cost:.2f} (input: {estimated_tokens:.0f} tokens, output: {output_tokens:.0f} tokens). Proceeding will use your OpenAI API quota."
+                logger.info(pre_warning)
+                warning_message = pre_warning  # Show this warning before summarization
             
-            # Apply smart summarization with target slightly under the limit
-            combined_preview_content = smart_text_summarization(
+            # Show API usage cost warning to the admin
+            api_usage_warning = ""
+            estimated_tokens = original_content_length / 4  # Rough estimate: 4 chars per token
+            estimated_cost = (estimated_tokens / 1_000_000) * 0.15  # $0.15 per 1M input tokens
+            output_tokens = original_content_length / 4  # Rough estimate: 4 chars per token
+            output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
+            estimated_cost = estimated_cost + output_cost
+            if original_content_length > 10000:  # Only show warning for larger content
+                api_usage_warning = f"Note: Using GPT-4o-mini for summarization will cost approximately ${estimated_cost:.2f} for this content."
+                logger.info(f"Showing API cost warning: ${estimated_cost:.2f} for {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
+                
+            # Apply GPT summarization with fallback to rule-based summarization
+            combined_preview_content, percent_reduced = gpt_summarize_text(
                 combined_preview_content, 
-                target_length=int(char_limit * 0.95),
+                target_length=int(char_limit * 0.95), 
                 max_length=char_limit
             )
             
@@ -1633,7 +1658,6 @@ def admin_preview_upload():
             # Check if summarization reduced content
             if final_content_length < original_content_length:
                 was_summarized = True
-                percent_reduced = round(((original_content_length - final_content_length) / original_content_length) * 100, 1)
                 
                 summarization_result = {
                     "original_length": original_content_length,
@@ -1644,7 +1668,8 @@ def admin_preview_upload():
                 logger.info(f"Content summarized: {original_content_length} -> {final_content_length} chars ({percent_reduced}%)")
                 
                 warning_message = f"Content was automatically summarized to fit within the {char_limit:,} character limit. " \
-                                f"Reduced by {percent_reduced}% from {original_content_length:,} to {final_content_length:,} characters."
+                                f"Original: {original_content_length:,} characters, Final: {final_content_length:,} characters " \
+                                f"({percent_reduced}% reduced). {api_usage_warning}"
                 
                 # Update the individual file contents using our distribution function
                 if extracted_files_data:
@@ -1801,9 +1826,23 @@ def admin_upload():
             if auto_summarize:
                 logger.info(f"Applying automatic summarization")
                 original_length = len(final_content)
-                final_content = smart_text_summarization(final_content, target_length=int(char_limit * 0.95), max_length=char_limit)
+                
+                # Show API usage cost warning to the admin
+                api_usage_warning = ""
+                estimated_tokens = original_length / 4  # Rough estimate: 4 chars per token
+                estimated_cost = (estimated_tokens / 1_000_000) * 0.15  # $0.15 per 1M input tokens
+                output_tokens = original_length / 4  # Rough estimate: 4 chars per token
+                output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
+                estimated_cost = estimated_cost + output_cost
+                if original_length > 10000:  # Only show warning for larger content
+                    api_usage_warning = f"Note: Using GPT-4o-mini for summarization will cost approximately ${estimated_cost:.2f} for this content."
+                    logger.info(f"API cost: ${estimated_cost:.2f} for {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
+                
+                # Apply GPT summarization with fallback to rule-based summarization
+                final_content, percent_reduced = gpt_summarize_text(final_content, target_length=int(char_limit * 0.95), max_length=char_limit)
+                
                 summarized_length = len(final_content)
-                logger.info(f"Content reduced from {original_length} to {summarized_length} characters")
+                logger.info(f"Content reduced from {original_length} to {summarized_length} characters ({percent_reduced}% reduction)")
                 
                 # Check if still over limit after summarization
                 if summarized_length > char_limit:
@@ -2191,14 +2230,27 @@ def admin_update_chatbot_content():
             if auto_summarize:
                 logger.info(f"Content exceeded limit ({len(content)} > {char_limit}). Applying automatic summarization.")
                 original_length = len(content)
-                content = smart_text_summarization(content, target_length=int(char_limit * 0.95), max_length=char_limit)
+                
+                # Show API usage cost warning to the admin
+                api_usage_warning = ""
+                estimated_tokens = original_length / 4  # Rough estimate: 4 chars per token
+                estimated_cost = (estimated_tokens / 1_000_000) * 0.15  # $0.15 per 1M input tokens
+                output_tokens = original_length / 4  # Rough estimate: 4 chars per token
+                output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
+                estimated_cost = estimated_cost + output_cost
+                if original_length > 10000:  # Only show warning for larger content
+                    api_usage_warning = f"Note: Using GPT-4o-mini for summarization will cost approximately ${estimated_cost:.2f} for this content."
+                    logger.info(f"API cost: ${estimated_cost:.2f} for {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
+                
+                # Apply GPT summarization with fallback to rule-based summarization
+                content, percent_reduced = gpt_summarize_text(content, target_length=int(char_limit * 0.95), max_length=char_limit)
                 
                 # Calculate reduction stats
                 summarization_stats = {
                     "original_length": original_length,
                     "final_length": len(content),
                     "chars_removed": original_length - len(content),
-                    "percent_reduced": round((original_length - len(content)) / original_length * 100, 1)
+                    "percent_reduced": percent_reduced
                 }
                 
                 logger.info(f"Content reduced from {original_length} to {len(content)} characters through automatic summarization.")
@@ -2206,7 +2258,7 @@ def admin_update_chatbot_content():
                     "success": True, 
                     "message": "Chatbot content updated successfully with summarization",
                     "was_summarized": True,
-                    "warning": f"Content was automatically summarized to fit within the character limit of {char_limit:,} characters.",
+                    "warning": f"Content was automatically summarized to fit within the character limit of {char_limit:,} characters. {api_usage_warning}",
                     "summarization_stats": summarization_stats,
                     "content_length": len(content),
                     "char_limit": char_limit
@@ -2631,6 +2683,136 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
     
     # Return the cleaned text, which should now be under max_length
     return cleaned_text
+
+def gpt_summarize_text(text, target_length=None, max_length=50000):
+    """
+    Use GPT-4o-mini to intelligently summarize text to meet a target length.
+    
+    Args:
+        text (str): The input text to summarize
+        target_length (int, optional): Target character length. If None, defaults to 80% of max_length
+        max_length (int): Maximum allowed length
+        
+    Returns:
+        str: Summarized text within the target length
+        float: Percent reduction achieved
+    """
+    if not text:
+        return "", 0
+    
+    # If text is already shorter than max_length, return as is
+    if len(text) <= max_length:
+        return text, 0
+    
+    if target_length is None:
+        target_length = int(max_length * 0.95)  # 95% of max to leave minimal buffer and maximize content preservation
+    
+    original_length = len(text)
+    logger.info(f"Starting GPT summarization: {original_length} characters to target {target_length} characters")
+    
+    # Keep most of the original text and only do minimal cleanup
+    # Only fix multiple newlines (3+) and multiple spaces to avoid confusing the model
+    cleaned_text = re.sub(r'\n{4,}', '\n\n\n', text)  # Keep more line breaks for structure
+    cleaned_text = re.sub(r' {3,}', '  ', cleaned_text)  # Keep double spaces for formatting
+    
+    # Only remove critical confidentiality notices that don't affect content
+    minimal_boilerplate = [
+        r'(?i)confidential.*?this email.*?intended only for',  # Email confidentiality notices
+        r'(?i)proprietary notice.*?distribution is prohibited',  # Distribution prohibitions
+    ]
+    
+    for pattern in minimal_boilerplate:
+        cleaned_text = re.sub(pattern, '[Legal notice removed]', cleaned_text)
+        
+    # For direct GPT summarization, always minimize the perceived reduction needed
+    current_length = len(cleaned_text)
+    
+    # Use a fixed target length close to the maximum to ensure minimal content loss
+    if current_length > 50000:
+        target_length = 50000  # Maximum target for very large documents
+    elif current_length > target_length:
+        # For documents that need reduction, set target to at least 80% of current length
+        # This ensures we keep as much content as possible while still reducing
+        target_length = max(target_length, int(current_length * 0.8))
+    
+    # Calculate a conservative reduction factor to preserve more content
+    reduction_factor = max(0.1, min(0.3, 1 - (target_length / current_length)))  # Cap at 0.3 (30% reduction)
+    
+    # Prepare system prompt based on reduction factor
+    prompt_instructions = ""
+    if reduction_factor <= 0.3:
+        prompt_instructions = "Maintain almost all of the original content. Only remove clear redundancies while preserving all details, examples and context."
+    elif reduction_factor <= 0.5:
+        prompt_instructions = "Maintain most of the original content, keeping all important details and examples. Only condense verbose explanations."
+    elif reduction_factor <= 0.7:
+        prompt_instructions = "Keep most core concepts and important details, while condensing explanations and examples."
+    else:
+        prompt_instructions = "Focus on preserving main ideas and key points, condensing where possible but maintaining overall scope and depth."
+        
+    # Format system prompt
+    system_prompt = f"""You are a text summarization assistant. Summarize the provided text while preserving as much original content as possible. 
+The output should be approximately {target_length} characters in length (current text is {current_length} characters).
+{prompt_instructions}
+
+IMPORTANT GUIDELINES:
+1. Preserve ALL important facts, key concepts, definitions, and essential information without exception
+2. Maintain the original document's complete structure, sections, and flow
+3. Keep ALL section titles, headers, and subheaders exactly as they appear
+4. Remove only clear redundancies and extremely verbose explanations if necessary
+5. Do not add any of your own commentary or content not present in the original
+6. The summary should aim for approximately {target_length} characters, but prioritize content preservation over length
+7. Do not include phrases like "the text discusses" - present the content directly
+8. Do not begin with "Here is the summarized content" or similar meta-commentary
+9. Preserve ALL technical details, numbers, statistics, names, and specific information
+10. The summary must be a comprehensive, cohesive document that captures the full scope of the original
+11. Aim to keep at least 50% of the original paragraphs mostly intact"""
+
+    # Format user prompt - ask for longer summary to ensure we get enough content
+    user_prompt = f"Please summarize the following text to approximately {target_length} characters. Your goal is to preserve as much of the original content, structure, and details as possible. The summary should be comprehensive and maintain all key information:\n\n{cleaned_text}"
+
+    # Call the GPT-4o-mini API
+    try:
+        logger.info("Calling GPT-4o-mini API for content summarization")
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.3,  # Lower temperature for more consistent summaries
+            max_tokens=16384,  # GPT-4o-mini's max supported tokens
+            n=1,
+        )
+        
+        # Extract summary from the response
+        summary = response['choices'][0]['message']['content'].strip()
+        
+        # Log completion and token usage
+        final_length = len(summary)
+        percent_reduced = round(((original_length - final_length) / original_length) * 100, 1)
+        logger.info(f"GPT summary complete: {original_length} → {final_length} chars ({percent_reduced}% reduction)")
+        
+        if 'usage' in response:
+            prompt_tokens = response['usage']['prompt_tokens']
+            completion_tokens = response['usage']['completion_tokens']
+            total_tokens = response['usage']['total_tokens']
+            logger.info(f"Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
+        
+        # Check if summary is within target length
+        if len(summary) > target_length:
+            logger.warning(f"Generated summary ({len(summary)} chars) exceeds target length ({target_length}). Will trim.")
+            # Simple trimming if necessary
+            summary = summary[:target_length - 100] + "..."
+            
+        return summary, percent_reduced
+        
+    except Exception as e:
+        logger.error(f"Error in GPT summarization: {str(e)}")
+        # Fall back to rule-based summarization if GPT fails
+        logger.info("Falling back to rule-based summarization")
+        result = smart_text_summarization(text, target_length, max_length)
+        percent_reduced = round(((original_length - len(result)) / original_length) * 100, 1)
+        return result, percent_reduced
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

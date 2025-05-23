@@ -378,4 +378,83 @@ languageSelect.addEventListener("change", function() {
 - [MDN Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API)
 - [Web Speech API Specification](https://wicg.github.io/speech-api/)
 - [Browser Compatibility](https://caniuse.com/?search=speech%20recognition)
-- [List of Language Codes](https://www.w3schools.com/tags/ref_language_codes.asp) 
+- [List of Language Codes](https://www.w3schools.com/tags/ref_language_codes.asp)
+
+## Robust Solution: Preventing Deleted Text Reappearing and Repeated Transcripts
+
+### Problem 1: Deleted Text Reappears After Voice Input Restart
+
+**Description:**
+When the user deletes or edits the input text and restarts voice input, previously deleted text may reappear. This happens if the speech recognition buffer (e.g., `appendedTranscript`) is not properly synchronized with the current input value.
+
+**Solution:**
+Always use the current value of the input field as the base for new speech recognition results. If the user edits or deletes text, the buffer should be updated immediately. When speech recognition starts, save the current input value as the base.
+
+### Problem 2: Repeated/Triplicated Transcripts
+
+**Description:**
+Sometimes, the same spoken phrase appears multiple times in the input. This is caused by naively concatenating interim and final transcripts, so that when a final result is received, the same text is appended again.
+
+**Solution:**
+- Only show the interim transcript as a temporary addition to the input.
+- When a final transcript is received, append it to the base and clear the interim.
+- The input should always be: `base input at recognition start` + `all final transcripts` + `current interim transcript`.
+
+### Safe Implementation Pattern (in English)
+
+```javascript
+let recognitionBase = ""; // The input value when speech recognition starts
+let recognitionFinal = ""; // Accumulated final transcript
+
+micBtn.addEventListener("click", function() {
+    if (isListening) {
+        recognition.stop();
+        isListening = false;
+        micBtn.classList.remove("active");
+    } else {
+        try {
+            recognitionBase = userInput.value; // Save input value at recognition start
+            recognitionFinal = "";
+            recognition.start();
+            isListening = true;
+            micBtn.classList.add("active");
+            userInput.focus();
+        } catch (error) {
+            console.error("Speech recognition error:", error);
+            alert("Could not start speech recognition. Please check your browser settings.");
+        }
+    }
+});
+
+recognition.onresult = function(event) {
+    let interimTranscript = "";
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+            recognitionFinal += event.results[i][0].transcript;
+        } else {
+            interimTranscript += event.results[i][0].transcript;
+        }
+    }
+    // Process transcripts
+    let finalText = autoCapitalizeSentences(replaceSpokenPunctuation(recognitionFinal));
+    let interimText = autoCapitalizeSentences(replaceSpokenPunctuation(interimTranscript));
+    userInput.value = recognitionBase + finalText + interimText;
+    userInput.style.height = "auto";
+    userInput.style.height = userInput.scrollHeight + "px";
+};
+
+userInput.addEventListener('input', function() {
+    recognitionBase = this.value; // Sync base with current input on user edit
+    recognitionFinal = ""; // Reset accumulated transcript on manual edit
+    this.style.height = 'auto';
+    this.style.height = this.scrollHeight + 'px';
+    scrollToBottom();
+});
+```
+
+**Key Points:**
+- The input field always reflects the current state: base + all final transcripts + current interim transcript.
+- If the user edits or deletes text, the base and final transcript are reset, so deleted text never reappears.
+- Interim results are only shown temporarily and do not cause duplication when final results arrive.
+
+This approach fully solves both the deleted text reappearing and repeated transcript issues in voice input UX. 

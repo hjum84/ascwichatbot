@@ -456,6 +456,9 @@ textarea#userInput:focus {
     body {
         padding: 0;
         height: 100%;
+        position: fixed; /* Prevent body scrolling */
+        width: 100%;
+        overflow: hidden;
     }
 
     .chat-container {
@@ -464,10 +467,59 @@ textarea#userInput:focus {
         max-height: 100vh;
         border-radius: 0;
         box-shadow: none;
+        display: flex;
+        flex-direction: column;
     }
 
     .modern-header {
-        padding: 0.75rem 0.75rem;  /* Reduced horizontal padding */
+        padding: 0.75rem 0.75rem;
+        flex-shrink: 0; /* Prevent header from shrinking */
+    }
+
+    .chat-box {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.75rem;
+        padding-bottom: 0.5rem;
+        margin-bottom: 0;
+    }
+
+    .input-area-container {
+        position: sticky;
+        bottom: 0;
+        background-color: var(--bg-white);
+        border-top: 1px solid var(--border-light);
+        padding: 0.75rem;
+        flex-shrink: 0; /* Prevent container from shrinking */
+        z-index: 100;
+    }
+
+    .input-container {
+        padding: 0;
+        position: relative;
+        z-index: 101;
+    }
+
+    textarea#userInput {
+        padding: 0.75rem;
+        font-size: 1rem;
+        max-height: 100px;
+        background-color: var(--bg-white);
+    }
+
+    /* Add padding to last message to ensure it's not hidden behind input area */
+    .chat-box::after {
+        content: '';
+        display: block;
+        height: 1rem;
+    }
+
+    .send-btn,
+    .mic-btn {
+        width: 38px;
+        height: 38px;
+        position: relative;
+        z-index: 101;
     }
 
     .program-main-title {
@@ -494,37 +546,9 @@ textarea#userInput:focus {
         font-size: 0.8125rem;  /* Slightly smaller font size */
     }
 
-    .chat-box {
-        padding: 0.75rem;
-    }
-
     .message {
         max-width: 90%;
         padding: 0.75rem 1rem;
-    }
-
-    .input-area-container {
-        position: sticky;
-        bottom: 0;
-        background-color: var(--bg-white);
-        border-top: 1px solid var(--border-light);
-        padding: 0.75rem;
-    }
-
-    .input-container {
-        padding: 0;
-    }
-
-    textarea#userInput {
-        padding: 0.75rem;
-        font-size: 1rem;
-        max-height: 100px;
-    }
-
-    .send-btn,
-    .mic-btn {
-        width: 38px;
-        height: 38px;
     }
 
     /* Ensure the button text doesn't wrap */

@@ -190,9 +190,11 @@
 
     // Auto-resize the textarea as the user types.
     userInput.addEventListener('input', function() {
+      recognitionBase = this.value; // Sync base with current input on user edit
+      recognitionFinal = ""; // Reset accumulated transcript on manual edit
       this.style.height = 'auto';
       this.style.height = this.scrollHeight + 'px';
-      scrollToBottom(); // Scroll when textarea resizes
+      scrollToBottom();
     });
 
     userInput.addEventListener('focus', () => {
@@ -414,7 +416,8 @@
     const micBtn = document.getElementById("micBtn");
     let recognition = null;
     let isListening = false;
-    let appendedTranscript = "";
+    let recognitionBase = ""; // The input value when speech recognition starts
+    let recognitionFinal = ""; // Accumulated final transcript
 
     function replaceSpokenPunctuation(text) {
       return text
@@ -446,21 +449,18 @@
 
         // Handle results
         recognition.onresult = function(event) {
-            const transcript = Array.from(event.results)
-                .map(result => result[0])
-                .map(result => result.transcript)
-                .join("");
-            
-            // Process transcript with custom functions
-            const processedTranscript = autoCapitalizeSentences(replaceSpokenPunctuation(transcript));
-            
-            // Append to existing text instead of replacing
-            if (appendedTranscript) {
-                userInput.value = appendedTranscript + " " + processedTranscript;
-            } else {
-                userInput.value = processedTranscript;
+            let interimTranscript = "";
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    recognitionFinal += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
             }
-            
+            // Process transcripts
+            let finalText = autoCapitalizeSentences(replaceSpokenPunctuation(recognitionFinal));
+            let interimText = autoCapitalizeSentences(replaceSpokenPunctuation(interimTranscript));
+            userInput.value = recognitionBase + finalText + interimText;
             userInput.style.height = "auto";
             userInput.style.height = userInput.scrollHeight + "px";
         };
@@ -470,7 +470,7 @@
             // Only save transcript if we're actually stopping (not just pausing)
             if (!isListening) {
                 if (userInput.value) {
-                    appendedTranscript = userInput.value;
+                    recognitionFinal = userInput.value;
                 }
                 micBtn.classList.remove("active");
             } else {
@@ -501,10 +501,8 @@
                 micBtn.classList.remove("active");
             } else {
                 try {
-                    // Update appendedTranscript to current input value 
-                    // This ensures manually deleted text doesn't reappear
-                    appendedTranscript = userInput.value;
-                    
+                    recognitionBase = userInput.value; // Save input value at recognition start
+                    recognitionFinal = "";
                     recognition.start();
                     isListening = true;
                     micBtn.classList.add("active");

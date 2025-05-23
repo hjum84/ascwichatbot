@@ -197,19 +197,10 @@
       scrollToBottom();
     });
 
-    userInput.addEventListener('focus', () => {
-        if (isAttachmentBarVisible) {
-            attachmentBar.style.display = 'none';
-            toggleAttachBarBtn.innerHTML = '<i class="bi bi-plus-circle-fill"></i>';
-            isAttachmentBarVisible = false;
-        }
-        // Adjust view for keyboard
-        // On some mobile browsers, focusing an input scrolls the page.
-        // We might need to counter-scroll or adjust padding.
-        setTimeout(() => { // Timeout to allow keyboard to show
-            document.body.scrollTop = document.body.scrollHeight;
-            scrollToBottom();
-        }, 300);
+    userInput.addEventListener('focus', function() {
+      setTimeout(() => {
+        userInput.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 300);
     });
 
     toggleAttachBarBtn.addEventListener('click', () => {

@@ -455,65 +455,59 @@ textarea#userInput:focus {
 @media (max-width: 767px) {
     body {
         padding: 0;
-        height: 100%;
-        position: fixed; /* Prevent body scrolling */
+        min-height: 100vh;
+        height: auto;
+        position: static;
+        overflow: auto;
         width: 100%;
-        overflow: hidden;
     }
-
     .chat-container {
         width: 100%;
-        height: 100vh;
-        max-height: 100vh;
+        min-height: 100vh;
+        height: auto;
         border-radius: 0;
         box-shadow: none;
         display: flex;
         flex-direction: column;
     }
-
-    .modern-header {
-        padding: 0.75rem 0.75rem;
-        flex-shrink: 0; /* Prevent header from shrinking */
-    }
-
-    .chat-box {
-        flex: 1;
-        overflow-y: auto;
-        padding: 0.75rem;
-        padding-bottom: 0.5rem;
-        margin-bottom: 0;
-    }
-
     .input-area-container {
-        position: sticky;
+        position: fixed;
+        left: 0;
+        right: 0;
         bottom: 0;
         background-color: var(--bg-white);
         border-top: 1px solid var(--border-light);
         padding: 0.75rem;
-        flex-shrink: 0; /* Prevent container from shrinking */
         z-index: 100;
     }
-
+    .chat-box {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.75rem;
+        padding-bottom: 80px; /* Enough space for input area */
+        margin-bottom: 0;
+    }
+    .modern-header {
+        padding: 0.75rem 0.75rem;
+        flex-shrink: 0; /* Prevent header from shrinking */
+    }
     .input-container {
         padding: 0;
         position: relative;
         z-index: 101;
     }
-
     textarea#userInput {
         padding: 0.75rem;
         font-size: 1rem;
         max-height: 100px;
         background-color: var(--bg-white);
     }
-
     /* Add padding to last message to ensure it's not hidden behind input area */
     .chat-box::after {
         content: '';
         display: block;
         height: 1rem;
     }
-
     .send-btn,
     .mic-btn {
         width: 38px;
@@ -521,36 +515,30 @@ textarea#userInput:focus {
         position: relative;
         z-index: 101;
     }
-
     .program-main-title {
         font-size: 1.25rem;
     }
-
     .user-info-and-actions {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.75rem;
         padding-right: 0.25rem;
     }
-
     .header-actions-modern {
         width: 100%;
         justify-content: flex-start;
         gap: 0.5rem;  /* Slightly reduce gap between buttons */
     }
-
     .header-button-modern {
         flex: 1;
         min-width: unset;
         padding: 0.5rem 0.5rem;  /* Reduced padding */
         font-size: 0.8125rem;  /* Slightly smaller font size */
     }
-
     .message {
         max-width: 90%;
         padding: 0.75rem 1rem;
     }
-
     /* Ensure the button text doesn't wrap */
     .danger-modern {
         white-space: nowrap;

@@ -4,11 +4,31 @@
     --acs-dark-green: #38A635;
     --acs-light-green: #62C55F;
     --acs-accent: #333333;
+    /* Modern theme variables */
+    --primary-color: #126A3E; /* Darker Green */
+    --secondary-color: #34C759; /* Lighter Green */
+    --primary-gradient: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --text-on-primary: #ffffff;
+    --bg-light: #f8fafc;
+    --bg-white: #ffffff;
+    --border-light: #e2e8f0;
+    --border-medium: #cbd5e1;
+    --danger-color: #dc2626;
+    --danger-bg-light: #fef2f2;
+    --danger-border: #fecaca;
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --border-radius-sm: 6px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
 }
 
 body {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    background-color: #f3f4f6;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    background-color: var(--bg-light);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -16,19 +36,21 @@ body {
     margin: 0;
     color: #2d3748;
     overflow: hidden;
+    padding: 1rem; /* Add padding around the chat container */
 }
 
 /* Container for the entire chat interface */
 .chat-container {
-    width: 400px;
-    max-width: 100%;
+    width: 100%;
+    max-width: 1024px; /* Limit maximum width */
+    height: 100vh;
     background-color: #fff;
-    border-radius: 12px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-md);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    margin: 0 auto; /* Center the container */
 }
 
 /* Chat box where messages are displayed */
@@ -303,71 +325,129 @@ textarea#userInput:focus {
     100% { transform: translate(-50%, -50%) scale(1.7); opacity: 0; }
 }
 
-/* Program header styling */
-.program-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    background-color: #fff;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    z-index: 20;
+/* Modern Header Styles */
+.modern-header {
+    background: var(--bg-white);
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+    padding: 1.25rem 2rem;
+    box-shadow: var(--shadow-md);
     position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
+    margin: 0;
 }
 
-.program-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #0073e6;
+.header-content-left {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
 }
 
-.program-badge {
-    margin-left: 8px;
-    background-color: #0073e6;
-    color: white;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 11px;
+.title-line {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.program-main-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin: 0;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.user-info-and-actions {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+}
+
+.user-status-modern {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.user-status-modern strong {
+    color: var(--text-primary);
+}
+
+.logout-link-modern {
+    color: var(--primary-color);
+    text-decoration: none;
     font-weight: 500;
-    text-transform: uppercase;
+    transition: all 0.2s ease-in-out;
 }
 
-.switch-program-btn {
+.logout-link-modern:hover {
+    color: var(--secondary-color);
+    text-decoration: underline;
+}
+
+.header-actions-modern {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.header-button-modern {
+    height: 2.25rem;
+    padding: 0 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: var(--border-radius-md);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background-color: transparent;
-    color: var(--acs-green);
-    border: 1px solid var(--acs-green);
-    font-size: 13px;
-    padding: 5px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s;
-    margin-left: 8px;
+    gap: 0.5rem;
     text-decoration: none;
+    white-space: nowrap;
+    min-width: 120px;
 }
 
-.switch-program-btn:hover {
-    background-color: rgba(76, 184, 72, 0.1);
-    color: var(--acs-dark-green);
+.header-button-modern.switch-program-modern {
+    background-color: var(--bg-white);
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+    font-weight: 600;
 }
 
-#clear-history-btn {
-    background-color: rgba(255, 77, 79, 0.1);
-    color: #ff4d4f;
-    border: none;
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 12px;
+.header-button-modern.switch-program-modern:hover {
+    background-color: var(--primary-color);
+    color: var(--text-on-primary);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+
+#clear-history-btn.danger-modern {
+    background-color: var(--bg-white);
+    color: var(--danger-color);
+    border-color: var(--danger-border);
     font-weight: 500;
-    transition: all 0.2s;
-    cursor: pointer;
 }
 
-#clear-history-btn:hover {
-    background-color: rgba(255, 77, 79, 0.2);
+#clear-history-btn.danger-modern:hover {
+    background-color: var(--danger-bg-light);
+    border-color: var(--danger-color);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+
+#clear-history-btn.danger-modern svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+    flex-shrink: 0;
 }
 
 /* Toggle Attachment Bar Button */
@@ -500,5 +580,40 @@ textarea#userInput:focus {
 .org-logo {
     height: 60px;
     margin-right: 15px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .chat-container {
+        max-width: 100%; /* Full width on mobile */
+        height: 100vh;
+        border-radius: 0; /* Remove border radius on mobile */
+    }
+
+    .modern-header {
+        padding: 1rem;
+    }
+
+    .user-info-and-actions {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+
+    .header-actions-modern {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .header-button-modern {
+        flex: 1;
+        min-width: unset;
+    }
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 0; /* Remove padding on mobile */
+    }
 }
   

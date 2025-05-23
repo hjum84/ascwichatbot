@@ -211,10 +211,18 @@ def get_cached_response(content_hash, user_message):
     try:
         # Get actual content to use in system message
         content = program_content[program_code]
+        # Try to get system prompt from DB
+        db = get_db()
+        chatbot = ChatbotContent.get_by_code(db, program_code)
+        if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
+            system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}"
+        else:
+            system_prompt = f"You are an assistant that only answers questions based on the following content for the {program_names.get(program_code, 'selected')} program: {content}"
+        close_db(db)
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"You are an assistant that only answers questions based on the following content for the {program_names.get(program_code, 'selected')} program: {content}"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
             max_tokens=500
@@ -817,10 +825,15 @@ def chat():
             cache_result = "cache_miss"
             try:
                 logger.debug(f"Cache miss for {current_program}, getting new response")
+                # Use system prompt from DB if available
+                if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
+                    system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}"
+                else:
+                    system_prompt = f"You are an assistant that only answers questions based on the following content for the {program_names.get(current_program, 'selected')} program: {program_content.get(current_program, '')}"
                 response = openai.ChatCompletion.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": f"You are an assistant that only answers questions based on the following content for the {program_names.get(current_program, 'selected')} program: {program_content.get(current_program, '')}"},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_message}
                     ],
                     max_tokens=500
@@ -1957,6 +1970,8 @@ def admin_upload():
         # Create new chatbot (or update if editing)
         logger.info(f"Creating chatbot with final content length: {len(final_content)}")
         logger.info(f"Content source was: {content_source}")
+        system_prompt_role = request.form.get('system_prompt_role', 'You are a text summarization assistant. Summarize the provided text while preserving as much original content as possible.')
+        system_prompt_guidelines = request.form.get('system_prompt_guidelines', '1. Preserve ALL important facts, key concepts, definitions, and essential information without exception\n2. Maintain the original document\'s complete structure, sections, and flow\n3. Keep ALL section titles, headers, and subheaders exactly as they appear\n4. Remove only clear redundancies and extremely verbose explanations if necessary\n5. Do not add any of your own commentary or content not present in the original\n6. The summary should aim for approximately {char_limit} characters, but prioritize content preservation over length\n7. Do not include phrases like "the text discusses" - present the content directly\n8. Do not begin with "Here is the summarized content" or similar meta-commentary\n9. Preserve ALL technical details, numbers, statistics, names, and specific information\n10. The summary must be a comprehensive, cohesive document that captures the full scope of the original\n11. Aim to keep at least 50% of the original paragraphs mostly intact')
         new_chatbot = ChatbotContent.create_or_update(
             db=db,
             code=chatbot_code.upper(),
@@ -1967,7 +1982,9 @@ def admin_upload():
             intro_message=intro_message,
             char_limit=char_limit,
             is_active=True, # New chatbots are active by default
-            category=category
+            category=category,
+            system_prompt_role=system_prompt_role,
+            system_prompt_guidelines=system_prompt_guidelines
         )
         db.commit()
         
@@ -2242,7 +2259,9 @@ def admin_get_chatbot_content(chatbot_code):
             "success": True,
             "content": chatbot.content,
             "char_count": len(chatbot.content),
-            "char_limit": chatbot.char_limit
+            "char_limit": chatbot.char_limit,
+            "system_prompt_role": chatbot.system_prompt_role,
+            "system_prompt_guidelines": chatbot.system_prompt_guidelines
         })
         
     except Exception as e:

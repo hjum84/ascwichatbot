@@ -937,6 +937,38 @@
                 max-width: 100%;
             }
         }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 2rem;
+            font-weight: 700;
+            color: #126A3E;
+            background: linear-gradient(90deg, #e8f5e9 60%, #f8fafc 100%);
+            border-left: 6px solid #34C759;
+            border-radius: 0 12px 12px 0;
+            box-shadow: 0 2px 8px rgba(52,199,89,0.07);
+            padding: 0.75rem 1.5rem;
+            margin-bottom: 1.5rem;
+            margin-top: 1.5rem;
+            letter-spacing: -0.01em;
+        }
+        .section-title i {
+            font-size: 1.5rem;
+            color: #34C759;
+            flex-shrink: 0;
+        }
+        @media (max-width: 600px) {
+            .section-title {
+                font-size: 1.2rem;
+                padding: 0.6rem 1rem;
+                border-radius: 0 8px 8px 0;
+            }
+            .section-title i {
+                font-size: 1.1rem;
+            }
+        }
     </style>
 </head>
 <body>
@@ -998,7 +1030,7 @@
                             <div class="tab-pane fade" id="stats-content" role="tabpanel" aria-labelledby="stats-tab">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
-                                        <h4 class="mb-0">Database Statistics</h4>
+                                        <h2 class="section-title"><i class="bi bi-database"></i> Database Statistics</h2>
                                     </div>
                                     <div class="card-body">
                                         {% if alerts %}
@@ -1098,7 +1130,7 @@
                             <div class="tab-pane fade show active" id="manage-content" role="tabpanel" aria-labelledby="manage-tab">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
-                                        <h4 class="mb-0">Manage Existing Chatbots</h4>
+                                        <h2 class="section-title"><i class="bi bi-list-check"></i> Manage Existing Chatbots</h2>
                                     </div>
                                     <div class="card-body">
                                         <div class="alert alert-info">
@@ -1225,7 +1257,7 @@
                             <div class="tab-pane fade" id="create-content" role="tabpanel" aria-labelledby="create-tab">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
-                                        <h4 class="mb-0">Create New Chatbot</h4>
+                                        <h2 class="section-title"><i class="bi bi-plus-circle"></i> Create New Chatbot</h2>
                                     </div>
                                     <div class="card-body">
                                         <div class="alert alert-info">
@@ -1330,6 +1362,32 @@
                                                             <i class="bi bi-trash"></i> Clear All
                                                         </button>
                                                         <div class="file-counter" id="fileCounter"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold">System Prompt <span class="text-muted">(Summarization)</span></label>
+                                                <div class="row g-2">
+                                                    <div class="col-md-6">
+                                                        <label for="system_prompt_role" class="form-label">Role</label>
+                                                        <textarea class="form-control" id="system_prompt_role" name="system_prompt_role" rows="2" required>You are a text summarization assistant. Summarize the provided text while preserving as much original content as possible.</textarea>
+                                                        <div class="form-text">Define the assistant's role and high-level behavior.</div>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <label for="system_prompt_guidelines" class="form-label">Important Guidelines</label>
+                                                        <textarea class="form-control" id="system_prompt_guidelines" name="system_prompt_guidelines" rows="7" required>1. Preserve ALL important facts, key concepts, definitions, and essential information without exception
+2. Maintain the original document's complete structure, sections, and flow
+3. Keep ALL section titles, headers, and subheaders exactly as they appear
+4. Remove only clear redundancies and extremely verbose explanations if necessary
+5. Do not add any of your own commentary or content not present in the original
+6. The summary should aim for approximately {char_limit} characters, but prioritize content preservation over length
+7. Do not include phrases like "the text discusses" - present the content directly
+8. Do not begin with "Here is the summarized content" or similar meta-commentary
+9. Preserve ALL technical details, numbers, statistics, names, and specific information
+10. The summary must be a comprehensive, cohesive document that captures the full scope of the original
+11. Aim to keep at least 50% of the original paragraphs mostly intact</textarea>
+                                                        <div class="form-text">List the detailed rules the assistant must always follow.</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1440,7 +1498,7 @@
                             <div class="tab-pane fade" id="trash-content" role="tabpanel" aria-labelledby="trash-tab">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
-                                        <h4 class="mb-0">Deleted Chatbots</h4>
+                                        <h2 class="section-title"><i class="bi bi-trash"></i> Deleted Chatbots</h2>
                                     </div>
                                     <div class="card-body">
                                         <div class="alert alert-warning">
@@ -1476,7 +1534,7 @@
                             <div class="tab-pane fade" id="data-mgmt-content" role="tabpanel" aria-labelledby="data-mgmt-tab">
                                 <div class="card mb-4">
                                     <div class="card-header bg-light">
-                                        <h4 class="mb-0">Data Management</h4>
+                                        <h2 class="section-title"><i class="bi bi-table"></i> Data Management</h2>
                                     </div>
                                     <div class="card-body">
                                         <!-- Subtabs -->
@@ -1747,6 +1805,18 @@
                         <label for="editCharLimit" class="form-label">Character Limit</label>
                         <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="100000" value="50000">
                         <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editSystemPromptRole" class="form-label">System Prompt Role</label>
+                        <input type="text" class="form-control" id="editSystemPromptRole" name="system_prompt_role" placeholder="e.g., You are a text summarization assistant...">
+                        <div class="form-text">Define the role and identity of the chatbot. This sets the tone and behavior of the AI.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editSystemPromptGuidelines" class="form-label">System Prompt Guidelines</label>
+                        <textarea class="form-control" id="editSystemPromptGuidelines" name="system_prompt_guidelines" rows="5" placeholder="Enter guidelines for the chatbot's behavior..."></textarea>
+                        <div class="form-text">Specify detailed guidelines and rules for how the chatbot should process and respond to queries.</div>
                     </div>
                     
                     <div class="mb-3 form-check">
@@ -2503,6 +2573,8 @@
                                     contentTextarea.value = data.content;
                                     document.getElementById('editCharLimit').value = data.char_limit;
                                     document.getElementById('charLimitDisplay').textContent = data.char_limit.toLocaleString();
+                                    document.getElementById('editSystemPromptRole').value = data.system_prompt_role;
+                                    document.getElementById('editSystemPromptGuidelines').value = data.system_prompt_guidelines;
                                     updateCharCount();
                                 } else {
                                     contentTextarea.value = 'Error: ' + (data.error || 'Failed to load content');
@@ -2532,6 +2604,8 @@
                     const charLimit = document.getElementById('editCharLimit').value;
                     const appendContent = document.getElementById('appendContent').checked;
                     const autoSummarize = document.getElementById('editAutoSummarize').checked;
+                    const systemPromptRole = document.getElementById('editSystemPromptRole').value;
+                    const systemPromptGuidelines = document.getElementById('editSystemPromptGuidelines').value;
                     const saveButton = this;
                     
                     if (!chatbotCode) {
@@ -2574,6 +2648,8 @@
                     formData.append('content', newContent);
                     formData.append('char_limit', charLimit);
                     formData.append('append_content', 'false'); // When editing, we're replacing content, not appending
+                    formData.append('system_prompt_role', systemPromptRole);
+                    formData.append('system_prompt_guidelines', systemPromptGuidelines);
                     
                     // Only enable auto-summarize when content exceeds limit
                     const contentExceedsLimit = newContent.length > parseInt(charLimit);

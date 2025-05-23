@@ -113,27 +113,25 @@
 
   <div class="chat-container">
     <div class="modern-header">
-      <div class="header-content-left">
-        <div class="title-line">
-          <h1 class="program-main-title">{{ program_display_name }} Chatbot</h1>
+      <div class="title-line">
+        <h1 class="program-main-title">{{ program_display_name }} Chatbot</h1>
+      </div>
+      <div class="user-info-and-actions">
+        {% if session.user_email %}
+        <div class="user-status-modern">
+          Logged in as: <strong>{{ session.user_email }}</strong>
+          <span>|</span>
+          <a href="{{ url_for('logout') }}" class="logout-link-modern">Logout</a>
         </div>
-        <div class="user-info-and-actions">
-          {% if session.user_email %}
-          <div class="user-status-modern">
-              Logged in as: <strong>{{ session.user_email }}</strong>
-              <span>|</span>
-              <a href="{{ url_for('logout') }}" class="logout-link-modern">Logout</a>
-          </div>
-          {% endif %}
-          <div class="header-actions-modern">
-            <a href="{{ url_for('switch_program') }}" class="header-button-modern switch-program-modern">Switch Program</a>
-            <button id="clear-history-btn" class="header-button-modern danger-modern">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-              </svg>
-              Delete Conversation
-            </button>
-          </div>
+        {% endif %}
+        <div class="header-actions-modern">
+          <a href="{{ url_for('switch_program') }}" class="header-button-modern switch-program-modern">Switch Program</a>
+          <button id="clear-history-btn" class="header-button-modern danger-modern">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+              <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+            Delete Conversation
+          </button>
         </div>
       </div>
     </div>

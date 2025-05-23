@@ -2323,6 +2323,8 @@ def admin_update_chatbot_content():
         chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
         content = request.form.get('content')
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
+        system_prompt_role = request.form.get('system_prompt_role')
+        system_prompt_guidelines = request.form.get('system_prompt_guidelines')
         
         if not chatbot_code or content is None:
             return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
@@ -2385,14 +2387,20 @@ def admin_update_chatbot_content():
         if chatbot.char_limit != char_limit:
             chatbot.char_limit = char_limit
             
+        # Update content and system prompts
         chatbot.content = content
+        if system_prompt_role is not None:
+            chatbot.system_prompt_role = system_prompt_role
+        if system_prompt_guidelines is not None:
+            chatbot.system_prompt_guidelines = system_prompt_guidelines
+            
         db.commit()
         
         # Update in-memory content and hash
         load_program_content()
         
-        logger.info(f"Successfully updated content for chatbot: {chatbot_code}")
-        return jsonify({"success": True, "message": "Chatbot content updated successfully"})
+        logger.info(f"Successfully updated content and system prompts for chatbot: {chatbot_code}")
+        return jsonify({"success": True, "message": "Chatbot content and system prompts updated successfully"})
         
     except Exception as e:
         if db: db.rollback()

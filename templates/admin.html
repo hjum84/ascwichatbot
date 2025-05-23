@@ -2573,8 +2573,8 @@
                                     contentTextarea.value = data.content;
                                     document.getElementById('editCharLimit').value = data.char_limit;
                                     document.getElementById('charLimitDisplay').textContent = data.char_limit.toLocaleString();
-                                    document.getElementById('editSystemPromptRole').value = data.system_prompt_role;
-                                    document.getElementById('editSystemPromptGuidelines').value = data.system_prompt_guidelines;
+                                    document.getElementById('editSystemPromptRole').value = data.system_prompt_role || '';
+                                    document.getElementById('editSystemPromptGuidelines').value = data.system_prompt_guidelines || '';
                                     updateCharCount();
                                 } else {
                                     contentTextarea.value = 'Error: ' + (data.error || 'Failed to load content');

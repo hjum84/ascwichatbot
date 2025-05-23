@@ -335,6 +335,18 @@ textarea#userInput:focus {
     z-index: 100;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    position: relative;  /* For pseudo-element positioning */
+}
+
+.modern-header::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;  /* Position it just below the border */
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(to right, var(--primary-color), var(--acs-green));
+    opacity: 0.8;
 }
 
 .title-line {

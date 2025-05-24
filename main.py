@@ -214,10 +214,54 @@ def get_cached_response(content_hash, user_message):
         # Try to get system prompt from DB
         db = get_db()
         chatbot = ChatbotContent.get_by_code(db, program_code)
-        if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
-            system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}"
+        
+        system_prompt_role_text = ""
+        system_prompt_guidelines_text = ""
+        char_limit_value = "50000" # Default character limit if not found
+
+        if chatbot:
+            char_limit_value = str(chatbot.char_limit) if chatbot.char_limit else "50000"
+            if chatbot.system_prompt_role:
+                system_prompt_role_text = chatbot.system_prompt_role
+            else: # Fallback to a default role if not set
+                system_prompt_role_text = f"You are an assistant that answers questions based on the following content for the {program_names.get(program_code, 'selected')} program."
+            
+            if chatbot.system_prompt_guidelines:
+                system_prompt_guidelines_text = chatbot.system_prompt_guidelines.replace("{char_limit}", char_limit_value)
+            else: # Fallback to default guidelines if not set
+                system_prompt_guidelines_text = f"""1. Only answer questions based on the provided content
+2. If the answer is not in the content, say "I don't have enough information to answer that question"
+3. Be concise but thorough in your responses
+4. Maintain a professional and helpful tone
+5. If asked about something not covered in the content, do not make assumptions
+6. Preserve ALL important facts, key concepts, definitions, and essential information without exception. The summary should aim for approximately {char_limit_value} characters, but prioritize content preservation over length."""
+
+            # Strengthened instruction for content-only answers
+            system_prompt = (
+                f"Critically, you MUST NOT answer any questions or provide any information that is not explicitly stated in the CONTENT section below. "
+                f"If the user asks about topics outside of the provided CONTENT, you MUST respond with 'I don't have enough information to answer that question.' or a similar direct refusal. "
+                f"Do not offer to search externally or provide general knowledge. Adhere strictly to the provided CONTENT.\n\n"
+                f"{system_prompt_role_text}\n\n"
+                f"IMPORTANT GUIDELINES:\n{system_prompt_guidelines_text}\n\n"
+                f"CONTENT:\n{content}"
+            )
         else:
-            system_prompt = f"You are an assistant that only answers questions based on the following content for the {program_names.get(program_code, 'selected')} program: {content}"
+            # Fallback if chatbot object itself is not found (should be rare)
+            default_guidelines = f"""1. Only answer questions based on the provided content
+2. If the answer is not in the content, say "I don't have enough information to answer that question"
+3. Be concise but thorough in your responses
+4. Maintain a professional and helpful tone
+5. If asked about something not covered in the content, do not make assumptions
+6. Preserve ALL important facts, key concepts, definitions, and essential information without exception. The summary should aim for approximately {char_limit_value} characters, but prioritize content preservation over length."""
+            system_prompt = (
+                f"Critically, you MUST NOT answer any questions or provide any information that is not explicitly stated in the CONTENT section below. "
+                f"If the user asks about topics outside of the provided CONTENT, you MUST respond with 'I don't have enough information to answer that question.' or a similar direct refusal. "
+                f"Do not offer to search externally or provide general knowledge. Adhere strictly to the provided CONTENT.\n\n"
+                f"You are an assistant that answers questions based on the following content for the {program_names.get(program_code, 'selected')} program.\n\n"
+                f"IMPORTANT GUIDELINES:\n{default_guidelines}\n\n"
+                f"CONTENT:\n{content}"
+            )
+        
         close_db(db)
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
@@ -568,7 +612,7 @@ def set_program(program):
             # Clear session and redirect to login
             session.clear()
             return redirect(url_for('login'))
-        
+            
         # Get lo_root_ids for the chatbot
         chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
         
@@ -836,9 +880,19 @@ def chat():
                 logger.debug(f"Cache miss for {current_program}, getting new response")
                 # Use system prompt from DB if available
                 if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
-                    system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}"
+                    system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}\n\nCONTENT:\n{program_content.get(current_program, '')}"
                 else:
-                    system_prompt = f"You are an assistant that only answers questions based on the following content for the {program_names.get(current_program, 'selected')} program: {program_content.get(current_program, '')}"
+                    system_prompt = f"""You are an assistant that answers questions based on the following content for the {program_names.get(current_program, 'selected')} program.
+
+IMPORTANT GUIDELINES:
+1. Only answer questions based on the provided content
+2. If the answer is not in the content, say "I don't have enough information to answer that question"
+3. Be concise but thorough in your responses
+4. Maintain a professional and helpful tone
+5. If asked about something not covered in the content, do not make assumptions
+
+CONTENT:
+{program_content.get(current_program, '')}"""
                 response = openai.ChatCompletion.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -962,7 +1016,7 @@ def delete_registration():
 
     db = get_db()
     try:
-        user = db.query(User).filter(User.email == email, User.last_name == last_name).first()
+        user = db.query(User).filter(User.email == email).first()
         if user:
             db.delete(user)
             db.commit()
@@ -1033,7 +1087,7 @@ def show_users():
                 self.date_added = data['date_added']
                 self.expiry_date = data['expiry_date']
                 self.lo_root_ids = data['lo_root_ids']
-        
+                
         user_objects = [UserObj(data) for data in user_data]
         close_db(db)
         return render_template('users.html', users=user_objects)
@@ -1849,6 +1903,53 @@ def admin_preview_upload():
         logger.error(f"Error in admin_preview_upload: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
 
+def gpt_summarize_text(text, target_length=None, max_length=50000):
+    """Summarize text using GPT-4.
+    Returns the summarized text.
+    """
+    current_length = len(text)
+    cleaned_text = text.strip()
+    
+    if not cleaned_text:
+        return "", 0
+        
+    if current_length <= (target_length or max_length):
+        return cleaned_text, 0
+    
+    # Use a fixed target length close to the maximum to ensure minimal content loss
+    if current_length > 50000:
+        target_length = 50000  # Maximum target for very large documents
+    elif current_length > target_length:
+        # For documents that need reduction, set target to at least 80% of current length
+        target_length = max(target_length, int(current_length * 0.8))
+    
+    # Calculate a conservative reduction factor to preserve more content
+    reduction_factor = max(0.1, min(0.3, 1 - (target_length / current_length)))
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": """You are a text summarization assistant. Your task is to:
+1. Preserve ALL important facts, key concepts, definitions, and essential information
+2. Maintain the original document's structure, sections, and flow
+3. Keep ALL section titles, headers, and subheaders exactly as they appear
+4. Remove only clear redundancies and verbose explanations
+5. Do not add any commentary or content not in the original"""},
+                {"role": "user", "content": f"Please summarize the following text to approximately {target_length} characters while preserving as much original content as possible:\n\n{cleaned_text}"}
+            ],
+            max_tokens=4000
+        )
+        
+        summary = response['choices'][0]['message']['content'].strip()
+        percent_reduced = round(((current_length - len(summary)) / current_length) * 100, 1)
+        
+        return summary, percent_reduced
+        
+    except Exception as e:
+        logger.error(f"Error in GPT summarization: {e}")
+        return smart_text_summarization(text, target_length, max_length), 0
+
 @app.route('/admin/upload', methods=['POST'])
 @requires_auth
 def admin_upload():
@@ -1987,8 +2088,24 @@ def admin_upload():
         # Create new chatbot (or update if editing)
         logger.info(f"Creating chatbot with final content length: {len(final_content)}")
         logger.info(f"Content source was: {content_source}")
-        system_prompt_role = request.form.get('system_prompt_role', 'You are a text summarization assistant. Summarize the provided text while preserving as much original content as possible.')
-        system_prompt_guidelines = request.form.get('system_prompt_guidelines', '1. Preserve ALL important facts, key concepts, definitions, and essential information without exception\n2. Maintain the original document\'s complete structure, sections, and flow\n3. Keep ALL section titles, headers, and subheaders exactly as they appear\n4. Remove only clear redundancies and extremely verbose explanations if necessary\n5. Do not add any of your own commentary or content not present in the original\n6. The summary should aim for approximately {char_limit} characters, but prioritize content preservation over length\n7. Do not include phrases like "the text discusses" - present the content directly\n8. Do not begin with "Here is the summarized content" or similar meta-commentary\n9. Preserve ALL technical details, numbers, statistics, names, and specific information\n10. The summary must be a comprehensive, cohesive document that captures the full scope of the original\n11. Aim to keep at least 50% of the original paragraphs mostly intact')
+        
+        # Get guidelines from form
+        system_prompt_guidelines = request.form.get('system_prompt_guidelines')
+        if not system_prompt_guidelines:
+            return jsonify({
+                "success": False,
+                "error": "System prompt guidelines are required"
+            }), 400
+        
+        # Generate role that maintains connection with content
+        system_prompt_role = "You are an AI assistant specialized in understanding and explaining the provided content. Your role is to provide accurate, helpful, and relevant information while maintaining a professional tone."
+        
+        # Handle content summarization if needed
+        if len(final_content) > char_limit and auto_summarize:
+            final_content, percent_reduced = gpt_summarize_text(final_content, char_limit)
+            if percent_reduced > 0:
+                system_prompt_role = f"""You are an AI assistant specialized in understanding and explaining the provided content. This content is a summarized version of a larger document that has been reduced by {percent_reduced}% while preserving key information."""
+            
         new_chatbot = ChatbotContent.create_or_update(
             db=db,
             code=chatbot_code.upper(),
@@ -1998,7 +2115,7 @@ def admin_upload():
             quota=default_quota,
             intro_message=intro_message,
             char_limit=char_limit,
-            is_active=True, # New chatbots are active by default
+            is_active=True,
             category=category,
             system_prompt_role=system_prompt_role,
             system_prompt_guidelines=system_prompt_guidelines
@@ -2017,6 +2134,34 @@ def admin_upload():
         return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
     finally:
         if db: close_db(db)
+
+def generate_content_aware_role(content, char_limit=None):
+    """Generate a role-based system prompt that maintains connection with the content.
+    If char_limit is provided, this is for a summarized version of the content."""
+    if char_limit and len(content) > char_limit:
+        return f"""You are an AI assistant specialized in understanding and explaining the provided content. This content is a summarized version of a larger document, focusing on key information while maintaining the original context and meaning.
+
+CONTENT CONTEXT:
+Original Length: {len(content)} characters
+Target Length: {char_limit} characters
+Content Type: Summarized Document
+
+Your role is to provide accurate, helpful, and relevant information while maintaining awareness that this is a summary of a more detailed document."""
+    else:
+        return """You are an AI assistant specialized in understanding and explaining the provided content. Your role is to provide accurate, helpful, and relevant information while maintaining a professional tone and basing all responses solely on the provided content."""
+
+def generate_default_guidelines():
+    """Generate default guidelines for system prompt."""
+    return """1. Only answer questions based on the provided content
+2. If the answer is not in the content, say "I don't have enough information to answer that question"
+3. Be concise but thorough in your responses
+4. Maintain a professional and helpful tone
+5. If asked about something not covered in the content, do not make assumptions
+6. Preserve all important facts, key concepts, and essential information
+7. Present information in a clear and organized manner
+8. Use examples from the content when relevant
+9. If multiple interpretations are possible, explain the different perspectives
+10. Always cite specific parts of the content when providing detailed answers"""
 
 @app.route('/admin/delete_chatbot', methods=['POST'])
 @requires_auth
@@ -2818,267 +2963,111 @@ def smart_text_summarization(text, target_length=None, max_length=50000):
     # Return the cleaned text, which should now be under max_length
     return cleaned_text
 
-def gpt_summarize_text(text, target_length=None, max_length=50000):
-    """
-    Use GPT-4o-mini to intelligently summarize text to meet a target length.
-    
-    Args:
-        text (str): The input text to summarize
-        target_length (int, optional): Target character length. If None, defaults to 80% of max_length
-        max_length (int): Maximum allowed length
-        
-    Returns:
-        str: Summarized text within the target length
-        float: Percent reduction achieved
-    """
-    if not text:
-        return "", 0
-    
-    # If text is already shorter than max_length, return as is
-    if len(text) <= max_length:
-        return text, 0
-    
-    if target_length is None:
-        target_length = int(max_length * 0.95)  # 95% of max to leave minimal buffer and maximize content preservation
-    
-    original_length = len(text)
-    logger.info(f"Starting GPT summarization: {original_length} characters to target {target_length} characters")
-    
-    # Keep most of the original text and only do minimal cleanup
-    # Only fix multiple newlines (3+) and multiple spaces to avoid confusing the model
-    cleaned_text = re.sub(r'\n{4,}', '\n\n\n', text)  # Keep more line breaks for structure
-    cleaned_text = re.sub(r' {3,}', '  ', cleaned_text)  # Keep double spaces for formatting
-    
-    # Only remove critical confidentiality notices that don't affect content
-    minimal_boilerplate = [
-        r'(?i)confidential.*?this email.*?intended only for',  # Email confidentiality notices
-        r'(?i)proprietary notice.*?distribution is prohibited',  # Distribution prohibitions
-    ]
-    
-    for pattern in minimal_boilerplate:
-        cleaned_text = re.sub(pattern, '[Legal notice removed]', cleaned_text)
-        
-    # For direct GPT summarization, always minimize the perceived reduction needed
-    current_length = len(cleaned_text)
-    
-    # Use a fixed target length close to the maximum to ensure minimal content loss
-    if current_length > 50000:
-        target_length = 50000  # Maximum target for very large documents
-    elif current_length > target_length:
-        # For documents that need reduction, set target to at least 80% of current length
-        # This ensures we keep as much content as possible while still reducing
-        target_length = max(target_length, int(current_length * 0.8))
-    
-    # Calculate a conservative reduction factor to preserve more content
-    reduction_factor = max(0.1, min(0.3, 1 - (target_length / current_length)))  # Cap at 0.3 (30% reduction)
-    
-    # Prepare system prompt based on reduction factor
-    prompt_instructions = ""
-    if reduction_factor <= 0.3:
-        prompt_instructions = "Maintain almost all of the original content. Only remove clear redundancies while preserving all details, examples and context."
-    elif reduction_factor <= 0.5:
-        prompt_instructions = "Maintain most of the original content, keeping all important details and examples. Only condense verbose explanations."
-    elif reduction_factor <= 0.7:
-        prompt_instructions = "Keep most core concepts and important details, while condensing explanations and examples."
-    else:
-        prompt_instructions = "Focus on preserving main ideas and key points, condensing where possible but maintaining overall scope and depth."
-        
-    # Format system prompt
-    system_prompt = f"""You are a text summarization assistant. Summarize the provided text while preserving as much original content as possible. 
-The output should be approximately {target_length} characters in length (current text is {current_length} characters).
-{prompt_instructions}
-
-IMPORTANT GUIDELINES:
-1. Preserve ALL important facts, key concepts, definitions, and essential information without exception
-2. Maintain the original document's complete structure, sections, and flow
-3. Keep ALL section titles, headers, and subheaders exactly as they appear
-4. Remove only clear redundancies and extremely verbose explanations if necessary
-5. Do not add any of your own commentary or content not present in the original
-6. The summary should aim for approximately {target_length} characters, but prioritize content preservation over length
-7. Do not include phrases like "the text discusses" - present the content directly
-8. Do not begin with "Here is the summarized content" or similar meta-commentary
-9. Preserve ALL technical details, numbers, statistics, names, and specific information
-10. The summary must be a comprehensive, cohesive document that captures the full scope of the original
-11. Aim to keep at least 50% of the original paragraphs mostly intact"""
-
-    # Format user prompt - ask for longer summary to ensure we get enough content
-    user_prompt = f"Please summarize the following text to approximately {target_length} characters. Your goal is to preserve as much of the original content, structure, and details as possible. The summary should be comprehensive and maintain all key information:\n\n{cleaned_text}"
-
-    # Call the GPT-4o-mini API
-    try:
-        logger.info("Calling GPT-4o-mini API for content summarization")
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3,  # Lower temperature for more consistent summaries
-            max_tokens=16384,  # GPT-4o-mini's max supported tokens
-            n=1,
-        )
-        
-        # Extract summary from the response
-        summary = response['choices'][0]['message']['content'].strip()
-        
-        # Log completion and token usage
-        final_length = len(summary)
-        percent_reduced = round(((original_length - final_length) / original_length) * 100, 1)
-        logger.info(f"GPT summary complete: {original_length} → {final_length} chars ({percent_reduced}% reduction)")
-        
-        if 'usage' in response:
-            prompt_tokens = response['usage']['prompt_tokens']
-            completion_tokens = response['usage']['completion_tokens']
-            total_tokens = response['usage']['total_tokens']
-            logger.info(f"Token usage: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
-        
-        # Check if summary is within target length
-        if len(summary) > target_length:
-            logger.warning(f"Generated summary ({len(summary)} chars) exceeds target length ({target_length}). Will trim.")
-            # Simple trimming if necessary
-            summary = summary[:target_length - 100] + "..."
-            
-        return summary, percent_reduced
-        
-    except Exception as e:
-        logger.error(f"Error in GPT summarization: {str(e)}")
-        # Fall back to rule-based summarization if GPT fails
-        logger.info("Falling back to rule-based summarization")
-        result = smart_text_summarization(text, target_length, max_length)
-        percent_reduced = round(((original_length - len(result)) / original_length) * 100, 1)
-        return result, percent_reduced
-
 @app.route('/admin/upload_user_csv', methods=['POST'])
 @requires_auth
 def admin_upload_user_csv():
     if 'file' not in request.files:
         flash('No file part', 'error')
-        return redirect(url_for('admin')) # Or a dedicated user management page
+        return redirect(url_for('admin'))
     
     file = request.files['file']
     if file.filename == '':
         flash('No selected file', 'error')
         return redirect(url_for('admin'))
 
-    if file and file.filename.endswith('.csv'):
-        try:
-            filename = secure_filename(file.filename)
-            # For security, don't save the file directly with user-provided name if saving to disk
-            # Instead, read it into memory or save with a generated name
-            
-            # Read CSV content into a pandas DataFrame
-            # This helps with data manipulation and validation
-            csv_content = file.read().decode('utf-8-sig') # Use utf-8-sig to handle BOM
-            df = pd.read_csv(StringIO(csv_content))
-
-            # --- Placeholder for progress tracking initialization ---
-            # progress_updates = [] # List to store progress messages
-            # progress_updates.append("Processing CSV file...")
-
-            # 1. Validate required columns
-            required_columns = ['last_name', 'email', 'status', 'lo_root_id']
-            missing_cols = [col for col in required_columns if col not in df.columns]
-            if missing_cols:
-                # progress_updates.append(f"Error: Missing required columns: {', '.join(missing_cols)}")
-                flash(f'Error: Missing required columns: {", ".join(missing_cols)}', 'error')
-                return redirect(url_for('admin')) # Or a dedicated user management page
-
-            # --- Placeholder for further processing steps (filtering, validation, registration) ---
-            # progress_updates.append("Validating data format...")
-            # ... (detailed validation logic here)
-            # progress_updates.append("Filtering active users...")
-            # ... (filtering logic here)
-            # progress_updates.append("Checking for existing users...")
-            # ... (checking logic here)
-            # progress_updates.append("Registering new users...")
-            # ... (registration logic here)
-
-            # Simulate processing for now
-            new_users_count = 0
-            skipped_inactive_count = 0
-            skipped_existing_count = 0
-            error_messages = []
-
-            db = get_db()
-            try:
-                for index, row in df.iterrows():
-                    # Basic data validation (example)
-                    last_name = row.get('last_name')
-                    email = row.get('email')
-                    status = str(row.get('status', '')).strip().lower()
-                    lo_root_id_raw = row.get('lo_root_id')
-
-                    if not all([last_name, email, status, lo_root_id_raw]):
-                        error_messages.append(f"Row {index+2}: Missing one or more required fields.")
-                        continue
-                    
-                    # Validate email format (basic)
-                    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-                        error_messages.append(f"Row {index+2}: Invalid email format for {email}.")
-                        continue
-
-                    # Filter for "Active" status
-                    if status != 'active':
-                        skipped_inactive_count += 1
-                        continue
-
-                    # Check if user already exists
-                    existing_user = db.query(User).filter(User.email == email).first()
-                    if existing_user:
-                        skipped_existing_count += 1
-                        # Here you might update existing user's lo_root_id if needed, 
-                        # or just skip if policy is to not touch existing users.
-                        # For now, we just skip.
-                        continue
-                    
-                    # Register new user
-                    expiry_date_calculated = datetime.utcnow() + timedelta(days=2*365)
-                    new_user = User(
-                        last_name=last_name,
-                        email=email,
-                        status='Active', # From CSV, already filtered
-                        date_added=datetime.utcnow(),
-                        expiry_date=expiry_date_calculated
-                    )
-                    db.add(new_user)
-                    db.flush() # To get new_user.id for association table
-
-                    # Add lo_root_id(s)
-                    # Assuming lo_root_id in CSV can be a single ID or multiple semicolon-separated IDs
-                    lo_root_ids_list = [lr_id.strip() for lr_id in str(lo_root_id_raw).split(';') if lr_id.strip()]
-                    for lr_id in lo_root_ids_list:
-                        if lr_id: # Ensure it's not an empty string
-                            user_lo_association = UserLORootID(user_id=new_user.id, lo_root_id=lr_id)
-                            db.add(user_lo_association)
-                    
-                    new_users_count += 1
-                
-                db.commit()
-                flash(f'CSV processed successfully: {new_users_count} new users added. Skipped {skipped_inactive_count} inactive, {skipped_existing_count} existing.', 'success')
-                if error_messages:
-                    for err_msg in error_messages:
-                        flash(err_msg, 'warning') # Show individual errors as warnings
-
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Error processing CSV data: {str(e)}")
-                flash(f'Error processing CSV data: {str(e)}', 'error')
-            finally:
-                close_db(db)
-
-        except pd.errors.EmptyDataError:
-            flash('Error: The uploaded CSV file is empty.', 'error')
-        except pd.errors.ParserError:
-            flash('Error: Could not parse the CSV file. Please check the format.', 'error')
-        except Exception as e:
-            logger.error(f"Error uploading/reading user CSV: {str(e)}")
-            flash(f'An unexpected error occurred: {str(e)}', 'error')
-        
-        return redirect(url_for('admin')) # Or a dedicated user management page
-
-    else:
+    if not file or not file.filename.endswith('.csv'):
         flash('Invalid file type. Please upload a CSV file.', 'error')
         return redirect(url_for('admin'))
+
+    db = get_db()
+    try:
+        # Read CSV content into memory
+        csv_content = file.read().decode('utf-8-sig')
+        df = pd.read_csv(StringIO(csv_content))
+        
+        # Validate required columns
+        required_columns = ['last_name', 'email', 'status', 'lo_root_id']
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            flash(f'Error: Missing required columns: {", ".join(missing_cols)}', 'error')
+            return redirect(url_for('admin'))
+
+        # Process users
+        new_users_count = 0
+        skipped_inactive_count = 0
+        skipped_existing_count = 0
+        error_messages = []
+
+        for index, row in df.iterrows():
+            try:
+                # Basic data validation
+                last_name = row.get('last_name')
+                email = row.get('email')
+                status = str(row.get('status', '')).strip().lower()
+                lo_root_id_raw = row.get('lo_root_id')
+
+                if not all([last_name, email, status, lo_root_id_raw]):
+                    error_messages.append(f"Row {index+2}: Missing one or more required fields.")
+                    continue
+                
+                # Validate email format
+                if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+                    error_messages.append(f"Row {index+2}: Invalid email format for {email}.")
+                    continue
+
+                # Filter for "Active" status
+                if status != 'active':
+                    skipped_inactive_count += 1
+                    continue
+
+                # Check if user already exists
+                existing_user = db.query(User).filter(User.email == email).first()
+                if existing_user:
+                    skipped_existing_count += 1
+                    continue
+                
+                # Register new user
+                expiry_date_calculated = datetime.utcnow() + timedelta(days=2*365)
+                new_user = User(
+                    last_name=last_name,
+                    email=email,
+                    status='Active',
+                    date_added=datetime.utcnow(),
+                    expiry_date=expiry_date_calculated
+                )
+                db.add(new_user)
+                db.flush()
+
+                # Add lo_root_id(s)
+                lo_root_ids_list = [lr_id.strip() for lr_id in str(lo_root_id_raw).split(';') if lr_id.strip()]
+                for lr_id in lo_root_ids_list:
+                    if lr_id:
+                        user_lo_association = UserLORootID(user_id=new_user.id, lo_root_id=lr_id)
+                        db.add(user_lo_association)
+                
+                new_users_count += 1
+                
+            except Exception as e:
+                error_messages.append(f"Row {index+2}: Error processing user - {str(e)}")
+                continue
+
+        db.commit()
+        flash(f'CSV processed successfully: {new_users_count} new users added. Skipped {skipped_inactive_count} inactive, {skipped_existing_count} existing.', 'success')
+        if error_messages:
+            for err_msg in error_messages:
+                flash(err_msg, 'warning')
+                
+    except Exception as e:
+        if db:
+            db.rollback()
+        logger.error(f"Error processing CSV data: {str(e)}")
+        flash(f'Error processing CSV data: {str(e)}', 'error')
+        
+    finally:
+        if db:
+            close_db(db)
+        
+    return redirect(url_for('admin'))
 
 @app.route('/admin/manage_users')
 @requires_auth

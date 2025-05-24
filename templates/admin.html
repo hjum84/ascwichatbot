@@ -1367,27 +1367,21 @@
                                             </div>
                                             
                                             <div class="mb-3">
-                                                <label class="form-label fw-bold">System Prompt <span class="text-muted">(Summarization)</span></label>
+                                                <label class="form-label fw-bold">System Prompt</label>
                                                 <div class="row g-2">
-                                                    <div class="col-md-6">
-                                                        <label for="system_prompt_role" class="form-label">Role</label>
-                                                        <textarea class="form-control" id="system_prompt_role" name="system_prompt_role" rows="2" required>You are a text summarization assistant. Summarize the provided text while preserving as much original content as possible.</textarea>
-                                                        <div class="form-text">Define the assistant's role and high-level behavior.</div>
-                                                    </div>
-                                                    <div class="col-md-6">
+                                                    <div class="col-12">
                                                         <label for="system_prompt_guidelines" class="form-label">Important Guidelines</label>
-                                                        <textarea class="form-control" id="system_prompt_guidelines" name="system_prompt_guidelines" rows="7" required>1. Preserve ALL important facts, key concepts, definitions, and essential information without exception
-2. Maintain the original document's complete structure, sections, and flow
-3. Keep ALL section titles, headers, and subheaders exactly as they appear
-4. Remove only clear redundancies and extremely verbose explanations if necessary
-5. Do not add any of your own commentary or content not present in the original
-6. The summary should aim for approximately {char_limit} characters, but prioritize content preservation over length
-7. Do not include phrases like "the text discusses" - present the content directly
-8. Do not begin with "Here is the summarized content" or similar meta-commentary
-9. Preserve ALL technical details, numbers, statistics, names, and specific information
-10. The summary must be a comprehensive, cohesive document that captures the full scope of the original
-11. Aim to keep at least 50% of the original paragraphs mostly intact</textarea>
-                                                        <div class="form-text">List the detailed rules the assistant must always follow.</div>
+                                                        <textarea class="form-control" id="system_prompt_guidelines" name="system_prompt_guidelines" rows="7" required>1. Only answer questions based on the provided content
+2. If the answer is not in the content, say "I don't have enough information to answer that question"
+3. Be concise but thorough in your responses
+4. Maintain a professional and helpful tone
+5. If asked about something not covered in the content, do not make assumptions
+6. Preserve all important facts, key concepts, and essential information
+7. Present information in a clear and organized manner
+8. Use examples from the content when relevant
+9. If multiple interpretations are possible, explain the different perspectives
+10. Always cite specific parts of the content when providing detailed answers</textarea>
+                                                        <div class="form-text">Specify the guidelines that the chatbot should follow when responding to user questions. These guidelines will directly affect how the chatbot processes and responds to queries.</div>
                                                     </div>
                                                 </div>
                                             </div>

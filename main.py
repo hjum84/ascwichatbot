@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash
 from functools import wraps
 import re
-from models import User, ChatbotContent, get_db, close_db, ChatHistory
+from models import User, ChatbotContent, get_db, close_db, ChatHistory, UserLORootID, ChatbotLORootAssociation
 import werkzeug
 import glob
 import shutil
@@ -568,13 +568,22 @@ def set_program(program):
             # Clear session and redirect to login
             session.clear()
             return redirect(url_for('login'))
-            
-        # Update program
-        user.current_program = program_upper
-        db.commit()
         
-        # Set in session
+        # Get lo_root_ids for the chatbot
+        chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+        
+        # Add lo_root_ids to user if they don't already have them
+        existing_lo_root_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
+        for lo_root_id in chatbot_lo_root_ids:
+            if lo_root_id not in existing_lo_root_ids:
+                new_assoc = UserLORootID(user_id=user.id, lo_root_id=lo_root_id)
+                db.add(new_assoc)
+        
+        # Set in session for current view
         session['current_program'] = program_upper
+        
+        # Commit changes
+        db.commit()
         
         # Cleanup
         close_db(db)
@@ -974,30 +983,35 @@ def delete_registration():
 @app.route('/export_users', methods=['GET'])
 @requires_auth
 def export_users():
-    db = get_db()
-    try:
-        # Get all users and convert to dictionaries
-        users = db.query(User).all()
-        user_data = [user.to_dict() for user in users]
-        
-        # Create CSV output
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['ID', 'Last Name', 'Email', 'Visit Count', 'Program'])
-        
-        for user in user_data:
-            writer.writerow([user['id'], user['last_name'], user['email'], user['visit_count'], user['current_program']])
-        
-        close_db(db)
-        return Response(
-            output.getvalue(),
-            mimetype="text/csv",
-            headers={"Content-disposition": "attachment; filename=user_data.csv"}
-        )
-    except Exception as e:
-        logger.error("Error exporting users: %s", str(e))
-        close_db(db)
-        return f"Error exporting users: {str(e)}", 500
+    """Export all users to CSV."""
+    # Create CSV in memory
+    si = StringIO()
+    cw = csv.writer(si)
+    
+    # Write header
+    cw.writerow(['ID', 'Last Name', 'Email', 'Visit Count', 'Status', 'Date Added', 'Expiry Date', 'LO Root IDs'])
+    
+    # Get all users
+    users = get_all_users()
+    
+    # Write user data
+    for user in users:
+        cw.writerow([
+            user['id'],
+            user['last_name'],
+            user['email'],
+            user['visit_count'],
+            user['status'],
+            user['date_added'],
+            user['expiry_date'],
+            ', '.join(user['lo_root_ids']) if user['lo_root_ids'] else 'None'
+        ])
+    
+    # Create the response
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = "attachment; filename=users.csv"
+    output.headers["Content-type"] = "text/csv"
+    return output
 
 @app.route('/users')
 @requires_auth
@@ -1015,8 +1029,11 @@ def show_users():
                 self.last_name = data['last_name']
                 self.email = data['email']
                 self.visit_count = data['visit_count']
-                self.current_program = data['current_program']
-                
+                self.status = data['status']
+                self.date_added = data['date_added']
+                self.expiry_date = data['expiry_date']
+                self.lo_root_ids = data['lo_root_ids']
+        
         user_objects = [UserObj(data) for data in user_data]
         close_db(db)
         return render_template('users.html', users=user_objects)
@@ -2930,6 +2947,178 @@ IMPORTANT GUIDELINES:
         result = smart_text_summarization(text, target_length, max_length)
         percent_reduced = round(((original_length - len(result)) / original_length) * 100, 1)
         return result, percent_reduced
+
+@app.route('/admin/upload_user_csv', methods=['POST'])
+@requires_auth
+def admin_upload_user_csv():
+    if 'file' not in request.files:
+        flash('No file part', 'error')
+        return redirect(url_for('admin')) # Or a dedicated user management page
+    
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file', 'error')
+        return redirect(url_for('admin'))
+
+    if file and file.filename.endswith('.csv'):
+        try:
+            filename = secure_filename(file.filename)
+            # For security, don't save the file directly with user-provided name if saving to disk
+            # Instead, read it into memory or save with a generated name
+            
+            # Read CSV content into a pandas DataFrame
+            # This helps with data manipulation and validation
+            csv_content = file.read().decode('utf-8-sig') # Use utf-8-sig to handle BOM
+            df = pd.read_csv(StringIO(csv_content))
+
+            # --- Placeholder for progress tracking initialization ---
+            # progress_updates = [] # List to store progress messages
+            # progress_updates.append("Processing CSV file...")
+
+            # 1. Validate required columns
+            required_columns = ['last_name', 'email', 'status', 'lo_root_id']
+            missing_cols = [col for col in required_columns if col not in df.columns]
+            if missing_cols:
+                # progress_updates.append(f"Error: Missing required columns: {', '.join(missing_cols)}")
+                flash(f'Error: Missing required columns: {", ".join(missing_cols)}', 'error')
+                return redirect(url_for('admin')) # Or a dedicated user management page
+
+            # --- Placeholder for further processing steps (filtering, validation, registration) ---
+            # progress_updates.append("Validating data format...")
+            # ... (detailed validation logic here)
+            # progress_updates.append("Filtering active users...")
+            # ... (filtering logic here)
+            # progress_updates.append("Checking for existing users...")
+            # ... (checking logic here)
+            # progress_updates.append("Registering new users...")
+            # ... (registration logic here)
+
+            # Simulate processing for now
+            new_users_count = 0
+            skipped_inactive_count = 0
+            skipped_existing_count = 0
+            error_messages = []
+
+            db = get_db()
+            try:
+                for index, row in df.iterrows():
+                    # Basic data validation (example)
+                    last_name = row.get('last_name')
+                    email = row.get('email')
+                    status = str(row.get('status', '')).strip().lower()
+                    lo_root_id_raw = row.get('lo_root_id')
+
+                    if not all([last_name, email, status, lo_root_id_raw]):
+                        error_messages.append(f"Row {index+2}: Missing one or more required fields.")
+                        continue
+                    
+                    # Validate email format (basic)
+                    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+                        error_messages.append(f"Row {index+2}: Invalid email format for {email}.")
+                        continue
+
+                    # Filter for "Active" status
+                    if status != 'active':
+                        skipped_inactive_count += 1
+                        continue
+
+                    # Check if user already exists
+                    existing_user = db.query(User).filter(User.email == email).first()
+                    if existing_user:
+                        skipped_existing_count += 1
+                        # Here you might update existing user's lo_root_id if needed, 
+                        # or just skip if policy is to not touch existing users.
+                        # For now, we just skip.
+                        continue
+                    
+                    # Register new user
+                    expiry_date_calculated = datetime.utcnow() + timedelta(days=2*365)
+                    new_user = User(
+                        last_name=last_name,
+                        email=email,
+                        status='Active', # From CSV, already filtered
+                        date_added=datetime.utcnow(),
+                        expiry_date=expiry_date_calculated
+                    )
+                    db.add(new_user)
+                    db.flush() # To get new_user.id for association table
+
+                    # Add lo_root_id(s)
+                    # Assuming lo_root_id in CSV can be a single ID or multiple semicolon-separated IDs
+                    lo_root_ids_list = [lr_id.strip() for lr_id in str(lo_root_id_raw).split(';') if lr_id.strip()]
+                    for lr_id in lo_root_ids_list:
+                        if lr_id: # Ensure it's not an empty string
+                            user_lo_association = UserLORootID(user_id=new_user.id, lo_root_id=lr_id)
+                            db.add(user_lo_association)
+                    
+                    new_users_count += 1
+                
+                db.commit()
+                flash(f'CSV processed successfully: {new_users_count} new users added. Skipped {skipped_inactive_count} inactive, {skipped_existing_count} existing.', 'success')
+                if error_messages:
+                    for err_msg in error_messages:
+                        flash(err_msg, 'warning') # Show individual errors as warnings
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error processing CSV data: {str(e)}")
+                flash(f'Error processing CSV data: {str(e)}', 'error')
+            finally:
+                close_db(db)
+
+        except pd.errors.EmptyDataError:
+            flash('Error: The uploaded CSV file is empty.', 'error')
+        except pd.errors.ParserError:
+            flash('Error: Could not parse the CSV file. Please check the format.', 'error')
+        except Exception as e:
+            logger.error(f"Error uploading/reading user CSV: {str(e)}")
+            flash(f'An unexpected error occurred: {str(e)}', 'error')
+        
+        return redirect(url_for('admin')) # Or a dedicated user management page
+
+    else:
+        flash('Invalid file type. Please upload a CSV file.', 'error')
+        return redirect(url_for('admin'))
+
+@app.route('/admin/manage_users')
+@requires_auth
+def admin_manage_users():
+    page = request.args.get('page', 1, type=int)
+    per_page = 20 # Users per page
+    search_term = request.args.get('search', '')
+    sort_by = request.args.get('sort_by', 'date_added')
+    sort_order = request.args.get('sort_order', 'desc')
+
+    db = get_db()
+    try:
+        query = db.query(User)
+
+        if search_term:
+            search_filter = f"%{search_term}%"
+            query = query.filter(
+                User.last_name.ilike(search_filter) |
+                User.email.ilike(search_filter)
+            )
+        
+        # Sorting logic
+        sort_column = getattr(User, sort_by, User.date_added) # Default to date_added
+        if sort_order == 'asc':
+            query = query.order_by(sort_column.asc())
+        else:
+            query = query.order_by(sort_column.desc())
+
+        users_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        users = users_pagination.items
+
+    finally:
+        close_db(db)
+    
+    return render_template('admin/manage_users.html', 
+                           users=users, 
+                           pagination=users_pagination,
+                           search_term=search_term,
+                           sort_by=sort_by,
+                           sort_order=sort_order)
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

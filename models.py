@@ -1,9 +1,9 @@
 # models.py
 import os
 import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker, scoped_session, relationship
 from sqlalchemy.sql import func
 from dotenv import load_dotenv
 load_dotenv()
@@ -30,6 +30,12 @@ SessionLocal = scoped_session(session_factory)
 Base = declarative_base()
 Base.query = SessionLocal.query_property()
 
+# Association table for User and LORootID (Many-to-Many)
+class UserLORootID(Base):
+    __tablename__ = "user_lo_root_ids"
+    user_id = Column(Integer, ForeignKey('users.id'), primary_key=True)
+    lo_root_id = Column(String, primary_key=True)
+
 # User model
 class User(Base):
     __tablename__ = "users"
@@ -37,8 +43,13 @@ class User(Base):
     last_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     visit_count = Column(Integer, default=0)
-    current_program = Column(String, default="BCC")
-    
+    status = Column(String, default="Inactive", nullable=False)  # Active/Inactive
+    date_added = Column(DateTime, default=datetime.datetime.utcnow)
+    expiry_date = Column(DateTime) # Calculated as date_added + 2 years
+
+    # Relationship to handle multiple lo_root_ids
+    lo_root_ids = relationship("UserLORootID", backref="user")
+
     @classmethod
     def get_by_credentials(cls, db, last_name, email):
         """Safely get user by credentials"""
@@ -59,8 +70,17 @@ class User(Base):
             "last_name": self.last_name,
             "email": self.email,
             "visit_count": self.visit_count,
-            "current_program": self.current_program
+            "status": self.status,
+            "date_added": self.date_added.isoformat() if self.date_added else None,
+            "expiry_date": self.expiry_date.isoformat() if self.expiry_date else None,
+            "lo_root_ids": [ulr.lo_root_id for ulr in self.lo_root_ids]
         }
+
+# Association table for ChatbotContent and LORootID (Many-to-Many)
+class ChatbotLORootAssociation(Base):
+    __tablename__ = 'chatbot_lo_root_association'
+    chatbot_id = Column(Integer, ForeignKey('chatbot_contents.id'), primary_key=True)
+    lo_root_id = Column(String, primary_key=True)
 
 # Chatbot content model
 class ChatbotContent(Base):
@@ -80,7 +100,10 @@ class ChatbotContent(Base):
     category = Column(String(50), nullable=False, default="standard")  # Program category: standard, tap, elearning
     system_prompt_role = Column(Text, nullable=True)  # System prompt: Role section
     system_prompt_guidelines = Column(Text, nullable=True)  # System prompt: Important Guidelines section
-    
+
+    # Relationship to handle multiple lo_root_ids
+    lo_root_ids = relationship("ChatbotLORootAssociation", backref="chatbot")
+
     @classmethod
     def get_by_code(cls, db, code):
         """Get chatbot content by code (case-insensitive search).
@@ -128,6 +151,7 @@ class ChatbotContent(Base):
                 category=category,
                 system_prompt_role=system_prompt_role,
                 system_prompt_guidelines=system_prompt_guidelines
+                # lo_root_ids will be handled separately after creation/update
             )
             db.add(new_content)
             return new_content
@@ -139,14 +163,14 @@ class ChatbotContent(Base):
             "code": self.code,
             "name": self.name,
             "description": self.description,
-            "content": self.content,
             "is_active": self.is_active,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "intro_message": self.intro_message,
             "category": self.category,
             "system_prompt_role": self.system_prompt_role,
-            "system_prompt_guidelines": self.system_prompt_guidelines
+            "system_prompt_guidelines": self.system_prompt_guidelines,
+            "lo_root_ids": [assoc.lo_root_id for assoc in self.lo_root_ids]
         }
 
 # Chat history model

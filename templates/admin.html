@@ -1561,11 +1561,13 @@
                                                         <thead>
                                                             <tr>
                                                                 <th>ID</th>
-                                                                <th>Name</th>
+                                                                <th>Last Name</th>
                                                                 <th>Email</th>
                                                                 <th>Visit Count</th>
-                                                                <th>Current Program</th>
-                                                                <th>Actions</th>
+                                                                <th>Status</th>
+                                                                <th>Date Added</th>
+                                                                <th>Expiry Date</th>
+                                                                <th>LO Root IDs</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -1575,11 +1577,10 @@
                                                                 <td>{{ user.last_name }}</td>
                                                                 <td>{{ user.email }}</td>
                                                                 <td>{{ user.visit_count }}</td>
-                                                                <td>{{ user.current_program }}</td>
-                                                                <td>
-                                                                    <button class="btn btn-sm btn-info">Edit</button>
-                                                                    <button class="btn btn-sm btn-danger">Delete</button>
-                                                                </td>
+                                                                <td>{{ user.status }}</td>
+                                                                <td>{{ user.date_added }}</td>
+                                                                <td>{{ user.expiry_date }}</td>
+                                                                <td>{{ user.lo_root_ids|join(', ') or 'None' }}</td>
                                                             </tr>
                                                             {% endfor %}
                                                         </tbody>

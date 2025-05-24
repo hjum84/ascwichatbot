@@ -80,7 +80,7 @@
                     <th>Last Name</th>
                     <th>Email</th>
                     <th>Visit Count</th>
-                    <th>Program</th>
+                    <th>LO Root IDs</th>
                 </tr>
             </thead>
             <tbody>
@@ -90,7 +90,7 @@
                     <td>{{ user.last_name }}</td>
                     <td>{{ user.email }}</td>
                     <td>{{ user.visit_count }}</td>
-                    <td>{{ user.current_program or 'None' }}</td>
+                    <td>{{ user.lo_root_ids|join(', ') or 'None' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

@@ -1,11 +1,15 @@
 from logging.config import fileConfig
 import os
+from dotenv import load_dotenv
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from sqlalchemy import create_engine
 
 from alembic import context
+
+# Load environment variables from .env file
+load_dotenv()
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -16,10 +20,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Get the database URL from the environment, or fallback to alembic.ini
+# Get the database URL from the environment
 DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL:
-    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
+
+# Set the database URL in the Alembic config
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -47,6 +54,9 @@ def run_migrations_offline() -> None:
 
     """
     url = config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise ValueError("Database URL not found in Alembic config")
+        
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -67,7 +77,26 @@ def run_migrations_online() -> None:
     """
     # Get the URL from config
     url = config.get_main_option("sqlalchemy.url")
-    connectable = create_engine(url, poolclass=pool.NullPool)
+    if not url:
+        raise ValueError("Database URL not found in Alembic config")
+        
+    # For online migrations, we don't need the same level of pool management
+    # as the main application, and NullPool is often preferred.
+    # If using NullPool, some pooling parameters might not be applicable or could cause issues.
+    if "postgresql" in url: # Specific check for PostgreSQL
+        connectable = create_engine(
+            url,
+            poolclass=pool.NullPool
+        )
+    else: # Fallback for other databases, keeping previous parameters
+        connectable = create_engine(
+            url,
+            poolclass=pool.NullPool,
+            pool_pre_ping=True,
+            pool_recycle=1800,
+            pool_size=10,
+            max_overflow=20
+        )
 
     with connectable.connect() as connection:
         context.configure(

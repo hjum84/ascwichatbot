@@ -2558,6 +2558,10 @@ def admin_update_chatbot_content():
             
         db.commit()
         
+        # Clear the cache for get_cached_response as prompts might have changed
+        get_cached_response.cache_clear()
+        logger.info("Cleared get_cached_response cache due to chatbot content/prompt update.")
+
         # Update in-memory content and hash
         load_program_content()
         

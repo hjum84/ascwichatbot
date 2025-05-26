@@ -221,11 +221,10 @@ def get_cached_response(content_hash, user_message):
 
         if chatbot:
             char_limit_value = str(chatbot.char_limit) if chatbot.char_limit else "50000"
-            if chatbot.system_prompt_role:
-                system_prompt_role_text = chatbot.system_prompt_role
-            else: # Fallback to a default role if not set
-                system_prompt_role_text = f"You are an assistant that answers questions based on the following content for the {program_names.get(program_code, 'selected')} program."
             
+            program_display_name = program_names.get(program_code, program_code) # Get display name
+            system_prompt_role_text = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
+
             if chatbot.system_prompt_guidelines:
                 system_prompt_guidelines_text = chatbot.system_prompt_guidelines.replace("{char_limit}", char_limit_value)
             else: # Fallback to default guidelines if not set
@@ -253,11 +252,13 @@ def get_cached_response(content_hash, user_message):
 4. Maintain a professional and helpful tone
 5. If asked about something not covered in the content, do not make assumptions
 6. Preserve ALL important facts, key concepts, definitions, and essential information without exception. The summary should aim for approximately {char_limit_value} characters, but prioritize content preservation over length."""
+            program_display_name = program_names.get(program_code, program_code) # Get display name for fallback
+            system_prompt_role_fallback = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
             system_prompt = (
                 f"Critically, you MUST NOT answer any questions or provide any information that is not explicitly stated in the CONTENT section below. "
-                f"If the user asks about topics outside of the provided CONTENT, you MUST respond with 'I don't have enough information to answer that question.' or a similar direct refusal. "
+                f"If the user asks about topics outside of the provided CONTENT, you MUST respond with 'I don\'t have enough information to answer that question.' or a similar direct refusal. "
                 f"Do not offer to search externally or provide general knowledge. Adhere strictly to the provided CONTENT.\n\n"
-                f"You are an assistant that answers questions based on the following content for the {program_names.get(program_code, 'selected')} program.\n\n"
+                f"{system_prompt_role_fallback}\n\n"
                 f"IMPORTANT GUIDELINES:\n{default_guidelines}\n\n"
                 f"CONTENT:\n{content}"
             )
@@ -2485,7 +2486,6 @@ def admin_update_chatbot_content():
         chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
         content = request.form.get('content')
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
-        system_prompt_role = request.form.get('system_prompt_role')
         system_prompt_guidelines = request.form.get('system_prompt_guidelines')
         
         if not chatbot_code or content is None:
@@ -2551,8 +2551,6 @@ def admin_update_chatbot_content():
             
         # Update content and system prompts
         chatbot.content = content
-        if system_prompt_role is not None:
-            chatbot.system_prompt_role = system_prompt_role
         if system_prompt_guidelines is not None:
             chatbot.system_prompt_guidelines = system_prompt_guidelines
             

@@ -1799,15 +1799,9 @@
                     <div class="mb-3">
                         <label for="editCharLimit" class="form-label">Character Limit</label>
                         <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="100000" value="50000">
-                        <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+                        <div class="form-text">Maximum number of characters allowed in the chatbot\'s content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="editSystemPromptRole" class="form-label">System Prompt Role</label>
-                        <input type="text" class="form-control" id="editSystemPromptRole" name="system_prompt_role" placeholder="e.g., You are a text summarization assistant...">
-                        <div class="form-text">Define the role and identity of the chatbot. This sets the tone and behavior of the AI.</div>
-                    </div>
-
                     <div class="mb-3">
                         <label for="editSystemPromptGuidelines" class="form-label">System Prompt Guidelines</label>
                         <textarea class="form-control" id="editSystemPromptGuidelines" name="system_prompt_guidelines" rows="5" placeholder="Enter guidelines for the chatbot's behavior..."></textarea>
@@ -2568,7 +2562,6 @@
                                     contentTextarea.value = data.content;
                                     document.getElementById('editCharLimit').value = data.char_limit;
                                     document.getElementById('charLimitDisplay').textContent = data.char_limit.toLocaleString();
-                                    document.getElementById('editSystemPromptRole').value = data.system_prompt_role || '';
                                     document.getElementById('editSystemPromptGuidelines').value = data.system_prompt_guidelines || '';
                                     updateCharCount();
                                 } else {
@@ -2599,7 +2592,6 @@
                     const charLimit = document.getElementById('editCharLimit').value;
                     const appendContent = document.getElementById('appendContent').checked;
                     const autoSummarize = document.getElementById('editAutoSummarize').checked;
-                    const systemPromptRole = document.getElementById('editSystemPromptRole').value;
                     const systemPromptGuidelines = document.getElementById('editSystemPromptGuidelines').value;
                     const saveButton = this;
                     
@@ -2643,7 +2635,6 @@
                     formData.append('content', newContent);
                     formData.append('char_limit', charLimit);
                     formData.append('append_content', 'false'); // When editing, we're replacing content, not appending
-                    formData.append('system_prompt_role', systemPromptRole);
                     formData.append('system_prompt_guidelines', systemPromptGuidelines);
                     
                     // Only enable auto-summarize when content exceeds limit

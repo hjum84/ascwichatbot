@@ -1321,8 +1321,8 @@
                                             
                                             <div class="mb-3">
                                                 <label for="char_limit" class="form-label">Character Limit</label>
-                                                <input type="number" class="form-control" id="char_limit" name="char_limit" min="50000" max="100000" value="50000">
-                                                <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+                                                <input type="number" class="form-control" id="char_limit" name="char_limit" min="50000" max="200000" value="50000">
+                                                <div class="form-text">Maximum number of characters allowed in the chatbot's content (50,000 - 200,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                                             </div>
                                             
                                             <div class="mb-3 form-check">
@@ -1548,12 +1548,18 @@
                                             <div class="tab-pane fade show active" id="users-mgmt" role="tabpanel">
                                                 <div class="d-flex justify-content-between mb-2">
                                                     <h5>User List</h5>
-                                                    <button class="btn btn-primary btn-sm">Add User</button>
+                                                    <div>
+                                                        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal">Add User</button>
+                                                        <button type="button" class="btn btn-danger btn-sm ms-2" id="deleteSelectedUsers" disabled>Delete Selected</button>
+                                                    </div>
                                                 </div>
                                                 <div class="table-responsive">
                                                     <table class="table table-striped">
                                                         <thead>
                                                             <tr>
+                                                                <th>
+                                                                    <input type="checkbox" class="form-check-input" id="selectAllUsers">
+                                                                </th>
                                                                 <th>ID</th>
                                                                 <th>Last Name</th>
                                                                 <th>Email</th>
@@ -1564,9 +1570,12 @@
                                                                 <th>LO Root IDs</th>
                                                             </tr>
                                                         </thead>
-                                                        <tbody>
+                                                        <tbody id="userTableBody">
                                                             {% for user in users %}
                                                             <tr>
+                                                                <td>
+                                                                    <input type="checkbox" class="form-check-input user-select" value="{{ user.id }}">
+                                                                </td>
                                                                 <td>{{ user.id }}</td>
                                                                 <td>{{ user.last_name }}</td>
                                                                 <td>{{ user.email }}</td>
@@ -1574,13 +1583,64 @@
                                                                 <td>{{ user.status }}</td>
                                                                 <td>{{ user.date_added }}</td>
                                                                 <td>{{ user.expiry_date }}</td>
-                                                                <td>{{ user.lo_root_ids|join(', ') or 'None' }}</td>
+                                                                <td>{{ user.lo_root_ids|join(', ') }}</td>
                                                             </tr>
                                                             {% endfor %}
                                                         </tbody>
                                                     </table>
                                                 </div>
                                             </div>
+                                            <!-- Add User Modal -->
+                                            <div class="modal fade" id="addUserModal" tabindex="-1">
+                                                <div class="modal-dialog">
+                                                    <div class="modal-content">
+                                                        <div class="modal-header">
+                                                            <h5 class="modal-title">Add New User</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                        </div>
+                                                        <div class="modal-body">
+                                                            <form id="addUserForm">
+                                                                <div class="mb-3">
+                                                                    <label for="lastName" class="form-label">Last Name</label>
+                                                                    <input type="text" class="form-control" id="lastName" required>
+                                                                </div>
+                                                                <div class="mb-3">
+                                                                    <label for="email" class="form-label">Email</label>
+                                                                    <input type="email" class="form-control" id="email" required>
+                                                                </div>
+                                                                <div class="mb-3">
+                                                                    <label for="loRootIds" class="form-label">LO Root IDs (semicolon-separated)</label>
+                                                                    <input type="text" class="form-control" id="loRootIds" placeholder="e.g. ID1;ID2;ID3">
+                                                                </div>
+                                                            </form>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                                            <button type="button" class="btn btn-primary" id="submitAddUser">Add User</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Delete Users Modal -->
+                                            <div class="modal fade" id="deleteUsersModal" tabindex="-1">
+                                                <div class="modal-dialog">
+                                                    <div class="modal-content">
+                                                        <div class="modal-header">
+                                                            <h5 class="modal-title">Delete Selected Users</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                        </div>
+                                                        <div class="modal-body">
+                                                            Are you sure you want to delete the selected users? This action cannot be undone.
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                                            <button type="button" class="btn btn-danger" id="confirmDeleteUsers">Delete</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <!-- Conversation Logs -->
                                             <div class="tab-pane fade" id="convo-logs" role="tabpanel">
                                                 <div class="d-flex justify-content-between mb-2 align-items-center">
@@ -1798,8 +1858,8 @@
                     
                     <div class="mb-3">
                         <label for="editCharLimit" class="form-label">Character Limit</label>
-                        <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="100000" value="50000">
-                        <div class="form-text">Maximum number of characters allowed in the chatbot\'s content (50,000 - 100,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+                        <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="200000" value="50000">
+                        <div class="form-text">Maximum number of characters allowed in the chatbot\'s content (50,000 - 200,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                     </div>
                     
                     <div class="mb-3">
@@ -2729,7 +2789,7 @@
                                 
                                 // Add event handlers for the action buttons
                                 statusMsg.querySelector('.increase-limit-btn').addEventListener('click', function() {
-                                    const newLimit = Math.min(parseInt(charLimit) + 10000, 100000);
+                                    const newLimit = Math.min(parseInt(charLimit) + 10000, 200000);
                                     document.getElementById('editCharLimit').value = newLimit;
                                     document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
                                     statusMsg.remove();
@@ -2774,7 +2834,7 @@
                 // Add event listener for the edit increase limit button
                 document.getElementById('edit-increase-limit-btn').addEventListener('click', function() {
                     const currentLimit = parseInt(document.getElementById('editCharLimit').value);
-                    const newLimit = Math.min(currentLimit + 10000, 100000);
+                    const newLimit = Math.min(currentLimit + 10000, 200000);
                     document.getElementById('editCharLimit').value = newLimit;
                     document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
                     bootstrap.Modal.getInstance(document.getElementById('editWarningModal')).hide();
@@ -3238,7 +3298,7 @@
                         // Auto dismiss after 3 seconds
                         setTimeout(() => {
                             alertDiv.classList.remove('show');
-                            setTimeout(() => alertDiv.remove(), 150);
+                            setTimeout(() => alertDiv.remove(), 1500);
                         }, 3000);
                     }
                 }
@@ -3788,7 +3848,7 @@
                     const charLimitInput = document.getElementById('char_limit');
                     
                     // 최대 100,000까지 10,000씩 증가
-                    const newLimit = Math.min(currentLimit + 10000, 100000);
+                    const newLimit = Math.min(currentLimit + 10000, 200000);
                     
                     // 입력 필드와 표시 값 모두 업데이트
                     charLimitInput.value = newLimit;
@@ -4023,9 +4083,493 @@
                         document.getElementById('saveContentChangesBtn').click();
                     }, 500);
                 });
+
+                // JavaScript for filtering conversation logs
+                function applyConvoFilters() {
+                    const searchTerm = document.getElementById('searchConvoInput').value.trim();
+                    const chatbotCode = document.getElementById('chatbotConvoFilter').value;
+                    const userId = document.getElementById('userConvoFilter').value;
+                    
+                    // Build the URL with the filter parameters
+                    let url = '/admin?';
+                    if (searchTerm) url += `search_term=${encodeURIComponent(searchTerm)}&`;
+                    if (chatbotCode) url += `chatbot_code=${encodeURIComponent(chatbotCode)}&`;
+                    if (userId) url += `user_id=${encodeURIComponent(userId)}&`;
+                    
+                    // Set the hash to ensure we go to the right tab
+                    url += '#data-mgmt-content-convo-logs';
+                    
+                    // Navigate to the filtered URL
+                    window.location.href = url;
+                }
+                
+                // Setup event listeners for Enter key on search input
+                const searchInput = document.getElementById('searchConvoInput');
+                if (searchInput) {
+                    searchInput.addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            applyConvoFilters();
+                        }
+                    });
+                }
+
+                // Select All checkbox functionality
+                const selectAllCheckbox = document.getElementById('selectAllUsers');
+                const userCheckboxes = document.getElementsByClassName('user-select');
+                const deleteSelectedBtn = document.getElementById('deleteSelectedUsers');
+
+                if (selectAllCheckbox) {
+                    selectAllCheckbox.addEventListener('change', function() {
+                        Array.from(userCheckboxes).forEach(checkbox => {
+                            checkbox.checked = this.checked;
+                        });
+                        updateDeleteButton();
+                    });
+                }
+
+                // Individual checkbox functionality
+                const userTableBody = document.getElementById('userTableBody');
+                if (userTableBody) {
+                    userTableBody.addEventListener('change', function(e) {
+                        if (e.target.classList.contains('user-select')) {
+                            updateDeleteButton();
+                            // Update select all checkbox
+                            const allChecked = Array.from(userCheckboxes).every(cb => cb.checked);
+                            if (selectAllCheckbox) {
+                                selectAllCheckbox.checked = allChecked;
+                            }
+                        }
+                    });
+                }
+
+                // Update delete button state
+                function updateDeleteButton() {
+                    if (deleteSelectedBtn) {
+                        const checkedCount = Array.from(userCheckboxes).filter(cb => cb.checked).length;
+                        deleteSelectedBtn.disabled = checkedCount === 0;
+                    }
+                }
+
+                // Delete selected users
+                if (deleteSelectedBtn) {
+                    deleteSelectedBtn.addEventListener('click', function() {
+                        const selectedIds = Array.from(userCheckboxes)
+                            .filter(cb => cb.checked)
+                            .map(cb => cb.value);
+                        
+                        if (selectedIds.length > 0) {
+                            const deleteModal = new bootstrap.Modal(document.getElementById('deleteUsersModal'));
+                            deleteModal.show();
+                        }
+                    });
+                }
+
+                // Confirm delete users
+                const confirmDeleteBtn = document.getElementById('confirmDeleteUsers');
+                if (confirmDeleteBtn) {
+                    confirmDeleteBtn.addEventListener('click', function() {
+                        const selectedIds = Array.from(userCheckboxes)
+                            .filter(cb => cb.checked)
+                            .map(cb => cb.value);
+
+                        fetch('/admin/delete_selected_users', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ user_ids: selectedIds })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Show success message
+                                const alertDiv = document.createElement('div');
+                                alertDiv.className = 'alert alert-success';
+                                alertDiv.textContent = data.message || 'Users deleted successfully';
+                                document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.card'));
+                                
+                                // Hide the modal
+                                const deleteModal = bootstrap.Modal.getInstance(document.getElementById('deleteUsersModal'));
+                                if (deleteModal) {
+                                    deleteModal.hide();
+                                }
+                                
+                                // Refresh the page after a short delay
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 1500);
+                            } else {
+                                alert('Error deleting users: ' + (data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            alert('Error deleting users');
+                        });
+                    });
+                }
+
+                // Add user functionality
+                const submitAddUserBtn = document.getElementById('submitAddUser');
+                if (submitAddUserBtn) {
+                    submitAddUserBtn.addEventListener('click', function() {
+                        const lastName = document.getElementById('lastName').value.trim();
+                        const email = document.getElementById('email').value.trim();
+                        const loRootIds = document.getElementById('loRootIds').value.trim();
+
+                        if (!lastName || !email) {
+                            showErrorMessage('Please fill in all required fields');
+                            return;
+                        }
+
+                        fetch('/admin/add_user', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                last_name: lastName,
+                                email: email,
+                                lo_root_ids: loRootIds ? loRootIds.split(';').filter(id => id.trim()) : []
+                            })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                showSuccessMessage(data.message || 'User added successfully');
+                                
+                                // Hide the modal
+                                const addModal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+                                if (addModal) {
+                                    addModal.hide();
+                                }
+                                
+                                // Clear the form
+                                document.getElementById('lastName').value = '';
+                                document.getElementById('email').value = '';
+                                document.getElementById('loRootIds').value = '';
+                                
+                                // Refresh the page after a short delay
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 1500);
+                            } else {
+                                showErrorMessage('Error adding user: ' + (data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            showErrorMessage('Error adding user: Network or server error');
+                        });
+                    });
+                }
+
+                function showSuccessMessage(message) {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-success alert-dismissible fade show';
+                    alertDiv.innerHTML = `
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    `;
+                    
+                    // Find the users management section and insert the alert at the top
+                    const usersMgmtSection = document.getElementById('users-mgmt');
+                    if (usersMgmtSection) {
+                        usersMgmtSection.insertBefore(alertDiv, usersMgmtSection.firstChild);
+                        
+                        // Auto-dismiss after 3 seconds
+                        setTimeout(() => {
+                            alertDiv.classList.remove('show');
+                            setTimeout(() => alertDiv.remove(), 150);
+                        }, 3000);
+                    }
+                }
+
+                function showErrorMessage(message) {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+                    alertDiv.innerHTML = `
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    `;
+                    
+                    const usersMgmtSection = document.getElementById('users-mgmt');
+                    if (usersMgmtSection) {
+                        usersMgmtSection.insertBefore(alertDiv, usersMgmtSection.firstChild);
+                        
+                        // Auto-dismiss after 5 seconds
+                        setTimeout(() => {
+                            alertDiv.classList.remove('show');
+                            setTimeout(() => alertDiv.remove(), 150);
+                        }, 5000);
+                    }
+                }
+
+                // Update the error handling in add user functionality
+                if (submitAddUserBtn) {
+                    submitAddUserBtn.addEventListener('click', function() {
+                        const lastName = document.getElementById('lastName').value.trim();
+                        const email = document.getElementById('email').value.trim();
+                        const loRootIds = document.getElementById('loRootIds').value.trim();
+
+                        if (!lastName || !email) {
+                            showErrorMessage('Please fill in all required fields');
+                            return;
+                        }
+
+                        fetch('/admin/add_user', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                last_name: lastName,
+                                email: email,
+                                lo_root_ids: loRootIds ? loRootIds.split(';').filter(id => id.trim()) : []
+                            })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                showSuccessMessage(data.message || 'User added successfully');
+                                
+                                // Hide the modal
+                                const addModal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+                                if (addModal) {
+                                    addModal.hide();
+                                }
+                                
+                                // Clear the form
+                                document.getElementById('lastName').value = '';
+                                document.getElementById('email').value = '';
+                                document.getElementById('loRootIds').value = '';
+                                
+                                // Refresh the page after a short delay
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 1500);
+                            } else {
+                                showErrorMessage('Error adding user: ' + (data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            showErrorMessage('Error adding user: Network or server error');
+                        });
+                    });
+                }
+
+                // Update the error handling in delete users functionality
+                if (confirmDeleteBtn) {
+                    confirmDeleteBtn.addEventListener('click', function() {
+                        const selectedIds = Array.from(userCheckboxes)
+                            .filter(cb => cb.checked)
+                            .map(cb => cb.value);
+
+                        fetch('/admin/delete_selected_users', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ user_ids: selectedIds })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                showSuccessMessage(data.message || 'Users deleted successfully');
+                                
+                                // Hide the modal
+                                const deleteModal = bootstrap.Modal.getInstance(document.getElementById('deleteUsersModal'));
+                                if (deleteModal) {
+                                    deleteModal.hide();
+                                }
+                                
+                                // Refresh the page after a short delay
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 1500);
+                            } else {
+                                showErrorMessage('Error deleting users: ' + (data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            showErrorMessage('Error deleting users: Network or server error');
+                        });
+                    });
+                }
+
+                function updateUserTable() {
+                    fetch('/admin/get_users')
+                        .then(response => response.json())
+                        .then(data => {
+                            const tbody = document.getElementById('userTableBody');
+                            if (tbody && data.users) {
+                                tbody.innerHTML = data.users.map(user => `
+                                    <tr>
+                                        <td>
+                                            <input type="checkbox" class="form-check-input user-select" value="${user.id}">
+                                        </td>
+                                        <td>${user.id}</td>
+                                        <td>${user.last_name}</td>
+                                        <td>${user.email}</td>
+                                        <td>${user.visit_count}</td>
+                                        <td>${user.status}</td>
+                                        <td>${user.date_added}</td>
+                                        <td>${user.expiry_date}</td>
+                                        <td>${user.lo_root_ids.join(', ')}</td>
+                                    </tr>
+                                `).join('');
+
+                                // Reinitialize checkbox functionality
+                                const userCheckboxes = document.getElementsByClassName('user-select');
+                                Array.from(userCheckboxes).forEach(checkbox => {
+                                    checkbox.addEventListener('change', function() {
+                                        updateDeleteButton();
+                                        updateSelectAllCheckbox();
+                                    });
+                                });
+                            }
+                        });
+                }
+
+                function showSuccessMessage(message) {
+                    // Remove any existing alerts first
+                    const existingAlerts = document.querySelectorAll('.alert');
+                    existingAlerts.forEach(alert => alert.remove());
+
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-success alert-dismissible fade show';
+                    alertDiv.innerHTML = `
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    `;
+                    
+                    const usersMgmtSection = document.getElementById('users-mgmt');
+                    if (usersMgmtSection) {
+                        usersMgmtSection.insertBefore(alertDiv, usersMgmtSection.firstChild);
+                        
+                        // Auto-dismiss after 3 seconds
+                        setTimeout(() => {
+                            alertDiv.classList.remove('show');
+                            setTimeout(() => alertDiv.remove(), 150);
+                        }, 3000);
+                    }
+                }
+
+                function showErrorMessage(message) {
+                    // Remove any existing alerts first
+                    const existingAlerts = document.querySelectorAll('.alert');
+                    existingAlerts.forEach(alert => alert.remove());
+
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+                    alertDiv.innerHTML = `
+                        ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    `;
+                    
+                    const usersMgmtSection = document.getElementById('users-mgmt');
+                    if (usersMgmtSection) {
+                        usersMgmtSection.insertBefore(alertDiv, usersMgmtSection.firstChild);
+                        
+                        // Auto-dismiss after 5 seconds
+                        setTimeout(() => {
+                            alertDiv.classList.remove('show');
+                            setTimeout(() => alertDiv.remove(), 150);
+                        }, 5000);
+                    }
+                }
+
+                // Add user functionality
+                if (submitAddUserBtn) {
+                    submitAddUserBtn.addEventListener('click', function() {
+                        const lastName = document.getElementById('lastName').value.trim();
+                        const email = document.getElementById('email').value.trim();
+                        const loRootIds = document.getElementById('loRootIds').value.trim();
+
+                        if (!lastName || !email) {
+                            showErrorMessage('Please fill in all required fields');
+                            return;
+                        }
+
+                        fetch('/admin/add_user', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                last_name: lastName,
+                                email: email,
+                                lo_root_ids: loRootIds ? loRootIds.split(';').filter(id => id.trim()) : []
+                            })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Hide the modal
+                                const addModal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+                                if (addModal) {
+                                    addModal.hide();
+                                }
+                                
+                                // Clear the form
+                                document.getElementById('lastName').value = '';
+                                document.getElementById('email').value = '';
+                                document.getElementById('loRootIds').value = '';
+                                
+                                // Update the table and show success message
+                                updateUserTable();
+                                showSuccessMessage(data.message || 'User added successfully');
+                            } else {
+                                showErrorMessage('Error adding user: ' + (data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            showErrorMessage('Error adding user: Network or server error');
+                        });
+                    });
+                }
+
+                // Delete users functionality
+                if (confirmDeleteBtn) {
+                    confirmDeleteBtn.addEventListener('click', function() {
+                        const selectedIds = Array.from(userCheckboxes)
+                            .filter(cb => cb.checked)
+                            .map(cb => cb.value);
+
+                        fetch('/admin/delete_selected_users', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ user_ids: selectedIds })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Hide the modal
+                                const deleteModal = bootstrap.Modal.getInstance(document.getElementById('deleteUsersModal'));
+                                if (deleteModal) {
+                                    deleteModal.hide();
+                                }
+                                
+                                // Update the table and show success message
+                                updateUserTable();
+                                showSuccessMessage(data.message || 'Users deleted successfully');
+                            } else {
+                                showErrorMessage('Error deleting users: ' + (data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            showErrorMessage('Error deleting users: Network or server error');
+                        });
+                    });
+                }
             }
         });
-
-        // JavaScript for filtering conversation logs        function applyConvoFilters() {            const searchTerm = document.getElementById('searchConvoInput').value.trim();            const chatbotCode = document.getElementById('chatbotConvoFilter').value;            const userId = document.getElementById('userConvoFilter').value;                        // Build the URL with the filter parameters            let url = '/admin?';            if (searchTerm) url += `search_term=${encodeURIComponent(searchTerm)}&`;            if (chatbotCode) url += `chatbot_code=${encodeURIComponent(chatbotCode)}&`;            if (userId) url += `user_id=${encodeURIComponent(userId)}&`;                        // Set the hash to ensure we go to the right tab            url += '#data-mgmt-content-convo-logs';                        // Navigate to the filtered URL            window.location.href = url;        }                // Setup event listeners for Enter key on search input        document.addEventListener('DOMContentLoaded', function() {            const searchInput = document.getElementById('searchConvoInput');            if (searchInput) {                searchInput.addEventListener('keypress', function(e) {                    if (e.key === 'Enter') {                        applyConvoFilters();                    }                });            }        });    </script>
+    </script>
 </body>
 </html> 

@@ -76,6 +76,37 @@ class User(Base):
             "lo_root_ids": [ulr.lo_root_id for ulr in self.lo_root_ids]
         }
 
+    @classmethod
+    def delete_all_users(cls, db):
+        """Delete all users and their associated lo_root_ids"""
+        try:
+            # First delete all associated lo_root_ids
+            db.query(UserLORootID).delete()
+            # Then delete all users
+            db.query(cls).delete()
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise e
+
+    @classmethod
+    def delete_user(cls, db, user_id):
+        """Delete a specific user and their associated lo_root_ids"""
+        try:
+            # First delete associated lo_root_ids
+            db.query(UserLORootID).filter(UserLORootID.user_id == user_id).delete()
+            # Then delete the user
+            user = db.query(cls).filter(cls.id == user_id).first()
+            if user:
+                db.delete(user)
+                db.commit()
+                return True
+            return False
+        except Exception as e:
+            db.rollback()
+            raise e
+
 # Association table for ChatbotContent and LORootID (Many-to-Many)
 class ChatbotLORootAssociation(Base):
     __tablename__ = 'chatbot_lo_root_association'

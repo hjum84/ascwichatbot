@@ -7,7 +7,7 @@ import io
 import threading
 import logging
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash
+from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash, send_file
 from functools import wraps
 import re
 from models import User, ChatbotContent, get_db, close_db, ChatHistory, UserLORootID, ChatbotLORootAssociation
@@ -3110,6 +3110,139 @@ def admin_manage_users():
                            search_term=search_term,
                            sort_by=sort_by,
                            sort_order=sort_order)
+
+@app.route('/admin/delete_all_users', methods=['POST'])
+@requires_auth
+def delete_all_users():
+    """Delete all users from the database"""
+    db = get_db()
+    try:
+        User.delete_all_users(db)
+        flash('All users have been successfully deleted.', 'success')
+    except Exception as e:
+        flash(f'Error deleting users: {str(e)}', 'error')
+    finally:
+        close_db(db)
+    return redirect(url_for('admin_manage_users'))
+
+@app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
+@requires_auth
+def delete_user(user_id):
+    """Delete a specific user from the database"""
+    db = get_db()
+    try:
+        if User.delete_user(db, user_id):
+            flash('User has been successfully deleted.', 'success')
+        else:
+            flash('User not found.', 'error')
+    except Exception as e:
+        flash(f'Error deleting user: {str(e)}', 'error')
+    finally:
+        close_db(db)
+    return redirect(url_for('admin_manage_users'))
+
+@app.route('/admin/delete_selected_users', methods=['POST'])
+@requires_auth
+def delete_selected_users():
+    """Delete multiple selected users"""
+    if not request.is_json:
+        return jsonify({'success': False, 'error': 'Invalid request format'})
+
+    user_ids = request.json.get('user_ids', [])
+    if not user_ids:
+        return jsonify({'success': False, 'error': 'No users selected'})
+
+    db = get_db()
+    try:
+        success_count = 0
+        for user_id in user_ids:
+            try:
+                user_id = int(user_id)  # Convert string to integer
+                if User.delete_user(db, user_id):
+                    success_count += 1
+            except ValueError:
+                continue
+        
+        if success_count == len(user_ids):
+            return jsonify({'success': True, 'message': f'Successfully deleted {success_count} users'})
+        else:
+            return jsonify({
+                'success': True, 
+                'message': f'Deleted {success_count} out of {len(user_ids)} users'
+            })
+    except Exception as e:
+        db.rollback()
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        close_db(db)
+
+@app.route('/admin/add_user', methods=['POST'])
+@requires_auth
+def add_user():
+    """Add a new user"""
+    if not request.is_json:
+        return jsonify({'success': False, 'error': 'Invalid request format'})
+
+    data = request.json
+    last_name = data.get('last_name')
+    email = data.get('email')
+    lo_root_ids = data.get('lo_root_ids', [])
+
+    if not all([last_name, email]):
+        return jsonify({'success': False, 'error': 'Missing required fields'})
+
+    db = get_db()
+    try:
+        # Check if user already exists
+        existing_user = User.get_by_credentials(db, last_name, email)
+        if existing_user:
+            return jsonify({'success': False, 'error': 'User already exists'})
+
+        # Create new user
+        expiry_date = datetime.utcnow() + timedelta(days=2*365)
+        new_user = User(
+            last_name=last_name,
+            email=email,
+            status='Active',
+            date_added=datetime.utcnow(),
+            expiry_date=expiry_date,
+            visit_count=0
+        )
+        db.add(new_user)
+        db.flush()  # Get the new user's ID
+
+        # Add LO Root IDs
+        for lo_root_id in lo_root_ids:
+            if lo_root_id:
+                user_lo = UserLORootID(user_id=new_user.id, lo_root_id=lo_root_id)
+                db.add(user_lo)
+
+        db.commit()
+        return jsonify({'success': True, 'message': 'User added successfully'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        close_db(db)
+
+@app.route('/admin/get_users')
+@requires_auth
+def get_users():
+    """Get all users as JSON"""
+    db = get_db()
+    try:
+        users = db.query(User).all()
+        return jsonify({
+            'success': True,
+            'users': [user.to_dict() for user in users]
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+    finally:
+        close_db(db)
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

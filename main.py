@@ -3244,6 +3244,48 @@ def get_users():
     finally:
         close_db(db)
 
+@app.route('/admin/edit_user', methods=['POST'])
+@requires_auth
+def edit_user():
+    try:
+        user_id = request.form.get('user_id')
+        last_name = request.form.get('last_name')
+        email = request.form.get('email')
+        status = request.form.get('status')
+        expiry_date = request.form.get('expiry_date')
+        lo_root_ids = request.form.get('lo_root_ids', '').strip()
+
+        db = get_db()
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'})
+
+        # Update user information
+        user.last_name = last_name
+        user.email = email
+        user.status = status
+        if expiry_date:
+            user.expiry_date = datetime.datetime.strptime(expiry_date, '%Y-%m-%d').date()
+
+        # Update LO Root IDs
+        if lo_root_ids:
+            # Delete existing associations
+            db.query(UserLORootID).filter(UserLORootID.user_id == user_id).delete()
+            
+            # Add new associations
+            lo_root_id_list = [id.strip() for id in lo_root_ids.split(';') if id.strip()]
+            for lo_root_id in lo_root_id_list:
+                db.add(UserLORootID(user_id=user.id, lo_root_id=lo_root_id))
+
+        db.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        db.close()
+
 if __name__ == '__main__':
     # Only migrate content if database is empty
     db = get_db()

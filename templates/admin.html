@@ -969,6 +969,18 @@
                 font-size: 1.1rem;
             }
         }
+
+        #editSelectedUsers.btn-primary {
+          background-color: #0d6efd !important;
+          border-color: #0d6efd !important;
+          color: #fff !important;
+        }
+        /* Force Edit Selected button to be Bootstrap info blue and black text for contrast */
+        #editSelectedUsers.btn-info {
+          background-color: #0dcaf0 !important;
+          border-color: #0dcaf0 !important;
+          color: #000 !important; /* Black text for better contrast on light blue */
+        }
     </style>
 </head>
 <body>
@@ -1550,24 +1562,65 @@
                                                     <h5>User List</h5>
                                                     <div>
                                                         <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal">Add User</button>
+                                                        <button type="button" class="btn btn-info btn-sm ms-2" id="editSelectedUsers" disabled>Edit Selected</button>
                                                         <button type="button" class="btn btn-danger btn-sm ms-2" id="deleteSelectedUsers" disabled>Delete Selected</button>
                                                     </div>
                                                 </div>
                                                 <div class="table-responsive">
                                                     <table class="table table-striped">
+                                                        <!-- User Management Table Header with Filters -->
                                                         <thead>
                                                             <tr>
-                                                                <th>
-                                                                    <input type="checkbox" class="form-check-input" id="selectAllUsers">
-                                                                </th>
-                                                                <th>ID</th>
-                                                                <th>Last Name</th>
-                                                                <th>Email</th>
-                                                                <th>Visit Count</th>
-                                                                <th>Status</th>
-                                                                <th>Date Added</th>
-                                                                <th>Expiry Date</th>
-                                                                <th>LO Root IDs</th>
+                                                            <th>
+                                                                <input type="checkbox" class="form-check-input" id="selectAllUsers">
+                                                            </th>
+                                                            <th>
+                                                                ID
+                                                                <input type="text" class="form-control form-control-sm mt-1 column-filter" data-column="id" placeholder="Filter ID...">
+                                                            </th>
+                                                            <th>
+                                                                Last Name
+                                                                <input type="text" class="form-control form-control-sm mt-1 column-filter" data-column="last_name" placeholder="Filter Last Name...">
+                                                            </th>
+                                                            <th>
+                                                                Email
+                                                                <input type="text" class="form-control form-control-sm mt-1 column-filter" data-column="email" placeholder="Filter Email...">
+                                                            </th>
+                                                            <th>
+                                                                Visit Count
+                                                                <input type="number" class="form-control form-control-sm mt-1 column-filter" data-column="visit_count" placeholder="Filter Count...">
+                                                            </th>
+                                                            <th>
+                                                                Status
+                                                                <select class="form-select form-select-sm mt-1 column-filter" data-column="status">
+                                                                    <option value="">All</option>
+                                                                    <option value="active">Active</option>
+                                                                    <option value="inactive">Inactive</option>
+                                                                </select>
+                                                            </th>
+                                                            <th>
+                                                                Date Added
+                                                                <input type="date" class="form-control form-control-sm mt-1 column-filter" data-column="date_added">
+                                                            </th>
+                                                            <th>
+                                                                Expiry Date
+                                                                <input type="date" class="form-control form-control-sm mt-1 column-filter" data-column="expiry_date">
+                                                            </th>
+                                                            <th>
+                                                                LO Root IDs
+                                                                <select class="form-select form-select-sm mt-1 column-filter" data-column="lo_root_ids">
+                                                                    <option value="">All</option>
+                                                                    {% set all_lo_ids = [] %}
+                                                                    {% for user in users %}
+                                                                        {% for loid in user.lo_root_ids %}
+                                                                            {% if loid not in all_lo_ids %}{% set _ = all_lo_ids.append(loid) %}{% endif %}
+                                                                        {% endfor %}
+                                                                    {% endfor %}
+                                                                    {% for loid in all_lo_ids %}
+                                                                        <option value="{{ loid }}">{{ loid }}</option>
+                                                                    {% endfor %}
+                                                                </select>
+                                                            </th>
                                                             </tr>
                                                         </thead>
                                                         <tbody id="userTableBody">
@@ -2053,6 +2106,50 @@
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button type="button" class="btn btn-warning" id="edit-increase-limit-btn">Increase Limit</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit User Modal -->
+        <div class="modal fade" id="editUserModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Edit User</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="editUserForm">
+                            <input type="hidden" id="editUserId">
+                            <div class="mb-3">
+                                <label for="editLastName" class="form-label">Last Name</label>
+                                <input type="text" class="form-control" id="editLastName" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="editEmail" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="editEmail" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="editStatus" class="form-label">Status</label>
+                                <select class="form-select" id="editStatus">
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="editExpiryDate" class="form-label">Expiry Date</label>
+                                <input type="date" class="form-control" id="editExpiryDate">
+                            </div>
+                            <div class="mb-3">
+                                <label for="editLoRootIds" class="form-label">LO Root IDs (semicolon-separated)</label>
+                                <input type="text" class="form-control" id="editLoRootIds" placeholder="e.g. ID1;ID2;ID3">
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="submitEditUser">Save Changes</button>
                     </div>
                 </div>
             </div>
@@ -4568,6 +4665,172 @@
                         });
                     });
                 }
+
+                // Column filtering
+                const columnFilters = document.querySelectorAll('.column-filter');
+                columnFilters.forEach(filter => {
+                    filter.addEventListener('input', filterTable);
+                    filter.addEventListener('change', filterTable); // for select/date inputs
+                });
+
+                function filterTable() {
+                    const tbody = document.getElementById('userTableBody');
+                    if (!tbody) return;
+                    
+                    const rows = tbody.getElementsByTagName('tr');
+                    const filters = {};
+                    
+                    // Collect all filter values
+                    columnFilters.forEach(filter => {
+                        const column = filter.dataset.column;
+                        const value = filter.value.trim().toLowerCase();
+                        if (value) filters[column] = value;
+                    });
+
+                    Array.from(rows).forEach(row => {
+                        let show = true;
+                        const cells = row.getElementsByTagName('td');
+                        
+                        // Skip rows that don't have enough cells
+                        if (cells.length < 9) return;
+
+                        // Last Name filter (case-insensitive partial match)
+                        if (filters.last_name && cells[2]) {
+                            const lastName = cells[2].textContent.trim().toLowerCase();
+                            if (!lastName.includes(filters.last_name.toLowerCase())) {
+                                show = false;
+                            }
+                        }
+
+                        // Email filter (case-insensitive partial match)
+                        if (filters.email && cells[3]) {
+                            const email = cells[3].textContent.trim().toLowerCase();
+                            if (!email.includes(filters.email.toLowerCase())) {
+                                show = false;
+                            }
+                        }
+
+                        // Visit Count filter (exact match)
+                        if (filters.visit_count && cells[4]) {
+                            const visitCount = cells[4].textContent.trim();
+                            if (visitCount !== filters.visit_count) {
+                                show = false;
+                            }
+                        }
+
+                        // Status filter (exact match, case-insensitive)
+                        if (filters.status && cells[5]) {
+                            const status = cells[5].textContent.trim().toLowerCase();
+                            if (status !== filters.status.toLowerCase()) {
+                                show = false;
+                            }
+                        }
+
+                        // Date Added filter (YYYY-MM-DD match)
+                        if (filters.date_added && cells[6]) {
+                            const dateAdded = cells[6].textContent.trim().split('T')[0]; // Get YYYY-MM-DD part
+                            if (dateAdded !== filters.date_added) {
+                                show = false;
+                            }
+                        }
+
+                        // Expiry Date filter (YYYY-MM-DD match)
+                        if (filters.expiry_date && cells[7]) {
+                            const expiryDate = cells[7].textContent.trim().split('T')[0]; // Get YYYY-MM-DD part
+                            if (expiryDate !== filters.expiry_date) {
+                                show = false;
+                            }
+                        }
+
+                        // LO Root IDs filter (match any ID in the comma-separated list)
+                        if (filters.lo_root_ids && cells[8]) {
+                            const cellLoIds = cells[8].textContent.toLowerCase().split(',').map(id => id.trim());
+                            if (!cellLoIds.includes(filters.lo_root_ids.toLowerCase())) {
+                                show = false;
+                            }
+                        }
+
+                        // Show/hide the row
+                        row.style.display = show ? '' : 'none';
+                    });
+                }
+
+                // Initialize filters on page load
+                filterTable();
+
+                // Edit User functionality
+                const editSelectedBtn = document.getElementById('editSelectedUsers');
+                const editModal = new bootstrap.Modal(document.getElementById('editUserModal'));
+
+                // Enable/disable edit button based on selection
+                document.querySelectorAll('.user-select').forEach(checkbox => {
+                    checkbox.addEventListener('change', function() {
+                        const selectedCount = document.querySelectorAll('.user-select:checked').length;
+                        editSelectedBtn.disabled = selectedCount !== 1;
+                        deleteSelectedUsers.disabled = selectedCount === 0;
+                    });
+                });
+
+                // Select all users checkbox
+                document.getElementById('selectAllUsers').addEventListener('change', function() {
+                    const checkboxes = document.querySelectorAll('.user-select');
+                    checkboxes.forEach(cb => cb.checked = this.checked);
+                    const selectedCount = this.checked ? checkboxes.length : 0;
+                    editSelectedBtn.disabled = selectedCount !== 1;
+                    deleteSelectedUsers.disabled = selectedCount === 0;
+                });
+
+                // Edit button click handler
+                editSelectedBtn.addEventListener('click', function() {
+                    const selectedUser = document.querySelector('.user-select:checked');
+                    if (!selectedUser) return;
+
+                    const row = selectedUser.closest('tr');
+                    const cells = row.getElementsByTagName('td');
+
+                    // Populate the edit form
+                    document.getElementById('editUserId').value = cells[1].textContent;
+                    document.getElementById('editLastName').value = cells[2].textContent;
+                    document.getElementById('editEmail').value = cells[3].textContent;
+                    document.getElementById('editStatus').value = cells[5].textContent.toLowerCase();
+                    document.getElementById('editExpiryDate').value = formatDateForInput(cells[7].textContent);
+                    document.getElementById('editLoRootIds').value = cells[8].textContent;
+
+                    editModal.show();
+                });
+
+                // Format date for input field
+                function formatDateForInput(dateStr) {
+                    const date = new Date(dateStr);
+                    return date.toISOString().split('T')[0];
+                }
+
+                // Handle edit form submission
+                document.getElementById('submitEditUser').addEventListener('click', function() {
+                    const formData = new FormData();
+                    formData.append('user_id', document.getElementById('editUserId').value);
+                    formData.append('last_name', document.getElementById('editLastName').value);
+                    formData.append('email', document.getElementById('editEmail').value);
+                    formData.append('status', document.getElementById('editStatus').value);
+                    formData.append('expiry_date', document.getElementById('editExpiryDate').value);
+                    formData.append('lo_root_ids', document.getElementById('editLoRootIds').value);
+
+                    fetch('/admin/edit_user', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert('Error: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        alert('Network error: ' + error);
+                    });
+                });
             }
         });
     </script>

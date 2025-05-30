@@ -237,11 +237,15 @@ def get_cached_response(content_hash, user_message):
 
             # Strengthened instruction for content-only answers
             system_prompt = (
-                f"Critically, you MUST NOT answer any questions or provide any information that is not explicitly stated in the CONTENT section below. "
-                f"If the user asks about topics outside of the provided CONTENT, you MUST respond with 'I don't have enough information to answer that question.' or a similar direct refusal. "
-                f"Do not offer to search externally or provide general knowledge. Adhere strictly to the provided CONTENT.\n\n"
+                f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
                 f"{system_prompt_role_text}\n\n"
                 f"IMPORTANT GUIDELINES:\n{system_prompt_guidelines_text}\n\n"
+                f"RESPONSE APPROACH:\n"
+                f"- Answer questions directly related to the provided content\n"
+                f"- For application-based or scenario-based questions, use the content as a foundation to provide practical guidance\n"
+                f"- You may extrapolate from the content to answer 'how-to' questions, create examples, or provide implementation guidance\n"
+                f"- For completely unrelated topics (e.g., cooking, sports, unrelated subjects), respond with 'I don't have enough information to answer that question'\n"
+                f"- Focus on being helpful while staying within the domain of the program content\n\n"
                 f"CONTENT:\n{content}"
             )
         else:
@@ -255,11 +259,15 @@ def get_cached_response(content_hash, user_message):
             program_display_name = program_names.get(program_code, program_code) # Get display name for fallback
             system_prompt_role_fallback = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
             system_prompt = (
-                f"Critically, you MUST NOT answer any questions or provide any information that is not explicitly stated in the CONTENT section below. "
-                f"If the user asks about topics outside of the provided CONTENT, you MUST respond with 'I don\'t have enough information to answer that question.' or a similar direct refusal. "
-                f"Do not offer to search externally or provide general knowledge. Adhere strictly to the provided CONTENT.\n\n"
+                f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
                 f"{system_prompt_role_fallback}\n\n"
                 f"IMPORTANT GUIDELINES:\n{default_guidelines}\n\n"
+                f"RESPONSE APPROACH:\n"
+                f"- Answer questions directly related to the provided content\n"
+                f"- For application-based or scenario-based questions, use the content as a foundation to provide practical guidance\n"
+                f"- You may extrapolate from the content to answer 'how-to' questions, create examples, or provide implementation guidance\n"
+                f"- For completely unrelated topics (e.g., cooking, sports, unrelated subjects), respond with 'I don't have enough information to answer that question'\n"
+                f"- Focus on being helpful while staying within the domain of the program content\n\n"
                 f"CONTENT:\n{content}"
             )
         
@@ -270,9 +278,46 @@ def get_cached_response(content_hash, user_message):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            max_tokens=500
+            max_tokens=1500,  # Increased from 500 to 1500
+            temperature=0.3   # Added for more creative responses
         )
-        return response['choices'][0]['message']['content'].strip()
+        
+        # Get the response content
+        response_content = response['choices'][0]['message']['content'].strip()
+        
+        # Check if response was cut off and try to complete it naturally
+        if response['choices'][0]['finish_reason'] == 'length':
+            logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
+            
+            try:
+                # Try to complete the response with a shorter follow-up
+                completion_response = openai.ChatCompletion.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": f"{system_prompt}\n\nIMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion."},
+                        {"role": "user", "content": user_message},
+                        {"role": "assistant", "content": response_content},
+                        {"role": "user", "content": "Please complete your previous response with a brief conclusion."}
+                    ],
+                    max_tokens=300,  # Shorter completion
+                    temperature=0.3
+                )
+                
+                completion_text = completion_response['choices'][0]['message']['content'].strip()
+                
+                # Combine original response with completion
+                if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
+                    response_content = response_content + " " + completion_text
+                else:
+                    # If completion failed, add a natural ending
+                    response_content = response_content + "\n\n[Response continues with additional details available in the program content]"
+            except Exception as completion_error:
+                logger.error(f"Error completing truncated response: {str(completion_error)}")
+                # Add a natural ending if completion fails
+                response_content = response_content + "\n\n[Response continues with additional details available in the program content]"
+        
+        return response_content
+        
     except Exception as e:
         logger.error(f"Error getting cached response: {str(e)}")
         return None
@@ -314,6 +359,10 @@ def load_program_content():
         logger.info(f"Loaded {len(program_content)} program content entries from database")
         logger.debug(f"Available programs: {', '.join(program_content.keys())}")
         logger.debug(f"Content hashes generated for caching: {', '.join(content_hashes.keys())}")
+        
+        # Clear cached responses when content is reloaded to ensure new prompts take effect
+        get_cached_response.cache_clear()
+        logger.info("Cleared cached responses to apply updated system prompts")
     finally:
         close_db(db)
 
@@ -900,9 +949,41 @@ CONTENT:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_message}
                     ],
-                    max_tokens=500
+                    max_tokens=1500,  # Increased from 500 to 1500
+                    temperature=0.3   # Added for more creative responses
                 )
                 chatbot_reply = response['choices'][0]['message']['content'].strip()
+                
+                # Check if response was cut off and try to complete it naturally
+                if response['choices'][0]['finish_reason'] == 'length':
+                    logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
+                    
+                    try:
+                        # Try to complete the response with a shorter follow-up
+                        completion_response = openai.ChatCompletion.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {"role": "system", "content": f"{system_prompt}\n\nIMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion."},
+                                {"role": "user", "content": user_message},
+                                {"role": "assistant", "content": chatbot_reply},
+                                {"role": "user", "content": "Please complete your previous response with a brief conclusion."}
+                            ],
+                            max_tokens=300,  # Shorter completion
+                            temperature=0.3
+                        )
+                        
+                        completion_text = completion_response['choices'][0]['message']['content'].strip()
+                        
+                        # Combine original response with completion
+                        if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
+                            chatbot_reply = chatbot_reply + " " + completion_text
+                        else:
+                            # If completion failed, add a natural ending
+                            chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
+                    except Exception as completion_error:
+                        logger.error(f"Error completing truncated response: {str(completion_error)}")
+                        # Add a natural ending if completion fails
+                        chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
             except Exception as e:
                 logger.error(f"Error getting new response: {str(e)}")
                 return jsonify({"error": str(e)}), 500

@@ -1,0 +1,974 @@
+/* Admin-specific styles that override the main styles.css */
+        :root {
+            --acs-green: #4CB848;
+            --acs-dark-green: #38A635;
+            --acs-light-green: #62C55F;
+            --acs-accent: #333333;
+            --background-color: #f8f9fa; 
+            --card-background-color: #FFFFFF;
+            --text-color-primary: #2d3748; 
+            --text-color-secondary: #5A6574;
+            --border-color: #e2e8f0; 
+            --header-height: 60px;
+        }
+        
+        body {
+            display: block !important;
+            height: auto !important;
+            min-height: 100vh;
+            align-items: initial !important;
+            justify-content: initial !important;
+            background-color: var(--background-color);
+            color: var(--text-color-primary);
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow-y: auto !important; 
+            position: relative;
+        }
+
+        html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow-y: scroll;
+        }
+        
+        /* Container should not restrict scrolling */
+        .container-admin {
+            padding: 1.5rem;
+            min-height: 100vh;
+            position: relative;
+            max-width: 1400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Modern admin dashboard styling */
+        .admin-header {
+            background: linear-gradient(135deg, var(--acs-green) 0%, var(--acs-dark-green) 100%);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .admin-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            background: radial-gradient(circle at top right, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 70%);
+            pointer-events: none;
+        }
+
+        .admin-header-left {
+            display: flex;
+            align-items: center;
+            z-index: 1;
+        }
+
+        .admin-header-right {
+            z-index: 1;
+        }
+
+        .admin-logo {
+            height: 50px;
+            margin-right: 20px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        }
+
+        .admin-title {
+            color: white;
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .admin-subtitle {            color: rgba(255,255,255,0.85);            margin: 0;            font-size: 1rem;            font-weight: 400;        }                /* Card styling */        .admin-main-card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.03);
+            margin-bottom: 2.5rem;
+            background-color: var(--card-background-color);
+            transition: box-shadow 0.3s ease;
+            overflow: hidden;
+        }
+        
+        .admin-main-card:hover {
+            box-shadow: 0 12px 32px rgba(0,0,0,0.09), 0 1px 4px rgba(0,0,0,0.04);
+        }
+        
+        /* Card styling enhancements */
+        .card {
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+            border: none;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .card:hover {
+            box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        }
+        
+        .card-header {
+            border-bottom: 1px solid rgba(0,0,0,0.04);
+            padding: 1.2rem 1.5rem;
+            background-color: rgba(249, 250, 251, 0.5);
+        }
+        
+        .card-header h4 {
+            font-weight: 600;
+            margin-bottom: 0;
+            color: #2d3748;
+        }
+        
+        .card-body {
+            padding: 1.6rem;
+        }
+
+        /* Nav tabs styling */
+        .nav-pills .nav-link {
+            font-weight: 500;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            color: var(--acs-dark-green);
+            background-color: rgba(76, 184, 72, 0.05);
+            border: 1px solid transparent;
+            transition: all 0.2s ease-in-out;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-pills .nav-link:hover {
+            background-color: rgba(76, 184, 72, 0.1);
+            border-color: rgba(76, 184, 72, 0.2);
+            color: var(--acs-dark-green);
+            transform: translateY(-1px);
+        }
+
+        .nav-pills .nav-link.active {
+            background-color: var(--acs-green);
+            color: white;
+            border-color: var(--acs-green);
+            box-shadow: 0 4px 8px rgba(76, 184, 72, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .nav-pills .nav-link i {
+            margin-right: 0.75rem;
+            font-size: 1.1rem;
+        }
+
+        /* Overall Nav Pills container */
+        .nav-pills#adminTabs {
+            margin-bottom: 2rem; 
+            padding: 0.25rem;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+
+        /* Alert styling */
+        .alert {
+            border-radius: 10px;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 1rem 1.25rem;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .alert::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 4px;
+        }
+
+        .alert-info {
+            background-color: rgba(59, 130, 246, 0.08);
+            color: #2563eb;
+        }
+        
+        .alert-info::before {
+            background-color: #3b82f6;
+        }
+
+        .alert-success {
+            background-color: rgba(52, 199, 89, 0.08);
+            color: #126A3E;
+        }
+        
+        .alert-success::before {
+            background-color: #34C759;
+        }
+
+        .alert-warning {
+            background-color: rgba(245, 158, 11, 0.08);
+            color: #d97706;
+        }
+        
+        .alert-warning::before {
+            background-color: #f59e0b;
+        }
+
+        .alert-danger {
+            background-color: rgba(239, 68, 68, 0.08);
+            color: #dc2626;
+        }
+        
+        .alert-danger::before {
+            background-color: #ef4444;
+        }
+
+        /* 파일 업로드 관련 스타일 */
+        .file-upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .file-upload-area:hover, .file-upload-area.dragover {
+            border-color: var(--acs-green);
+            background-color: rgba(76, 184, 72, 0.05);
+        }
+        
+        .file-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background-color: #f8f9fa;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+        }
+        
+        .file-item:hover {
+            border-color: var(--acs-green);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .file-info {
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .file-name {
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .file-size {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .file-actions {
+            margin-left: 15px;
+        }
+        
+        .remove-file {
+            color: #dc3545;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: color 0.2s;
+        }
+        
+        .remove-file:hover {
+            color: #bd2130;
+        }
+        
+        .file-counter {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 10px;
+        }
+        
+        .file-preview-panel {
+            margin-top: 30px;
+        }
+        
+        /* 수정 가능한 파일 내용 관련 스타일 */
+        .file-content-editor {
+            width: 100%;
+            min-height: 200px;
+            font-family: monospace;
+            resize: vertical;
+            white-space: pre-wrap;
+        }
+        
+        .char-counter {
+            text-align: right;
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .char-counter.over-limit {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        
+        /* 드래그앤드롭 메시지 */
+        .drag-message {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .drag-message i {
+            font-size: 2rem;
+            color: var(--acs-green);
+            margin-bottom: 10px;
+        }
+        
+        /* 요약 버튼 스타일 */
+        .summarize-btn {
+            margin-top: 10px;
+            background-color: var(--acs-green);
+            border-color: var(--acs-green);
+        }
+        
+        .summarize-btn:hover {
+            background-color: var(--acs-dark-green);
+            border-color: var(--acs-dark-green);
+        }
+        
+        /* 드래그앤드롭 영역 스타일 */
+        .drag-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .drag-area.active {
+            border-color: #007bff;
+        }
+        .chatbot-list {
+            margin-top: 10px;
+        }
+        .chatbot-card {
+            margin-bottom: 15px;
+        }
+        .deleted-chatbots {
+            margin-top: 30px;
+            opacity: 0.7;
+        }
+        .deleted-chatbots:hover {
+            opacity: 1;
+        }
+        #debug-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            display: none;
+        }
+        /* Adjust top spacing for the main container */
+        .container-admin {
+            padding-top: 1.5rem; /* Add a bit more padding to the top */
+            padding-bottom: 1.5rem; /* Add padding to the bottom as well */
+        }
+        /* Make form fields stand out */
+        .form-label {
+            font-weight: 500; /* Slightly less bold for labels */
+            color: var(--text-color-secondary);
+            margin-bottom: 0.3rem;
+        }
+        /* Style for the tab pills */
+        .nav-pills .nav-link {
+            font-weight: 500;
+            padding: 0.65rem 1rem; /* Adjusted padding */
+            border-radius: 0.375rem;
+            color: var(--text-color-secondary); /* Default text color */
+            background-color: transparent;
+            border: none; /* No border by default */
+            transition: all 0.2s ease-in-out;
+            margin: 0 0.25rem; /* Add some horizontal spacing between tabs */
+        }
+
+        .nav-pills .nav-link:hover {
+            background-color: var(--acs-light-green); /* Light green on hover */
+            color: white;
+        }
+
+        .nav-pills .nav-link.active {
+            background-color: var(--acs-green); /* Accent color for active */
+            color: white;
+            box-shadow: 0 2px 5px rgba(76, 184, 72, 0.3); /* Softer shadow for active tab */
+        }
+
+        .nav-pills .nav-link i {
+            margin-right: 0.5rem;
+            font-size: 0.9em; /* Slightly smaller icons */
+        }
+
+        /* Overall Nav Pills container */
+        .nav-pills#adminTabs {
+            margin-bottom: 1.5rem; /* Space below tabs */
+            padding-bottom: 0.5rem; /* Add a little padding if wrapped */
+            /* Removed nav-fill to allow natural width */
+        }
+        /* Make cards consistent */
+        .card {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .card-header.bg-primary {
+            background-color: var(--acs-green) !important;
+        }
+        /* Section dividers */
+        .section-divider {
+            border-top: 1px solid #dee2e6;
+            margin: 2rem 0;
+        }
+        /* 추가 스타일 - 프로그레스 바 관련 */
+        .progress-bar {
+            transition: width 0.6s ease;
+        }
+        
+        /* Shadow pulse animation for guiding user attention */
+        @keyframes shadow-pulse {
+            0% {
+                box-shadow: 0 0 0 0px rgba(76, 184, 72, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 0 10px rgba(76, 184, 72, 0);
+            }
+        }
+
+        .shadow-pulse {
+            animation: shadow-pulse 1.5s infinite;
+        }
+        
+        /* Fix scrolling for modals and large content */
+        .modal-body {
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+        }
+        
+        /* Fix for any height restrictions in tab panes */
+        .tab-pane {
+            overflow: visible;
+        }
+        
+        /* Ensure content areas can scroll */
+        .tab-content {
+            overflow: visible;
+        }
+        
+        /* Fix for any conflicting styles from the chat interface */
+        .chat-container, .chat-box {
+            height: auto;
+        }
+
+        /* Logo and organization header styles */
+        .org-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .org-logo {
+            height: 60px;
+            margin-right: 15px;
+        }
+        
+        .org-name {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .org-name h2 {
+            margin: 0;
+            color: var(--acs-green);
+            font-size: 1.2rem;
+            line-height: 1.2;
+        }
+        
+        .org-name p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--acs-accent);
+        }
+
+        .org-header .logo-banner {
+            height: 45px; /* Adjust this value as needed */
+            width: auto;  /* Maintain aspect ratio */
+        }
+
+        /* Modern Admin Header Styles */
+        .admin-main-header {
+            background: #ffffff;
+            padding: 1.8rem 2.5rem;
+            border-radius: 16px 16px 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.04), 0 6px 12px rgba(26,127,79,0.04);
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 0;
+            border-bottom: none;
+        }
+
+        /* Modern gradient accent line */
+        .admin-main-header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #126A3E 0%, #34C759 50%, #126A3E 100%);
+        }
+
+        /* Background subtle pattern */
+        .admin-main-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            background-image: 
+                radial-gradient(circle at 20% 110%, rgba(52, 199, 89, 0.05) 0%, rgba(255, 255, 255, 0) 40%),
+                radial-gradient(circle at 80% -10%, rgba(18, 106, 62, 0.03) 0%, rgba(255, 255, 255, 0) 30%);
+            opacity: 0.8;
+            z-index: 0;
+        }
+
+        /* Logo section */
+        .admin-header-left {
+            display: flex;
+            align-items: center;
+            gap: 1.6rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .admin-main-header .logo-banner {
+            height: 48px;
+            width: auto;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05));
+            transition: transform 0.3s ease;
+        }
+
+        .admin-main-header .logo-banner:hover {
+            transform: translateY(-1px);
+        }
+
+        /* Title section with hierarchical typography */
+        .header-title-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .header-subtitle {
+            font-size: 0.85rem;
+            color: #617668;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin: 0;
+            opacity: 0.9;
+        }
+        
+        .admin-main-header h2 {
+            margin: 0;
+            font-size: 1.75rem;
+            font-weight: 600;
+            font-family: 'Segoe UI', 'SF Pro Display', 'Pretendard', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+            background: linear-gradient(135deg, #126A3E 0%, #34C759 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: -0.01em;
+            line-height: 1.2;
+        }
+
+        /* Right section for future actions/elements */
+        .admin-header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .admin-header-version {
+            font-size: 0.8rem;
+            color: #8fa796;
+            padding: 0.3rem 0.8rem;
+            background-color: rgba(52, 199, 89, 0.08);
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 900px) {
+            .admin-main-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1.2rem;
+                padding: 1.5rem 1.8rem;
+            }
+            
+            .admin-header-right {
+                align-self: flex-end;
+            }
+            
+            .admin-main-header .logo-banner {
+                height: 42px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .admin-main-header {
+                padding: 1.2rem 1.2rem;
+            }
+            
+            .admin-header-left {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .admin-main-header .logo-banner {
+                height: 36px;
+            }
+            
+            .header-subtitle {
+                font-size: 0.75rem;
+            }
+            
+            .admin-main-header h2 {
+                font-size: 1.4rem;
+            }
+            
+            .admin-header-right {
+                align-self: flex-start;
+                margin-top: 0.5rem;
+            }
+        }
+        
+        /* Modern Card Styling */
+        .admin-main-card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            margin-bottom: 2rem;
+            background-color: var(--card-background-color);
+        }
+        
+        /* Modern Nav Tabs */
+        .nav-pills .nav-link {
+            font-weight: 500;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            color: var(--text-color-primary);
+            background-color: rgba(76, 184, 72, 0.05);
+            border: 1px solid transparent;
+            transition: all 0.2s ease-in-out;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-pills .nav-link:hover {
+            background-color: rgba(76, 184, 72, 0.1);
+            border-color: rgba(76, 184, 72, 0.2);
+            color: var(--acs-dark-green);
+            transform: translateY(-1px);
+        }
+
+        .nav-pills .nav-link.active {
+            background-color: var(--acs-green);
+            color: white;
+            border-color: var(--acs-green);
+            box-shadow: 0 4px 8px rgba(76, 184, 72, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .nav-pills .nav-link i {
+            margin-right: 0.75rem;
+            font-size: 1.1rem;
+        }
+        
+        /* Card styling enhancements */
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+            border: none;
+            overflow: hidden;
+        }
+        
+        .card-header {
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            padding: 1rem 1.25rem;
+        }
+        
+        .card-header h4 {
+            font-weight: 600;
+            margin-bottom: 0;
+        }
+        
+        .card-body {
+            padding: 1.5rem;
+        }
+
+        /* Modern Nav Tabs - 2024 Design */
+        .nav-pills .nav-link {
+            font-weight: 500;
+            padding: 0.8rem 1.25rem;
+            border-radius: 10px;
+            color: #4a5568;
+            background-color: #f9fafb;
+            border: 1px solid rgba(226, 232, 240, 0.7);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-right: 0.7rem;
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        }
+
+        .nav-pills .nav-link:hover {
+            background-color: rgba(52, 199, 89, 0.06);
+            border-color: rgba(52, 199, 89, 0.15);
+            color: #126A3E;
+            transform: translateY(-2px);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.07);
+        }
+
+        .nav-pills .nav-link.active {
+            background: linear-gradient(135deg, #126A3E 0%, #34C759 100%);
+            color: white;
+            border-color: transparent;
+            box-shadow: 0 5px 12px rgba(52, 199, 89, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .nav-pills .nav-link i {
+            margin-right: 0.75rem;
+            font-size: 1.1rem;
+            transition: transform 0.2s ease;
+        }
+        
+        .nav-pills .nav-link:hover i {
+            transform: translateY(-1px);
+        }
+        
+        /* Overall Nav Pills container */
+        .nav-pills#adminTabs {
+            margin-bottom: 1.5rem;
+            padding: 0.5rem 0.25rem;
+            gap: 0.25rem;
+            flex-wrap: wrap;
+        }
+
+        /* Modern Button Styling - 2024 Design */
+        .btn {
+            border-radius: 8px;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(rgba(255,255,255,0.1), rgba(255,255,255,0));
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        
+        .btn:hover::before {
+            opacity: 1;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #126A3E 0%, #34C759 100%);
+            border: none;
+            box-shadow: 0 2px 5px rgba(52, 199, 89, 0.3);
+        }
+        
+        .btn-primary:hover {
+            box-shadow: 0 4px 12px rgba(52, 199, 89, 0.4);
+            transform: translateY(-1px);
+        }
+        
+        .btn-secondary {
+            background-color: #f1f5f9;
+            color: #475569;
+            border: 1px solid rgba(203, 213, 225, 0.5);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        
+        .btn-secondary:hover {
+            background-color: #f8fafc;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.08);
+            transform: translateY(-1px);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+            border: none;
+            box-shadow: 0 2px 5px rgba(239, 68, 68, 0.3);
+        }
+        
+        .btn-danger:hover {
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+            transform: translateY(-1px);
+        }
+        
+        .btn-info {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            border: none;
+            color: white;
+            box-shadow: 0 2px 5px rgba(59, 130, 246, 0.3);
+        }
+        
+        .btn-info:hover {
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+            transform: translateY(-1px);
+        }
+        
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.875rem;
+        }
+
+        /* Slimmer Form Controls for Filters */
+        .filter-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: nowrap;
+        }
+        
+        .filter-controls .form-control,
+        .filter-controls .form-select {
+            height: 38px;
+            padding: 6px 12px;
+            font-size: 0.875rem;
+            width: 200px;
+        }
+        
+        .filter-controls #searchConvoInput {
+            width: 250px;
+        }
+        
+        .filter-controls .btn {
+            height: 38px;
+            padding: 6px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--acs-green);
+            border-color: var(--acs-green);
+        }
+        
+        .filter-controls .btn:hover {
+            background-color: var(--acs-dark-green);
+            border-color: var(--acs-dark-green);
+        }
+        
+        @media (max-width: 992px) {
+            .filter-controls {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+                width: 100%;
+            }
+            
+            .filter-controls .form-control,
+            .filter-controls .form-select,
+            .filter-controls #searchConvoInput {
+                width: 100%;
+                max-width: 100%;
+            }
+        }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 2rem;
+            font-weight: 700;
+            color: #126A3E;
+            background: linear-gradient(90deg, #e8f5e9 60%, #f8fafc 100%);
+            border-left: 6px solid #34C759;
+            border-radius: 0 12px 12px 0;
+            box-shadow: 0 2px 8px rgba(52,199,89,0.07);
+            padding: 0.75rem 1.5rem;
+            margin-bottom: 1.5rem;
+            margin-top: 1.5rem;
+            letter-spacing: -0.01em;
+        }
+        .section-title i {
+            font-size: 1.5rem;
+            color: #34C759;
+            flex-shrink: 0;
+        }
+        @media (max-width: 600px) {
+            .section-title {
+                font-size: 1.2rem;
+                padding: 0.6rem 1rem;
+                border-radius: 0 8px 8px 0;
+            }
+            .section-title i {
+                font-size: 1.1rem;
+            }
+        }
+
+        #editSelectedUsers.btn-primary {
+          background-color: #0d6efd !important;
+          border-color: #0d6efd !important;
+          color: #fff !important;
+        }
+        /* Force Edit Selected button to be Bootstrap info blue and black text for contrast */
+        #editSelectedUsers.btn-info {
+          background-color: #0dcaf0 !important;
+          border-color: #0dcaf0 !important;
+          color: #000 !important; /* Black text for better contrast on light blue */
+        } 

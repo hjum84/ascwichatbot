@@ -1,4 +1,4 @@
-# Chatbot Essential Features Documentation
+ Chatbot Essential Features Documentation
 
 This document provides comprehensive technical information about the key features of the chatbot system, including user interface elements, mobile optimization, content formatting, data management, and backend functionality.
 

@@ -1136,13 +1136,13 @@
             </div>
         </div>
 
-        <!-- Edit User Modal -->
-        <div class="modal fade" id="editUserModal" tabindex="-1">
+        <!-- Edit User Modal - Moved outside other modals to fix display issues -->
+        <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title">Edit User</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        <h5 class="modal-title" id="editUserModalLabel">Edit User</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
                         <form id="editUserForm">
@@ -1169,6 +1169,7 @@
                             <div class="mb-3">
                                 <label for="editLoRootIds" class="form-label">LO Root IDs (semicolon-separated)</label>
                                 <input type="text" class="form-control" id="editLoRootIds" placeholder="e.g. ID1;ID2;ID3">
+                                <div class="form-text">Separate multiple IDs with semicolons (;)</div>
                             </div>
                         </form>
                     </div>

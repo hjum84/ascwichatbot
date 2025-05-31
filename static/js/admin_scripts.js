@@ -2057,17 +2057,43 @@ document.addEventListener('DOMContentLoaded', function() {
     // const userCheckboxes = document.getElementsByClassName('user-select'); // Declared dynamically now
     const deleteSelectedBtn = document.getElementById('deleteSelectedUsers');
     const editSelectedBtn = document.getElementById('editSelectedUsers'); 
+    
+    // Debug logging for user management buttons
+    console.log('User Management Elements:', {
+        selectAllCheckbox: selectAllCheckbox,
+        deleteSelectedBtn: deleteSelectedBtn,
+        editSelectedBtn: editSelectedBtn
+    });
 
     // Function to update Edit and Delete button states
     function updateActionButtonsState() {
         const currentSelectedCheckboxes = document.getElementsByClassName('user-select'); 
         const checkedCount = Array.from(currentSelectedCheckboxes).filter(cb => cb.checked).length;
+        
+        console.log('Updating action button states. Checked count:', checkedCount);
 
         if (deleteSelectedBtn) {
             deleteSelectedBtn.disabled = (checkedCount === 0);
+            console.log('Delete button disabled:', deleteSelectedBtn.disabled);
         }
         if (editSelectedBtn) {
             editSelectedBtn.disabled = (checkedCount !== 1);
+            console.log('Edit button disabled:', editSelectedBtn.disabled);
+            
+            // Add visual feedback for the edit button
+            if (checkedCount === 1) {
+                editSelectedBtn.classList.remove('btn-secondary');
+                editSelectedBtn.classList.add('btn-info');
+                editSelectedBtn.textContent = 'Edit Selected';
+            } else if (checkedCount === 0) {
+                editSelectedBtn.classList.remove('btn-info');
+                editSelectedBtn.classList.add('btn-secondary');
+                editSelectedBtn.textContent = 'Edit Selected (Select 1 user)';
+            } else {
+                editSelectedBtn.classList.remove('btn-info');
+                editSelectedBtn.classList.add('btn-secondary');
+                editSelectedBtn.textContent = 'Edit Selected (Select only 1 user)';
+            }
         }
     }
 
@@ -2404,30 +2430,464 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize filters on page load
     filterTable();
+    
+    // Initialize button states on page load
+    updateActionButtonsState();
+    
+    // Log initialization completion
+    console.log('Admin scripts initialization completed');
 
     // Edit User functionality
     const editUserModalElement = document.getElementById('editUserModal');
-    const editModal = editUserModalElement ? new bootstrap.Modal(editUserModalElement) : null;
+    let editModal = null;
+    
+    // Initialize Bootstrap modal with better error handling
+    if (editUserModalElement) {
+        try {
+            editModal = new bootstrap.Modal(editUserModalElement, {
+                backdrop: 'static',
+                keyboard: false
+            });
+            console.log('Bootstrap Modal initialized successfully');
+        } catch (error) {
+            console.error('Error initializing Bootstrap Modal:', error);
+            editModal = null;
+        }
+    } else {
+        console.error('Edit User Modal element not found in DOM');
+    }
+    
+    // Debug logging to identify issues
+    console.log('Edit User Modal Element:', editUserModalElement);
+    console.log('Edit Modal Instance:', editModal);
+    console.log('Edit Selected Button:', editSelectedBtn);
 
     // Edit button click handler
-    if (editSelectedBtn && editModal) { 
+    if (editSelectedBtn) {
+        console.log('Adding event listener to Edit Selected button');
         editSelectedBtn.addEventListener('click', function() {
-            const selectedUser = document.querySelector('.user-select:checked');
-            if (!selectedUser) return;
-
+            console.log('Edit Selected button clicked');
+            
+            const selectedUsers = document.querySelectorAll('.user-select:checked');
+            console.log('Selected user checkboxes:', selectedUsers);
+            
+            if (selectedUsers.length === 0) {
+                alert('Please select exactly one user to edit');
+                return;
+            }
+            
+            if (selectedUsers.length > 1) {
+                alert('Please select only one user to edit');
+                return;
+            }
+            
+            const selectedUser = selectedUsers[0];
             const row = selectedUser.closest('tr');
             const cells = row.getElementsByTagName('td');
+            
+            console.log('Row cells:', cells);
+            console.log('Cells content:', Array.from(cells).map(cell => cell.textContent));
+
+            // Check if modal elements exist before populating
+            const editUserIdField = document.getElementById('editUserId');
+            const editLastNameField = document.getElementById('editLastName');
+            const editEmailField = document.getElementById('editEmail');
+            const editStatusField = document.getElementById('editStatus');
+            const editExpiryDateField = document.getElementById('editExpiryDate');
+            const editLoRootIdsField = document.getElementById('editLoRootIds');
+            
+            console.log('Modal form fields:', {
+                editUserId: editUserIdField,
+                editLastName: editLastNameField,
+                editEmail: editEmailField,
+                editStatus: editStatusField,
+                editExpiryDate: editExpiryDateField,
+                editLoRootIds: editLoRootIdsField
+            });
+
+            if (!editUserIdField || !editLastNameField || !editEmailField || !editStatusField || !editExpiryDateField || !editLoRootIdsField) {
+                console.error('Some modal form fields are missing');
+                alert('Error: Modal form fields are not properly loaded. Please refresh the page and try again.');
+                return;
+            }
 
             // Populate the edit form
-            document.getElementById('editUserId').value = cells[1].textContent;
-            document.getElementById('editLastName').value = cells[2].textContent;
-            document.getElementById('editEmail').value = cells[3].textContent;
-            document.getElementById('editStatus').value = cells[5].textContent.toLowerCase();
-            document.getElementById('editExpiryDate').value = formatDateForInput(cells[7].textContent);
-            document.getElementById('editLoRootIds').value = cells[8].textContent;
+            editUserIdField.value = cells[1].textContent.trim();
+            editLastNameField.value = cells[2].textContent.trim();
+            editEmailField.value = cells[3].textContent.trim();
+            editStatusField.value = cells[5].textContent.trim().toLowerCase();
+            editExpiryDateField.value = formatDateForInput(cells[7].textContent.trim());
+            editLoRootIdsField.value = cells[8].textContent.trim();
+            
+            console.log('Form populated with values:', {
+                id: editUserIdField.value,
+                lastName: editLastNameField.value,
+                email: editEmailField.value,
+                status: editStatusField.value,
+                expiryDate: editExpiryDateField.value,
+                loRootIds: editLoRootIdsField.value
+            });
 
-            editModal.show();
+            // Show modal with multiple fallback approaches
+            try {
+                if (editModal) {
+                    console.log('Showing edit modal using Bootstrap Modal instance');
+                    
+                    // Add CSS debugging
+                    console.log('Modal element styles before show:', {
+                        display: editUserModalElement.style.display,
+                        visibility: editUserModalElement.style.visibility,
+                        opacity: editUserModalElement.style.opacity,
+                        zIndex: window.getComputedStyle(editUserModalElement).zIndex,
+                        position: window.getComputedStyle(editUserModalElement).position
+                    });
+                    
+                    // Force CSS styles to ensure visibility
+                    editUserModalElement.style.display = 'block';
+                    editUserModalElement.style.visibility = 'visible';
+                    editUserModalElement.style.opacity = '1';
+                    editUserModalElement.style.zIndex = '9999';
+                    editUserModalElement.style.position = 'fixed';
+                    editUserModalElement.style.top = '50%';
+                    editUserModalElement.style.left = '50%';
+                    editUserModalElement.style.transform = 'translate(-50%, -50%)';
+                    
+                    editModal.show();
+                    
+                    // Check if modal is actually shown after show() call
+                    setTimeout(() => {
+                        console.log('Modal element styles after show:', {
+                            display: editUserModalElement.style.display,
+                            visibility: editUserModalElement.style.visibility,
+                            opacity: editUserModalElement.style.opacity,
+                            hasShowClass: editUserModalElement.classList.contains('show'),
+                            ariaHidden: editUserModalElement.getAttribute('aria-hidden'),
+                            isVisible: editUserModalElement.offsetHeight > 0
+                        });
+                        
+                        // If modal is still not visible, force it with aggressive CSS
+                        if (!editUserModalElement.classList.contains('show') || editUserModalElement.offsetHeight === 0) {
+                            console.log('Modal not properly shown, forcing visibility with aggressive CSS');
+                            
+                            // CREATE A COMPLETELY NEW MODAL FROM SCRATCH
+                            console.log('Bootstrap modal failed completely. Creating new modal from scratch.');
+                            
+                            // Remove existing modal if any
+                            const existingCustomModal = document.getElementById('customEditUserModal');
+                            if (existingCustomModal) {
+                                existingCustomModal.remove();
+                            }
+                            
+                            // Create completely new modal HTML
+                            const customModal = document.createElement('div');
+                            customModal.id = 'customEditUserModal';
+                            customModal.style.cssText = `
+                                position: fixed !important;
+                                top: 0 !important;
+                                left: 0 !important;
+                                width: 100vw !important;
+                                height: 100vh !important;
+                                background-color: rgba(0, 0, 0, 0.8) !important;
+                                z-index: 999999 !important;
+                                display: flex !important;
+                                align-items: center !important;
+                                justify-content: center !important;
+                                font-family: 'Segoe UI', system-ui, sans-serif !important;
+                            `;
+                            
+                            customModal.innerHTML = `
+                                <div style="
+                                    background: white !important;
+                                    border-radius: 8px !important;
+                                    box-shadow: 0 10px 30px rgba(0,0,0,0.3) !important;
+                                    width: 90% !important;
+                                    max-width: 500px !important;
+                                    max-height: 90vh !important;
+                                    overflow: auto !important;
+                                    position: relative !important;
+                                ">
+                                    <div style="
+                                        padding: 20px !important;
+                                        border-bottom: 1px solid #dee2e6 !important;
+                                        display: flex !important;
+                                        justify-content: space-between !important;
+                                        align-items: center !important;
+                                    ">
+                                        <h5 style="margin: 0 !important; font-size: 1.25rem !important; font-weight: 600 !important;">Edit User</h5>
+                                        <button id="customCloseBtn" style="
+                                            background: none !important;
+                                            border: none !important;
+                                            font-size: 24px !important;
+                                            cursor: pointer !important;
+                                            padding: 0 !important;
+                                            width: 30px !important;
+                                            height: 30px !important;
+                                            display: flex !important;
+                                            align-items: center !important;
+                                            justify-content: center !important;
+                                        ">×</button>
+                                    </div>
+                                    <div style="padding: 20px !important;">
+                                        <div style="margin-bottom: 15px !important;">
+                                            <label style="display: block !important; margin-bottom: 5px !important; font-weight: 500 !important;">Last Name</label>
+                                            <input type="text" id="customLastName" value="${editLastNameField.value}" style="
+                                                width: 100% !important;
+                                                padding: 8px 12px !important;
+                                                border: 1px solid #ced4da !important;
+                                                border-radius: 4px !important;
+                                                font-size: 14px !important;
+                                            ">
+                                        </div>
+                                        <div style="margin-bottom: 15px !important;">
+                                            <label style="display: block !important; margin-bottom: 5px !important; font-weight: 500 !important;">Email</label>
+                                            <input type="email" id="customEmail" value="${editEmailField.value}" style="
+                                                width: 100% !important;
+                                                padding: 8px 12px !important;
+                                                border: 1px solid #ced4da !important;
+                                                border-radius: 4px !important;
+                                                font-size: 14px !important;
+                                            ">
+                                        </div>
+                                        <div style="margin-bottom: 15px !important;">
+                                            <label style="display: block !important; margin-bottom: 5px !important; font-weight: 500 !important;">Status</label>
+                                            <select id="customStatus" style="
+                                                width: 100% !important;
+                                                padding: 8px 12px !important;
+                                                border: 1px solid #ced4da !important;
+                                                border-radius: 4px !important;
+                                                font-size: 14px !important;
+                                            ">
+                                                <option value="active" ${editStatusField.value === 'active' ? 'selected' : ''}>Active</option>
+                                                <option value="inactive" ${editStatusField.value === 'inactive' ? 'selected' : ''}>Inactive</option>
+                                            </select>
+                                        </div>
+                                        <div style="margin-bottom: 15px !important;">
+                                            <label style="display: block !important; margin-bottom: 5px !important; font-weight: 500 !important;">Expiry Date</label>
+                                            <input type="date" id="customExpiryDate" value="${editExpiryDateField.value}" style="
+                                                width: 100% !important;
+                                                padding: 8px 12px !important;
+                                                border: 1px solid #ced4da !important;
+                                                border-radius: 4px !important;
+                                                font-size: 14px !important;
+                                            ">
+                                        </div>
+                                        <div style="margin-bottom: 15px !important;">
+                                            <label style="display: block !important; margin-bottom: 5px !important; font-weight: 500 !important;">LO Root IDs</label>
+                                            <input type="text" id="customLoRootIds" value="${editLoRootIdsField.value}" placeholder="e.g. ID1;ID2;ID3" style="
+                                                width: 100% !important;
+                                                padding: 8px 12px !important;
+                                                border: 1px solid #ced4da !important;
+                                                border-radius: 4px !important;
+                                                font-size: 14px !important;
+                                            ">
+                                            <small style="color: #6c757d !important; font-size: 12px !important;">Separate multiple IDs with semicolons (;)</small>
+                                        </div>
+                                    </div>
+                                    <div style="
+                                        padding: 15px 20px !important;
+                                        border-top: 1px solid #dee2e6 !important;
+                                        display: flex !important;
+                                        justify-content: flex-end !important;
+                                        gap: 10px !important;
+                                    ">
+                                        <button id="customCancelBtn" style="
+                                            padding: 8px 16px !important;
+                                            background: #6c757d !important;
+                                            color: white !important;
+                                            border: none !important;
+                                            border-radius: 4px !important;
+                                            cursor: pointer !important;
+                                            font-size: 14px !important;
+                                        ">Cancel</button>
+                                        <button id="customSaveBtn" style="
+                                            padding: 8px 16px !important;
+                                            background: #007bff !important;
+                                            color: white !important;
+                                            border: none !important;
+                                            border-radius: 4px !important;
+                                            cursor: pointer !important;
+                                            font-size: 14px !important;
+                                        ">Save Changes</button>
+                                    </div>
+                                </div>
+                            `;
+                            
+                            // Add to body
+                            document.body.appendChild(customModal);
+                            document.body.style.overflow = 'hidden';
+                            
+                            console.log('Custom modal created and added to body');
+                            
+                            // Add event listeners
+                            const closeModal = () => {
+                                console.log('Closing custom modal');
+                                
+                                // Remove the modal completely
+                                if (customModal && customModal.parentNode) {
+                                    customModal.parentNode.removeChild(customModal);
+                                }
+                                
+                                // Restore body styles
+                                document.body.style.overflow = '';
+                                document.body.style.paddingRight = '';
+                                document.body.classList.remove('modal-open');
+                                
+                                // Remove any modal backdrops that might exist
+                                const existingBackdrops = document.querySelectorAll('.modal-backdrop');
+                                existingBackdrops.forEach(backdrop => {
+                                    if (backdrop.parentNode) {
+                                        backdrop.parentNode.removeChild(backdrop);
+                                    }
+                                });
+                                
+                                // Remove any other custom modals that might exist
+                                const existingCustomModals = document.querySelectorAll('#customEditUserModal');
+                                existingCustomModals.forEach(modal => {
+                                    if (modal.parentNode) {
+                                        modal.parentNode.removeChild(modal);
+                                    }
+                                });
+                                
+                                // Also clean up any Bootstrap modals that might be open
+                                const bootstrapModals = document.querySelectorAll('.modal.show');
+                                bootstrapModals.forEach(modal => {
+                                    modal.classList.remove('show');
+                                    modal.style.display = 'none';
+                                    modal.setAttribute('aria-hidden', 'true');
+                                    modal.removeAttribute('aria-modal');
+                                });
+                                
+                                // Remove any modal-open class from body
+                                document.body.classList.remove('modal-open');
+                                
+                                // Clean up any additional styles that might be interfering
+                                document.documentElement.style.overflow = '';
+                                
+                                console.log('Custom modal closed and cleanup completed');
+                            };
+                            
+                            document.getElementById('customCloseBtn').addEventListener('click', closeModal);
+                            document.getElementById('customCancelBtn').addEventListener('click', closeModal);
+                            
+                            // Click outside to close
+                            customModal.addEventListener('click', function(e) {
+                                if (e.target === this) {
+                                    closeModal();
+                                }
+                            });
+                            
+                            // ESC to close
+                            document.addEventListener('keydown', function(e) {
+                                if (e.key === 'Escape') {
+                                    closeModal();
+                                }
+                            }, { once: true });
+                            
+                            // Save button functionality
+                            document.getElementById('customSaveBtn').addEventListener('click', function() {
+                                console.log('Custom modal save button clicked');
+                                
+                                const formData = new FormData();
+                                formData.append('user_id', editUserIdField.value);
+                                formData.append('last_name', document.getElementById('customLastName').value);
+                                formData.append('email', document.getElementById('customEmail').value);
+                                formData.append('status', document.getElementById('customStatus').value);
+                                formData.append('expiry_date', document.getElementById('customExpiryDate').value);
+                                formData.append('lo_root_ids', document.getElementById('customLoRootIds').value);
+                                
+                                this.disabled = true;
+                                this.innerHTML = 'Saving...';
+                                
+                                fetch(window.adminUrls.editUser, {
+                                    method: 'POST',
+                                    body: formData
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        console.log('User update successful, closing modal');
+                                        closeModal();
+                                        updateUserTable();
+                                        showSuccessMessage(data.message || 'User updated successfully');
+                                    } else {
+                                        alert('Error: ' + (data.error || 'Could not update user.'));
+                                        this.disabled = false;
+                                        this.innerHTML = 'Save Changes';
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Network error:', error);
+                                    alert('Network error: ' + error.message);
+                                    this.disabled = false;
+                                    this.innerHTML = 'Save Changes';
+                                });
+                            });
+                        }
+                    }, 100);
+                } else {
+                    console.log('Bootstrap Modal instance not available, trying jQuery approach');
+                    // Try jQuery approach if available
+                    if (typeof $ !== 'undefined') {
+                        $(editUserModalElement).modal('show');
+                    } else {
+                        console.log('jQuery not available, using manual modal display');
+                        // Manual modal display
+                        editUserModalElement.style.display = 'block';
+                        editUserModalElement.classList.add('show');
+                        editUserModalElement.setAttribute('aria-hidden', 'false');
+                        editUserModalElement.setAttribute('aria-modal', 'true');
+                        editUserModalElement.style.paddingRight = '17px';
+                        document.body.classList.add('modal-open');
+                        document.body.style.paddingRight = '17px';
+                        
+                        // Create and add backdrop
+                        let backdrop = document.querySelector('.modal-backdrop');
+                        if (!backdrop) {
+                            backdrop = document.createElement('div');
+                            backdrop.className = 'modal-backdrop fade show';
+                            document.body.appendChild(backdrop);
+                        }
+                        
+                        // Add close functionality
+                        const closeButtons = editUserModalElement.querySelectorAll('[data-bs-dismiss="modal"], .btn-close');
+                        closeButtons.forEach(button => {
+                            button.addEventListener('click', function() {
+                                editUserModalElement.style.display = 'none';
+                                editUserModalElement.classList.remove('show');
+                                editUserModalElement.setAttribute('aria-hidden', 'true');
+                                editUserModalElement.removeAttribute('aria-modal');
+                                editUserModalElement.style.paddingRight = '';
+                                document.body.classList.remove('modal-open');
+                                document.body.style.paddingRight = '';
+                                if (backdrop) backdrop.remove();
+                            });
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error showing modal:', error);
+                
+                // Emergency fallback - force show modal with inline styles
+                console.log('Using emergency fallback to show modal');
+                editUserModalElement.style.cssText = `
+                    display: block !important;
+                    position: fixed !important;
+                    top: 50% !important;
+                    left: 50% !important;
+                    transform: translate(-50%, -50%) !important;
+                    z-index: 9999 !important;
+                    background: rgba(0,0,0,0.5) !important;
+                    width: 100vw !important;
+                    height: 100vh !important;
+                `;
+                editUserModalElement.classList.add('show');
+                editUserModalElement.setAttribute('aria-hidden', 'false');
+                
+                alert('Modal opened using emergency fallback. If you can see this alert but not the modal, there may be a CSS conflict.');
+            }
         });
+    } else {
+        console.error('Edit Selected button not found');
     }
 
     // Format date for input field
@@ -2444,24 +2904,53 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Handle edit form submission
     const submitEditUserBtn = document.getElementById('submitEditUser');
-    if (submitEditUserBtn && editModal) {
+    if (submitEditUserBtn) {
         submitEditUserBtn.addEventListener('click', function() {
-            const formData = new FormData(); // Use FormData for simplicity if not sending JSON
+            console.log('Submit Edit User button clicked');
+            
+            const formData = new FormData();
             formData.append('user_id', document.getElementById('editUserId').value);
             formData.append('last_name', document.getElementById('editLastName').value);
             formData.append('email', document.getElementById('editEmail').value);
             formData.append('status', document.getElementById('editStatus').value);
             formData.append('expiry_date', document.getElementById('editExpiryDate').value);
             formData.append('lo_root_ids', document.getElementById('editLoRootIds').value);
+            
+            console.log('Submitting form data:', {
+                user_id: formData.get('user_id'),
+                last_name: formData.get('last_name'),
+                email: formData.get('email'),
+                status: formData.get('status'),
+                expiry_date: formData.get('expiry_date'),
+                lo_root_ids: formData.get('lo_root_ids')
+            });
+
+            // Disable button and show loading state
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Saving...';
 
             fetch(window.adminUrls.editUser, {
-                method: 'POST', // Flask usually expects form data for POST not JSON unless specified
+                method: 'POST',
                 body: formData 
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log('Server response status:', response.status);
+                return response.json();
+            })
             .then(data => {
+                console.log('Server response data:', data);
+                
                 if (data.success) {
-                    editModal.hide();
+                    // Close modal aggressively
+                    const editUserModalElement = document.getElementById('editUserModal');
+                    editUserModalElement.style.display = 'none';
+                    editUserModalElement.classList.remove('show');
+                    editUserModalElement.setAttribute('aria-hidden', 'true');
+                    editUserModalElement.removeAttribute('aria-modal');
+                    document.body.classList.remove('modal-open');
+                    document.body.style.overflow = '';
+                    document.body.style.paddingRight = '';
+                    
                     updateUserTable(); // Refresh table content
                     showSuccessMessage(data.message || 'User updated successfully');
                 } else {
@@ -2475,18 +2964,30 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     errorDiv.textContent = 'Error: ' + (data.error || 'Could not update user.');
                 }
+                
+                // Reset button state
+                this.disabled = false;
+                this.innerHTML = 'Save Changes';
             })
             .catch(error => {
                 console.error('Network error:', error);
-                 const editUserModalBody = editUserModalElement.querySelector('.modal-body');
-                 let errorDiv = editUserModalBody.querySelector('.alert-danger');
-                 if(!errorDiv){
-                    errorDiv = document.createElement('div');
-                    errorDiv.className = 'alert alert-danger mt-2';
-                    editUserModalBody.insertBefore(errorDiv, editUserModalBody.firstChild);
-                 }
-                 errorDiv.textContent = 'Network error: ' + error.message;
+                
+                const editUserModalElement = document.getElementById('editUserModal');
+                const editUserModalBody = editUserModalElement.querySelector('.modal-body');
+                let errorDiv = editUserModalBody.querySelector('.alert-danger');
+                if(!errorDiv){
+                   errorDiv = document.createElement('div');
+                   errorDiv.className = 'alert alert-danger mt-2';
+                   editUserModalBody.insertBefore(errorDiv, editUserModalBody.firstChild);
+                }
+                errorDiv.textContent = 'Network error: ' + error.message;
+                
+                // Reset button state
+                this.disabled = false;
+                this.innerHTML = 'Save Changes';
             });
         });
+    } else {
+        console.error('Submit Edit User button not found');
     }
 }); 

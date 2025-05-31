@@ -3347,7 +3347,7 @@ def edit_user():
         user.email = email
         user.status = status
         if expiry_date:
-            user.expiry_date = datetime.datetime.strptime(expiry_date, '%Y-%m-%d').date()
+            user.expiry_date = datetime.strptime(expiry_date, '%Y-%m-%d').date()
 
         # Update LO Root IDs
         if lo_root_ids:

@@ -98,6 +98,38 @@
       70% { transform: translate(-50%, -50%) scale(1.4); opacity: 0.2; }
       100% { transform: translate(-50%, -50%) scale(1.7); opacity: 0; }
     }
+
+    .questions-remaining-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+
+    .questions-remaining-indicator svg {
+      color: #10b981;
+      flex-shrink: 0;
+    }
+
+    .questions-remaining-indicator.warning {
+      color: #f59e0b;
+    }
+
+    .questions-remaining-indicator.warning svg {
+      color: #f59e0b;
+    }
+
+    .questions-remaining-indicator.danger {
+      color: #ef4444;
+    }
+
+    .questions-remaining-indicator.danger svg {
+      color: #ef4444;
+    }
   </style>
 </head>
 <body>
@@ -115,6 +147,12 @@
     <div class="modern-header">
       <div class="title-line">
         <h1 class="program-main-title">{{ program_display_name }} Chatbot</h1>
+        <div class="questions-remaining-indicator" id="questionsRemaining">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/>
+          </svg>
+          <span id="remainingCount">{{ remaining_questions }}</span> questions remaining today
+        </div>
       </div>
       <div class="user-info-and-actions">
         {% if session.user_email %}
@@ -304,6 +342,35 @@
         return p; // Return the paragraph element for typing animation
     }
 
+    function updateRemainingQuestions(remaining, quota) {
+        const remainingCountElement = document.getElementById('remainingCount');
+        const indicatorElement = document.getElementById('questionsRemaining');
+        const svgElement = indicatorElement.querySelector('svg');
+        
+        if (remainingCountElement) {
+            remainingCountElement.textContent = remaining;
+        }
+        
+        if (indicatorElement && svgElement) {
+            // Remove existing classes
+            indicatorElement.classList.remove('warning', 'danger');
+            
+            // Update icon and color based on remaining count
+            if (remaining === 0) {
+                indicatorElement.classList.add('danger');
+                // X icon for 0 remaining - clearer X mark
+                svgElement.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" fill="currentColor"/>';
+            } else if (remaining === 1) {
+                indicatorElement.classList.add('warning');
+                // Warning icon for 1 remaining
+                svgElement.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor"/>';
+            } else {
+                // Check icon for 2+ remaining (default/good state)
+                svgElement.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/>';
+            }
+        }
+    }
+
     function sendMessage() {
       const message = userInput.value;
       if (message.trim() === '') return;
@@ -326,6 +393,11 @@
           typeMessage(botMessageP, data.reply || "Sorry, I couldn't process that.").then(() => {
               scrollToBottom(); // Final scroll after typing is complete
           });
+          
+          // Update remaining questions count
+          if (data.remaining_questions !== undefined) {
+              updateRemainingQuestions(data.remaining_questions, data.quota);
+          }
         }, 500); // Delay for bot "thinking"
       })
       .catch(error => {
@@ -360,6 +432,12 @@
             msgDiv.appendChild(p);
             msgDiv.removeAttribute('data-raw'); // Clean up
         });
+        
+        // Set initial state for questions remaining indicator
+        const initialRemaining = parseInt('{{ remaining_questions }}');
+        const initialQuota = parseInt('{{ quota }}');
+        updateRemainingQuestions(initialRemaining, initialQuota);
+        
         scrollToBottom();
     });
 

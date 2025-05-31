@@ -698,15 +698,17 @@ def set_program(program):
         logger.error("Error setting program: %s", str(e))
         return redirect(url_for('program_select'))
 
-# Helper: fetch chat history for a user and program
-def get_chat_history(user_id, program_code, limit=50):
+# Helper: fetch chat history for a user and program and calculate remaining questions
+def get_chat_history_and_remaining(user_id, program_code, limit=50):
     db = get_db()
     try:
+        # Get chat history
         history = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == program_code,
             ChatHistory.is_visible == True
         ).order_by(ChatHistory.timestamp.asc()).limit(limit).all()
+        
         result = []
         for h in history:
             # Add user message
@@ -721,7 +723,31 @@ def get_chat_history(user_id, program_code, limit=50):
                 'sender': 'bot',
                 'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
             })
-        return result
+        
+        # Calculate remaining questions for today
+        chatbot = ChatbotContent.get_by_code(db, program_code)
+        quota = chatbot.quota if chatbot else 3
+        
+        # Count today's messages for this user and program using UTC consistently
+        from datetime import timezone
+        today_utc = datetime.now(timezone.utc).date()
+        today_start_utc = datetime.combine(today_utc, datetime.min.time()).replace(tzinfo=timezone.utc)
+        today_end_utc = datetime.combine(today_utc, datetime.max.time()).replace(tzinfo=timezone.utc)
+        
+        logger.info(f"get_chat_history_and_remaining: Checking quota for user {user_id}, program {program_code}, date range: {today_start_utc} to {today_end_utc}")
+        
+        message_count = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code,
+            ChatHistory.timestamp >= today_start_utc,
+            ChatHistory.timestamp <= today_end_utc
+        ).count()
+        
+        remaining_questions = max(0, quota - message_count)
+        
+        logger.info(f"get_chat_history_and_remaining: User {user_id} in program {program_code} has {message_count}/{quota} messages today, {remaining_questions} remaining")
+        
+        return result, remaining_questions, quota
     finally:
         close_db(db)
 
@@ -731,11 +757,10 @@ def get_chat_history(user_id, program_code, limit=50):
 def index_bcc():
     session['current_program'] = 'BCC'
     user_id = session['user_id']
-    chat_history = get_chat_history(user_id, 'BCC')
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, 'BCC')
     db = get_db()
     try:
         chatbot = ChatbotContent.get_by_code(db, 'BCC')
-        quota = chatbot.quota if chatbot else 3
         program_display_name = chatbot.name if chatbot else "Building Coaching Competency"
         intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
     finally:
@@ -746,6 +771,7 @@ def index_bcc():
                          program='BCC',
                          program_display_name=program_display_name,
                          chat_history=chat_history,
+                         remaining_questions=remaining_questions,
                          quota=quota,
                          intro_message=formatted_intro)
 
@@ -755,11 +781,10 @@ def index_bcc():
 def index_mi():
     session['current_program'] = 'MI'
     user_id = session['user_id']
-    chat_history = get_chat_history(user_id, 'MI')
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, 'MI')
     db = get_db()
     try:
         chatbot = ChatbotContent.get_by_code(db, 'MI')
-        quota = chatbot.quota if chatbot else 3
         program_display_name = chatbot.name if chatbot else "Motivational Interviewing"
         intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
     finally:
@@ -770,6 +795,7 @@ def index_mi():
                          program='MI',
                          program_display_name=program_display_name,
                          chat_history=chat_history,
+                         remaining_questions=remaining_questions,
                          quota=quota,
                          intro_message=formatted_intro)
 
@@ -779,11 +805,10 @@ def index_mi():
 def index_safety():
     session['current_program'] = 'Safety'
     user_id = session['user_id']
-    chat_history = get_chat_history(user_id, 'Safety')
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, 'Safety')
     db = get_db()
     try:
         chatbot = ChatbotContent.get_by_code(db, 'Safety')
-        quota = chatbot.quota if chatbot else 3
         program_display_name = chatbot.name if chatbot else "Safety and Risk Assessment"
         intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
     finally:
@@ -794,6 +819,7 @@ def index_safety():
                          program='Safety',
                          program_display_name=program_display_name,
                          chat_history=chat_history,
+                         remaining_questions=remaining_questions,
                          quota=quota,
                          intro_message=formatted_intro)
 
@@ -814,7 +840,7 @@ def index_generic(program):
         quota = chatbot.quota
         intro_message = chatbot.intro_message if hasattr(chatbot, 'intro_message') and chatbot.intro_message else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
         user_id = session['user_id']
-        chat_history = get_chat_history(user_id, program_upper)
+        chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, program_upper)
         close_db(db)
         
         # Format the intro message by replacing placeholders
@@ -824,6 +850,7 @@ def index_generic(program):
                             program=program_upper,
                             program_display_name=program_display_name,
                             chat_history=chat_history,
+                            remaining_questions=remaining_questions,
                             quota=quota,
                             intro_message=formatted_intro)
     except Exception as e:
@@ -882,20 +909,28 @@ def chat():
             return jsonify({"error": "Program not found."}), 404
         
         quota = chatbot.quota
+        logger.info(f"User {user_id} attempting to send message. Program: {current_program}, Quota: {quota}")
 
-        # Count today's messages for this user and program
-        today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.min.time())
-        today_end = datetime.combine(today, datetime.max.time())
+        # Count today's messages for this user and program using UTC consistently
+        from datetime import timezone
+        today_utc = datetime.now(timezone.utc).date()
+        today_start_utc = datetime.combine(today_utc, datetime.min.time()).replace(tzinfo=timezone.utc)
+        today_end_utc = datetime.combine(today_utc, datetime.max.time()).replace(tzinfo=timezone.utc)
         
+        logger.info(f"Checking quota for user {user_id}, program {current_program}, date range: {today_start_utc} to {today_end_utc}")
+        
+        # Use a database transaction to prevent race conditions
         message_count = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == current_program,
-            ChatHistory.timestamp >= today_start,
-            ChatHistory.timestamp <= today_end
+            ChatHistory.timestamp >= today_start_utc,
+            ChatHistory.timestamp <= today_end_utc
         ).count()
+        
+        logger.info(f"Current message count for user {user_id} in program {current_program}: {message_count}/{quota}")
 
         if message_count >= quota:
+            logger.warning(f"User {user_id} has reached quota limit for {current_program}: {message_count}/{quota}")
             return jsonify({"reply": f"You have reached your daily quota of {quota} questions for the {chatbot.name} program. Please try again tomorrow."}), 200
 
         content_hash = content_hashes.get(current_program)
@@ -1017,15 +1052,18 @@ CONTENT:
         # Parse markdown in the response
         html_reply = parse_markdown(chatbot_reply)
 
-        # Save to chat history (both user message and chatbot reply)
+        # Save to chat history with UTC timestamp
         chat_entry = ChatHistory(
             user_id=user_id,
             program_code=current_program,
             user_message=user_message,
-            bot_message=chatbot_reply
+            bot_message=chatbot_reply,
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None)  # Store as UTC without timezone info
         )
         db.add(chat_entry)
         db.commit()
+        
+        logger.info(f"Successfully saved chat entry for user {user_id} in program {current_program}")
 
         # Record conversation in Smartsheet asynchronously
         def record_smartsheet_async(user_question, chatbot_reply, program):
@@ -1036,9 +1074,16 @@ CONTENT:
 
         threading.Thread(target=record_smartsheet_async, args=(user_message, chatbot_reply, current_program)).start()
 
+        # Calculate remaining questions after this interaction
+        remaining_questions = max(0, quota - (message_count + 1))
+        
+        logger.info(f"Interaction complete. User {user_id} has {remaining_questions} questions remaining for {current_program}")
+
         return jsonify({
             "reply": chatbot_reply,
-            "html_reply": html_reply
+            "html_reply": html_reply,
+            "remaining_questions": remaining_questions,
+            "quota": quota
         })
 
     except Exception as e:
@@ -3398,6 +3443,76 @@ def edit_user():
         return jsonify({'success': False, 'error': str(e)})
     finally:
         db.close()
+
+@app.route('/debug_quota/<program_code>')
+@requires_auth
+def debug_quota(program_code):
+    """Debug route to check quota system for a specific program"""
+    if 'user_id' not in session:
+        return jsonify({"error": "Not logged in"}), 401
+        
+    user_id = session['user_id']
+    
+    db = get_db()
+    try:
+        # Get chatbot info
+        chatbot = ChatbotContent.get_by_code(db, program_code)
+        if not chatbot:
+            return jsonify({"error": "Program not found"}), 404
+            
+        # Get all chat history for this user and program
+        all_history = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code
+        ).order_by(ChatHistory.timestamp.desc()).all()
+        
+        # Count today's messages using UTC
+        from datetime import timezone
+        today_utc = datetime.now(timezone.utc).date()
+        today_start_utc = datetime.combine(today_utc, datetime.min.time()).replace(tzinfo=timezone.utc)
+        today_end_utc = datetime.combine(today_utc, datetime.max.time()).replace(tzinfo=timezone.utc)
+        
+        today_messages = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code,
+            ChatHistory.timestamp >= today_start_utc,
+            ChatHistory.timestamp <= today_end_utc
+        ).all()
+        
+        debug_info = {
+            "user_id": user_id,
+            "program_code": program_code,
+            "program_name": chatbot.name,
+            "quota": chatbot.quota,
+            "today_utc": today_utc.isoformat(),
+            "today_start_utc": today_start_utc.isoformat(),
+            "today_end_utc": today_end_utc.isoformat(),
+            "total_messages_count": len(all_history),
+            "today_messages_count": len(today_messages),
+            "remaining_questions": max(0, chatbot.quota - len(today_messages)),
+            "all_messages": [
+                {
+                    "id": h.id,
+                    "timestamp": h.timestamp.isoformat() if h.timestamp else None,
+                    "user_message": h.user_message[:100] + "..." if len(h.user_message) > 100 else h.user_message,
+                    "is_today": today_start_utc <= h.timestamp <= today_end_utc if h.timestamp else False
+                }
+                for h in all_history[:20]  # Show last 20 messages
+            ],
+            "today_messages": [
+                {
+                    "id": h.id,
+                    "timestamp": h.timestamp.isoformat() if h.timestamp else None,
+                    "user_message": h.user_message[:100] + "..." if len(h.user_message) > 100 else h.user_message
+                }
+                for h in today_messages
+            ]
+        }
+        
+        return jsonify(debug_info)
+        
+    finally:
+        close_db(db)
 
 if __name__ == '__main__':
     # Only migrate content if database is empty

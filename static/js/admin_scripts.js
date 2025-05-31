@@ -106,21 +106,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const form = document.getElementById('upload-form');
         const formData = new FormData(form);
         
-        if (uploadedFiles.length === 0) {
-            alert('Please select at least one file');
-            return;
-        }
-        
-        // Get auto summarize option
-        const autoSummarize = document.getElementById('auto_summarize').checked;
-        formData.append('auto_summarize', autoSummarize.toString());
-        
         // Check if we have edited content in the preview section
         const previewSection = document.getElementById('preview-section');
         const isPreviewVisible = previewSection && previewSection.style.display !== 'none';
         
         console.log("Submit button clicked");
         console.log("Preview section visible:", isPreviewVisible);
+        console.log("Files uploaded:", uploadedFiles.length);
+        
+        // Get auto summarize option
+        const autoSummarize = document.getElementById('auto_summarize').checked;
+        formData.append('auto_summarize', autoSummarize.toString());
         
         // Always remove original file fields from form data to avoid duplication
         formData.delete('file');
@@ -143,13 +139,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log("Removed original files from submission and using only combined_content");
             } else {
                 console.warn("Preview section is visible but combined-preview element not found or empty");
+                alert('Error: Preview content is empty. Please make sure you have content to submit.');
+                return;
             }
-        } else {
-            // Only use the original files if no preview content exists
+        } else if (uploadedFiles.length > 0) {
+            // Only use the original files if no preview content exists but files are available
             console.log("No preview section found, using original files");
             for (let i = 0; i < uploadedFiles.length; i++) {
                 formData.append('files', uploadedFiles[i]);
             }
+        } else {
+            // No files and no preview content
+            alert('Please select at least one file or use the preview feature to add content');
+            return;
         }
         
         // Show loading state
@@ -166,31 +168,67 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        fetch(window.adminUrls.upload, {
+        // Debug URL
+        console.log("Upload URL:", window.adminUrls.upload);
+        const uploadUrl = window.adminUrls.upload || '/admin/upload';
+        console.log("Using URL:", uploadUrl);
+        
+        fetch(uploadUrl, {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
+        .then(response => {
+            console.log('Response status:', response.status);
+            console.log('Response URL:', response.url);
+            
+            // Always try to parse JSON first
+            return response.json().then(data => {
+                if (response.ok) {
+                    // Success response
+                    return { success: true, data: data };
+                } else {
+                    // Error response with JSON data
+                    console.log('Error data received:', data);
+                    return { success: false, error: data };
+                }
+            }).catch(jsonError => {
+                console.error('Failed to parse JSON response:', jsonError);
+                // If JSON parsing fails, return generic error
+                return { 
+                    success: false, 
+                    error: { 
+                        error: `HTTP ${response.status}: ${response.statusText}`,
+                        message: 'Server returned invalid response format'
+                    }
+                };
+            });
+        })
+        .then(result => {
+            if (result.success) {
+                // Success case
                 window.location.href = window.adminUrls.adminBase + "?message=" + encodeURIComponent('The chatbot has been successfully created') + "&message_type=success";
             } else {
-                // If error is about character limit, show a more detailed error
-                if (data.error === "Content too long" && data.warning) {
-                    const charLimitModal = new bootstrap.Modal(document.getElementById('editWarningModal'));
-                    document.getElementById('edit-warning-message').textContent = data.warning;
-                    document.getElementById('edit-warning-content-length').textContent = data.content_length.toLocaleString();
-                    document.getElementById('edit-warning-char-limit').textContent = data.char_limit.toLocaleString();
-                    charLimitModal.show();
+                // Error case
+                const errorData = result.error;
+                let errorMessage;
+                
+                if (errorData.error === "Content too long" && errorData.warning) {
+                    errorMessage = 'Content too long: ' + errorData.warning + 
+                                 '\n\nCurrent length: ' + (errorData.content_length || 'unknown').toLocaleString() + ' characters' +
+                                 '\nLimit: ' + (errorData.char_limit || 'unknown').toLocaleString() + ' characters' +
+                                 '\n\nPlease reduce content or enable auto-summarize.';
                 } else {
-                    alert('Error: ' + (data.error || 'Could not create chatbot.'));
+                    errorMessage = 'Error: ' + (errorData.error || errorData.message || 'Could not create chatbot.');
                 }
+                
+                alert(errorMessage);
                 this.disabled = false;
                 this.textContent = 'Create Chatbot';
             }
         })
-        .catch(error => {
-            alert('Network error: ' + error);
+        .catch(networkError => {
+            console.error('Network error:', networkError);
+            alert('Network error: ' + networkError.message);
             this.disabled = false;
             this.textContent = 'Create Chatbot';
         });

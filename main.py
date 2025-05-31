@@ -125,16 +125,16 @@ def get_embedding(text):
         logger.error(f"Error generating embedding: {str(e)}")
         return None
 
-def find_similar_question(user_message, content_hash):
+def find_similar_question(user_message, content_hash, chatbot_code):
     """
     Find a question similar to the given user_message.
-    Returns a cached question within the content_hash that has similarity above threshold.
+    Returns a cached question within the chatbot_code that has similarity above threshold.
     """
     # Basic preprocessing: lowercase, normalize whitespace
     normalized_question = re.sub(r'\s+', ' ', user_message.lower()).strip()
     
-    # Create cache key
-    cache_key = f"{content_hash}:{normalized_question}"
+    # Create cache key specific to this chatbot
+    cache_key = f"{chatbot_code}:{normalized_question}"
     
     # Check if we already found similar questions in cache
     if cache_key in similar_questions_cache:
@@ -146,7 +146,7 @@ def find_similar_question(user_message, content_hash):
     if new_embedding is None:
         return None
     
-    # Construct a list to hold questions from cache keys
+    # Construct a list to hold questions from cache keys for this specific chatbot
     content_questions = []
     
     # Get cache info
@@ -158,9 +158,10 @@ def find_similar_question(user_message, content_hash):
         # For some Python versions, it might be just .cache
         cache_dict = get_cached_response.cache
     
-    # Find existing questions for this content_hash
+    # Find existing questions for this specific chatbot
     for key in cache_dict:
-        if key[0] == content_hash:  # Only consider entries with matching content_hash
+        # key format is now (content_hash, user_message, chatbot_code)
+        if len(key) >= 3 and key[0] == content_hash and key[2] == chatbot_code:
             content_questions.append(key[1])  # Extract question part
     
     # Find similar questions
@@ -180,7 +181,7 @@ def find_similar_question(user_message, content_hash):
             if similarity >= SIMILARITY_THRESHOLD and similarity > best_similarity:
                 best_similarity = similarity
                 best_question = question
-                logger.debug(f"Found similar question: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
+                logger.debug(f"Found similar question for {chatbot_code}: '{question}' for '{normalized_question}' with similarity {similarity:.3f}")
         except Exception as e:
             logger.error(f"Error calculating similarity between embeddings: {str(e)}")
             continue
@@ -192,28 +193,23 @@ def find_similar_question(user_message, content_hash):
     return best_question
 
 @lru_cache(maxsize=1000)
-def get_cached_response(content_hash, user_message):
-    """Get cached response for the same content and user message.
+def get_cached_response(content_hash, user_message, chatbot_code):
+    """Get cached response for the same content, user message, and chatbot code.
     This function is decorated with lru_cache which will cache the results,
     reducing API costs by using cached inputs (50% cost reduction).
+    Each chatbot maintains its own cache based on its unique code and system prompts.
     """
     # Find program code based on content hash
-    program_code = None
-    for code, hash_value in content_hashes.items():
-        if hash_value == content_hash:
-            program_code = code
-            break
-    
-    if not program_code or program_code not in program_content:
-        logger.error(f"Program content not found for hash: {content_hash}")
+    if chatbot_code not in program_content:
+        logger.error(f"Program content not found for chatbot: {chatbot_code}")
         return None
     
     try:
         # Get actual content to use in system message
-        content = program_content[program_code]
+        content = program_content[chatbot_code]
         # Try to get system prompt from DB
         db = get_db()
-        chatbot = ChatbotContent.get_by_code(db, program_code)
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
         
         system_prompt_role_text = ""
         system_prompt_guidelines_text = ""
@@ -222,7 +218,7 @@ def get_cached_response(content_hash, user_message):
         if chatbot:
             char_limit_value = str(chatbot.char_limit) if chatbot.char_limit else "50000"
             
-            program_display_name = program_names.get(program_code, program_code) # Get display name
+            program_display_name = program_names.get(chatbot_code, chatbot_code) # Get display name
             system_prompt_role_text = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
 
             if chatbot.system_prompt_guidelines:
@@ -256,7 +252,7 @@ def get_cached_response(content_hash, user_message):
 4. Maintain a professional and helpful tone
 5. If asked about something not covered in the content, do not make assumptions
 6. Preserve ALL important facts, key concepts, definitions, and essential information without exception. The summary should aim for approximately {char_limit_value} characters, but prioritize content preservation over length."""
-            program_display_name = program_names.get(program_code, program_code) # Get display name for fallback
+            program_display_name = program_names.get(chatbot_code, chatbot_code) # Get display name for fallback
             system_prompt_role_fallback = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
             system_prompt = (
                 f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
@@ -343,7 +339,9 @@ def load_program_content():
             program_names[chatbot.code] = chatbot.name
             program_descriptions[chatbot.code] = chatbot.description or ""
             # Store content hash for caching
-            content_hashes[chatbot.code] = get_content_hash(chatbot.content)
+            content_hash_value = get_content_hash(chatbot.content)
+            content_hashes[chatbot.code] = content_hash_value
+            logger.info(f"Loaded chatbot '{chatbot.code}': Name='{chatbot.name}', Content Length={len(chatbot.content)}, Hash={content_hash_value}")
         
         # Make sure default programs are defined with proper names even if not in DB
         default_programs = {
@@ -902,23 +900,48 @@ def chat():
 
         content_hash = content_hashes.get(current_program)
         if not content_hash:
-            content = program_content.get(current_program, "")
-            content_hash = get_content_hash(content)
+            # This block should ideally not be hit if load_program_content works correctly after chatbot creation
+            content_for_hash = program_content.get(current_program, "")
+            if not content_for_hash:
+                logger.error(f"CRITICAL: Content for program '{current_program}' is MISSING from program_content dict in /chat endpoint.")
+                # Attempt to reload all program content as a fallback, though this indicates a deeper issue
+                load_program_content() 
+                content_for_hash = program_content.get(current_program, "") # Try again
+                if not content_for_hash:
+                     logger.error(f"CRITICAL: Content for '{current_program}' STILL MISSING after reload. Chatbot will not function.")
+                     return jsonify({"reply": "I apologize, but I'm currently unable to access my knowledge base for this program. Please try again later or contact an administrator."}), 500
+            
+            content_hash = get_content_hash(content_for_hash)
             content_hashes[current_program] = content_hash
-            logger.debug(f"Generated new content hash for {current_program}")
+            logger.warning(f"Re-generated content hash for '{current_program}' in /chat endpoint. This might indicate an issue if it happens frequently for existing chatbots.")
+        else:
+            logger.info(f"Successfully retrieved content_hash for '{current_program}' in /chat endpoint: {content_hash}")
+
+        # Verify content is available before calling get_cached_response
+        current_program_content = program_content.get(current_program)
+        if not current_program_content:
+            logger.error(f"CRITICAL: Content for '{current_program}' is NOT FOUND in program_content when preparing for get_cached_response. Hash was {content_hash}")
+            load_program_content() # Attempt reload
+            current_program_content = program_content.get(current_program)
+            if not current_program_content:
+                logger.error(f"CRITICAL: Content for '{current_program}' STILL MISSING after reload in /chat. Cannot proceed.")
+                return jsonify({"reply": "I apologize, but I'm having trouble accessing the content for this program. Please contact an administrator."}), 500
+            logger.info(f"Content for '{current_program}' was reloaded. Length: {len(current_program_content)}")
+        else:
+            logger.info(f"Content for '{current_program}' (length: {len(current_program_content)}) is available for get_cached_response.")
 
         start_time = time.time()
         cache_result = "exact_match"
         
-        chatbot_reply = get_cached_response(content_hash, user_message)
+        chatbot_reply = get_cached_response(content_hash, user_message, current_program)
         
         if not chatbot_reply:
             cache_result = "semantic_match"
             try:
-                similar_question = find_similar_question(user_message, content_hash)
+                similar_question = find_similar_question(user_message, content_hash, current_program)
                 if similar_question:
                     logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
-                    chatbot_reply = get_cached_response(content_hash, similar_question)
+                    chatbot_reply = get_cached_response(content_hash, similar_question, current_program)
                     logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
             except Exception as e:
                 logger.error(f"Error finding similar question: {str(e)}")
@@ -2038,6 +2061,12 @@ def admin_upload():
     """Handles the creation of a new chatbot."""
     db = get_db()
     try:
+        logger.info("=== ADMIN_UPLOAD START ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request form keys: {list(request.form.keys())}")
+        logger.info(f"Request files keys: {list(request.files.keys())}")
+        
         chatbot_code = request.form.get('course_name')
         display_name = request.form.get('display_name')
         description = request.form.get('description', '')
@@ -2052,12 +2081,11 @@ def admin_upload():
         # Log what we received for debugging
         logger.info(f"Admin upload - chatbot_code: {chatbot_code}, display_name: {display_name}")
         logger.info(f"Admin upload - char_limit: {char_limit}, auto_summarize: {auto_summarize}, category: {category}")
-        logger.info(f"Request form keys: {list(request.form.keys())}")
-        if 'files' in request.files:
-            logger.info(f"Request has {len(request.files.getlist('files'))} files")
         
         if not chatbot_code or not display_name:
-            return jsonify({"success": False, "error": "Chatbot ID (course_name) and Display Name are required."}), 400
+            error_msg = "Chatbot ID (course_name) and Display Name are required."
+            logger.error(f"Validation error: {error_msg}")
+            return jsonify({"success": False, "error": error_msg}), 400
         
         # Check if chatbot code already exists
         existing_chatbot = ChatbotContent.get_by_code(db, chatbot_code.upper())
@@ -2122,6 +2150,10 @@ def admin_upload():
             logger.error(f"Final content is empty after processing from source: {content_source}")
             return jsonify({"success": False, "error": "Extracted or provided content is empty. Please check your files or edited content."}), 400
 
+        # Normalize newline characters before length check
+        final_content = final_content.replace('\r\n', '\n')
+        logger.info(f"Normalized final_content length: {len(final_content)} chars")
+
         # LENGTH CHECK & AUTO-SUMMARIZATION
         # If content exceeds limit and auto-summarize is enabled, try to summarize
         if len(final_content) > char_limit:
@@ -2162,9 +2194,10 @@ def admin_upload():
                 return jsonify({
                     "success": False, 
                     "error": "Content too long",
-                    "warning": f"Content length ({len(final_content):,} characters) exceeds the specified limit ({char_limit:,} characters).",
+                    "warning": f"Content length ({len(final_content):,} characters) exceeds the specified limit ({char_limit:,} characters). Please enable auto-summarize or reduce content manually.",
                     "content_length": len(final_content),
-                    "char_limit": char_limit
+                    "char_limit": char_limit,
+                    "auto_summarize_enabled": auto_summarize
                 }), 400
 
         # Create new chatbot (or update if editing)
@@ -2174,10 +2207,9 @@ def admin_upload():
         # Get guidelines from form
         system_prompt_guidelines = request.form.get('system_prompt_guidelines')
         if not system_prompt_guidelines:
-            return jsonify({
-                "success": False,
-                "error": "System prompt guidelines are required"
-            }), 400
+            # Provide default guidelines if not provided
+            system_prompt_guidelines = generate_default_guidelines()
+            logger.info("Using default system prompt guidelines as none were provided")
         
         # Generate role that maintains connection with content
         system_prompt_role = "You are an AI assistant specialized in understanding and explaining the provided content. Your role is to provide accurate, helpful, and relevant information while maintaining a professional tone."

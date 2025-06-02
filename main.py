@@ -67,6 +67,150 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
 
+# Configuration for authorized users CSV file
+AUTHORIZED_USERS_CSV = os.path.join(os.path.dirname(__file__), 'authorized_users.csv')
+authorized_users_cache = {}  # Cache for authorized users
+authorized_users_last_modified = None  # Track file modification time
+
+def load_authorized_users():
+    """Load authorized users from CSV file with caching"""
+    global authorized_users_cache, authorized_users_last_modified
+    
+    try:
+        # Check if file exists
+        if not os.path.exists(AUTHORIZED_USERS_CSV):
+            logger.warning(f"Authorized users CSV file not found: {AUTHORIZED_USERS_CSV}")
+            return {}
+        
+        # Check file modification time for cache invalidation
+        current_mtime = os.path.getmtime(AUTHORIZED_USERS_CSV)
+        
+        # If cache is empty or file was modified, reload
+        if not authorized_users_cache or current_mtime != authorized_users_last_modified:
+            logger.info("Loading authorized users from CSV...")
+            
+            # Read CSV with actual format: user_code,last_name,email,status,class_name,date,lo_root_id
+            df = pd.read_csv(AUTHORIZED_USERS_CSV, header=None, names=[
+                'user_code', 'last_name', 'email', 'status', 'class_name', 'date', 'lo_root_id'
+            ])
+            
+            # Group by (last_name, email) and collect all lo_root_ids for each user
+            new_cache = {}
+            active_count = 0
+            
+            # Group by user (last_name + email combination)
+            user_groups = df.groupby(['last_name', 'email'])
+            
+            for (last_name, email), group in user_groups:
+                try:
+                    # Clean the data
+                    last_name = str(last_name).strip()
+                    email = str(email).strip().lower()
+                    
+                    # Check if any row for this user has 'active' status
+                    statuses = group['status'].str.strip().str.lower()
+                    is_active = any(status == 'active' for status in statuses)
+                    
+                    if is_active and last_name and email:
+                        # Collect all unique lo_root_ids for this user
+                        lo_root_ids = []
+                        for lo_root_id in group['lo_root_id']:
+                            lo_root_id_clean = str(lo_root_id).strip()
+                            if lo_root_id_clean and lo_root_id_clean not in lo_root_ids:
+                                lo_root_ids.append(lo_root_id_clean)
+                        
+                        if lo_root_ids:  # Only add users with at least one lo_root_id
+                            key = (last_name.lower(), email)
+                            new_cache[key] = {
+                                'last_name': last_name,
+                                'email': email,
+                                'status': 'active',
+                                'lo_root_ids': lo_root_ids,  # List of all lo_root_ids
+                                'lo_root_id': ';'.join(lo_root_ids)  # Semicolon-separated for backward compatibility
+                            }
+                            active_count += 1
+                            logger.debug(f"Loaded user {last_name} ({email}) with {len(lo_root_ids)} lo_root_ids: {lo_root_ids}")
+                            
+                except Exception as e:
+                    logger.warning(f"Error processing user group {last_name}, {email}: {e}")
+                    continue
+            
+            authorized_users_cache = new_cache
+            authorized_users_last_modified = current_mtime
+            
+            logger.info(f"Loaded {active_count} authorized users from CSV")
+            
+        return authorized_users_cache
+        
+    except Exception as e:
+        logger.error(f"Error loading authorized users CSV: {e}")
+        return {}
+
+def is_user_authorized(last_name, email):
+    """Check if user is authorized to register"""
+    authorized_users = load_authorized_users()
+    
+    if not authorized_users:
+        logger.warning("No authorized users loaded - allowing registration")
+        return True, None  # If no CSV file, allow registration
+    
+    key = (last_name.lower().strip(), email.lower().strip())
+    user_data = authorized_users.get(key)
+    
+    if user_data:
+        logger.info(f"User authorized: {last_name} ({email})")
+        return True, user_data
+    else:
+        logger.info(f"User not authorized: {last_name} ({email})")
+        return False, None
+
+def has_chatbot_access(user_id, chatbot_code):
+    """Check if a user has access to a specific chatbot based on LO Root IDs"""
+    db = get_db()
+    try:
+        logger.info(f"🔍 DEBUGGING ACCESS: User {user_id} trying to access chatbot {chatbot_code}")
+        
+        # Get the chatbot and its LO Root IDs
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            logger.warning(f"❌ Chatbot {chatbot_code} not found")
+            return False
+        
+        # Get chatbot's required LO Root IDs
+        chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+        logger.info(f"📋 Chatbot {chatbot_code} requires LO Root IDs: {chatbot_lo_root_ids}")
+        
+        # If no LO Root IDs are specified for the chatbot, allow access for all users
+        if not chatbot_lo_root_ids:
+            logger.info(f"✅ Chatbot {chatbot_code} has no access restrictions - allowing access for user {user_id}")
+            return True
+        
+        # Get user's LO Root IDs
+        user = User.get_by_id(db, user_id)
+        if not user:
+            logger.warning(f"❌ User {user_id} not found")
+            return False
+        
+        user_lo_root_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
+        logger.info(f"👤 User {user_id} ({user.last_name}) has LO Root IDs: {user_lo_root_ids}")
+        
+        # Check if user has any matching LO Root IDs
+        matching_ids = set(user_lo_root_ids) & set(chatbot_lo_root_ids)
+        logger.info(f"🔄 Matching IDs found: {matching_ids}")
+        
+        if matching_ids:
+            logger.info(f"✅ ACCESS GRANTED: User {user_id} has access to chatbot {chatbot_code} via LO Root IDs: {matching_ids}")
+            return True
+        else:
+            logger.warning(f"❌ ACCESS DENIED: User {user_id} denied access to chatbot {chatbot_code}. User LO Root IDs: {user_lo_root_ids}, Required: {chatbot_lo_root_ids}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"💥 ERROR checking chatbot access for user {user_id}, chatbot {chatbot_code}: {e}")
+        return False
+    finally:
+        close_db(db)
+
 # Program content dictionaries (in-memory cache)
 program_content = {}
 program_names = {}
@@ -510,20 +654,86 @@ def register():
         last_name = request.form.get('last_name')
         email = request.form.get('email')
         
+        if not last_name or not email:
+            flash("Last name and email are required.", "danger")
+            return redirect(url_for('register'))
+        
+        # Check if user is authorized to register
+        is_authorized, user_data = is_user_authorized(last_name, email)
+        
+        if not is_authorized:
+            logger.warning(f"Unauthorized registration attempt: {last_name} ({email})")
+            flash("Registration is restricted. Please contact an administrator if you believe this is an error.", "danger")
+            return redirect(url_for('register'))
+        
         db = get_db()
         try:
+            # Check if user already exists
+            existing_user = User.get_by_credentials(db, last_name, email)
+            if existing_user:
+                # User exists - check if we need to add new lo_root_ids
+                if user_data and user_data.get('lo_root_ids'):
+                    # Get user's current lo_root_ids
+                    current_lo_root_ids = {assoc.lo_root_id for assoc in existing_user.lo_root_ids}
+                    csv_lo_root_ids = set(user_data['lo_root_ids'])
+                    
+                    # Find new lo_root_ids to add
+                    new_lo_root_ids = csv_lo_root_ids - current_lo_root_ids
+                    
+                    if new_lo_root_ids:
+                        # Add new lo_root_ids
+                        for lr_id in new_lo_root_ids:
+                            user_lo_association = UserLORootID(user_id=existing_user.id, lo_root_id=lr_id)
+                            db.add(user_lo_association)
+                        
+                        db.commit()
+                        logger.info(f"Added new lo_root_ids {new_lo_root_ids} to existing user {last_name} ({email})")
+                        flash(f"Welcome back! Your account has been updated with additional access permissions.", "info")
+                    else:
+                        logger.info(f"User {last_name} ({email}) already has all required lo_root_ids")
+                        flash("User already exists. Please try logging in instead.", "warning")
+                else:
+                    flash("User already exists. Please try logging in instead.", "warning")
+                
+                close_db(db)
+                return redirect(url_for('login'))
+            
             logger.debug("Creating new user with email: %s", email)
-            new_user = User(last_name=last_name, email=email)
+            
+            # Create new user with additional data from CSV
+            expiry_date = datetime.utcnow() + timedelta(days=2*365)  # 2 years from now
+            new_user = User(
+                last_name=last_name, 
+                email=email,
+                status='Active',
+                date_added=datetime.utcnow(),
+                expiry_date=expiry_date
+            )
             db.add(new_user)
+            db.flush()  # Get the user ID
+            
+            # Add lo_root_ids from CSV data if available (use the new list format)
+            if user_data and user_data.get('lo_root_ids'):
+                lo_root_ids = user_data['lo_root_ids']  # This is now a list
+                logger.debug(f"Adding lo_root_ids for new user {last_name}: {lo_root_ids}")
+                for lr_id in lo_root_ids:
+                    if lr_id:
+                        user_lo_association = UserLORootID(user_id=new_user.id, lo_root_id=lr_id)
+                        db.add(user_lo_association)
+            
             db.commit()
-            logger.debug("User created successfully")
+            logger.debug(f"User created successfully with {len(user_data.get('lo_root_ids', []))} lo_root_ids")
+            
+            flash("Registration successful! You can now log in.", "success")
             close_db(db)
             return redirect(url_for('login'))
+            
         except Exception as e:
             db.rollback()
             logger.error("Registration error: %s", str(e))
             close_db(db)
-            return f"Registration error: {str(e)}", 400
+            flash("Registration error occurred. Please try again.", "danger")
+            return redirect(url_for('register'))
             
     return render_template('register.html')
 
@@ -589,6 +799,8 @@ def login():
 @login_required
 def program_select():
     # Verify user is logged in (handled by decorator)
+    user_id = session['user_id']
+    
     # Get all available programs from database
     db = get_db()
     try:
@@ -598,30 +810,34 @@ def program_select():
         available_program_codes = []
         
         for chatbot in chatbots:
-            # Determine if NEW badge should be shown
-            show_new = False
-            if chatbot.created_at:
-                # Show NEW if created within the last 14 days (changed from 7 days)
-                if (datetime.now() - chatbot.created_at).days < 14:
-                    show_new = True
-            
-            # Ensure predefined programs BCC, MI, Safety do not show 'NEW' badge
-            if chatbot.code in ['BCC', 'MI', 'SAFETY']:
+            # Check if user has access to this chatbot
+            if has_chatbot_access(user_id, chatbot.code):
+                # Determine if NEW badge should be shown
                 show_new = False
+                if chatbot.created_at:
+                    # Show NEW if created within the last 14 days (changed from 7 days)
+                    if (datetime.now() - chatbot.created_at).days < 14:
+                        show_new = True
+                
+                # Ensure predefined programs BCC, MI, Safety do not show 'NEW' badge
+                if chatbot.code in ['BCC', 'MI', 'SAFETY']:
+                    show_new = False
 
-            program_info = {
-                "code": chatbot.code,
-                "name": chatbot.name,
-                "description": chatbot.description or f"Learn about the {chatbot.name} program content.",
-                "show_new_badge": show_new,
-                "category": chatbot.category or "standard"  # Include category, default to standard
-            }
-            available_programs.append(program_info)
-            available_program_codes.append(chatbot.code)
+                program_info = {
+                    "code": chatbot.code,
+                    "name": chatbot.name,
+                    "description": chatbot.description or f"Learn about the {chatbot.name} program content.",
+                    "show_new_badge": show_new,
+                    "category": chatbot.category or "standard"  # Include category, default to standard
+                }
+                available_programs.append(program_info)
+                available_program_codes.append(chatbot.code)
+            else:
+                logger.debug(f"User {user_id} does not have access to chatbot {chatbot.code}")
         
         available_programs.sort(key=lambda x: x["name"])
         
-        logger.debug(f"Program select page for user: {session.get('user_id')}, showing {len(available_programs)} programs")
+        logger.info(f"Program select page for user: {user_id}, showing {len(available_programs)} accessible programs out of {len(chatbots)} total")
         return render_template('program_select.html', 
                               available_programs=available_programs,
                               available_program_codes=available_program_codes)
@@ -634,11 +850,20 @@ def program_select():
 def set_program(program):
     # Verify if content exists for this program in the database
     program_upper = program.upper()
+    user_id = session['user_id']
+    
     db = get_db()
     try:
         chatbot = ChatbotContent.get_by_code(db, program_upper)
         if not chatbot or not chatbot.is_active:
             logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('program_select'))
+        
+        # Check if user has access to this chatbot
+        if not has_chatbot_access(user_id, program_upper):
+            logger.warning(f"User {user_id} denied access to chatbot {program_upper} - insufficient LO Root ID permissions")
+            flash(f"Access denied: You don't have permission to access the {chatbot.name} program.", "danger")
             close_db(db)
             return redirect(url_for('program_select'))
             
@@ -648,7 +873,6 @@ def set_program(program):
             close_db(db)
             return redirect(url_for('login'))
             
-        user_id = session['user_id']
         logger.debug("Setting program %s for user %s", program, user_id)
         
         # Get user by ID
@@ -676,6 +900,8 @@ def set_program(program):
         
         # Commit changes
         db.commit()
+        
+        logger.info(f"User {user_id} successfully accessed chatbot {program_upper}")
         
         # Cleanup
         close_db(db)
@@ -1591,16 +1817,23 @@ def get_available_chatbots():
     db = get_db()
     try:
         chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
-        return [
-            {
+        result = []
+        for chatbot in chatbots:
+            # Get LO Root IDs for this chatbot
+            lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+            
+            chatbot_data = {
                 "code": chatbot.code,
                 "name": chatbot.name,
                 "display_name": chatbot.name,
                 "description": chatbot.description or "",
                 "quota": chatbot.quota,
-                "intro_message": chatbot.intro_message
-            } for chatbot in chatbots
-        ]
+                "intro_message": chatbot.intro_message,
+                "lo_root_ids": lo_root_ids,  # Add LO Root IDs for admin display
+                "category": chatbot.category or "standard"
+            }
+            result.append(chatbot_data)
+        return result
     finally:
         close_db(db)
 
@@ -1627,8 +1860,18 @@ def get_all_users():
     """Get all users from the database."""
     db = get_db()
     try:
-        users = db.query(User).all()
-        return [user.to_dict() for user in users]
+        from sqlalchemy.orm import joinedload
+        # Explicitly load the lo_root_ids relationship to avoid lazy loading issues
+        users = db.query(User).options(joinedload(User.lo_root_ids)).all()
+        
+        result = []
+        for user in users:
+            user_dict = user.to_dict()
+            # Debug log to verify lo_root_ids are being loaded correctly
+            logger.debug(f"User {user.last_name} ({user.email}) has lo_root_ids: {user_dict['lo_root_ids']}")
+            result.append(user_dict)
+        
+        return result
     finally:
         close_db(db)
 
@@ -2279,6 +2522,24 @@ def admin_upload():
             system_prompt_role=system_prompt_role,
             system_prompt_guidelines=system_prompt_guidelines
         )
+        db.flush()  # Ensure we get the chatbot ID
+        
+        # Handle LO Root IDs for access control
+        lo_root_ids_str = request.form.get('lo_root_ids', '').strip()
+        if lo_root_ids_str:
+            lo_root_ids = [lo_id.strip() for lo_id in lo_root_ids_str.split(';') if lo_id.strip()]
+            logger.info(f"Adding {len(lo_root_ids)} LO Root IDs for access control: {lo_root_ids}")
+            
+            for lo_root_id in lo_root_ids:
+                if lo_root_id:  # Ensure it's not empty
+                    association = ChatbotLORootAssociation(
+                        chatbot_id=new_chatbot.id,
+                        lo_root_id=lo_root_id
+                    )
+                    db.add(association)
+        else:
+            logger.info("No LO Root IDs specified - chatbot will be accessible to all users")
+        
         db.commit()
         
         # Reload program content in memory to include the new chatbot
@@ -2764,6 +3025,67 @@ def admin_update_category():
         if db: db.rollback()
         logger.error(f"Error in admin_update_category: {e}", exc_info=True)
         return jsonify({"success": False, "error": f"An unexpected error occurred: {str(e)}"}), 500
+    finally:
+        if db: close_db(db)
+
+@app.route('/admin/update_lo_root_ids', methods=['POST'])
+@requires_auth
+def admin_update_lo_root_ids():
+    """Update the LO Root IDs for an existing chatbot."""
+    db = get_db()
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+            
+        chatbot_code = data.get('chatbot_code')
+        lo_root_ids_str = data.get('lo_root_ids', '').strip()
+        
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+        
+        # Parse LO Root IDs from semicolon-separated string
+        lo_root_ids = []
+        if lo_root_ids_str:
+            lo_root_ids = [lo_id.strip() for lo_id in lo_root_ids_str.split(';') if lo_id.strip()]
+        
+        # Remove existing LO Root ID associations
+        db.query(ChatbotLORootAssociation).filter(
+            ChatbotLORootAssociation.chatbot_id == chatbot.id
+        ).delete()
+        
+        # Add new LO Root ID associations
+        for lo_root_id in lo_root_ids:
+            if lo_root_id:  # Ensure it's not empty
+                association = ChatbotLORootAssociation(
+                    chatbot_id=chatbot.id,
+                    lo_root_id=lo_root_id
+                )
+                db.add(association)
+        
+        db.commit()
+        
+        # Reload content to reflect changes
+        load_program_content()
+        
+        logger.info(f"Successfully updated LO Root IDs for chatbot {chatbot_code}: {lo_root_ids}")
+        
+        # Provide helpful feedback message
+        if lo_root_ids:
+            message = f"Access control updated! Only users with LO Root IDs [{', '.join(lo_root_ids)}] can access this chatbot."
+        else:
+            message = "Access control removed! All users can now access this chatbot."
+            
+        return jsonify({"success": True, "message": message})
+        
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_update_lo_root_ids: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if db: close_db(db)
 
@@ -3405,44 +3727,80 @@ def get_users():
 @app.route('/admin/edit_user', methods=['POST'])
 @requires_auth
 def edit_user():
+    """Edit an existing user."""
+    db = get_db()
     try:
-        user_id = request.form.get('user_id')
-        last_name = request.form.get('last_name')
-        email = request.form.get('email')
-        status = request.form.get('status')
-        expiry_date = request.form.get('expiry_date')
-        lo_root_ids = request.form.get('lo_root_ids', '').strip()
+        # Handle both JSON and form data
+        if request.is_json:
+            data = request.get_json()
+            user_id = data.get('user_id')
+            last_name = data.get('last_name')
+            email = data.get('email')
+            status = data.get('status')
+            expiry_date_str = data.get('expiry_date')
+            lo_root_ids_str = data.get('lo_root_ids', '')
+        else:
+            # Handle form data (original format)
+            user_id = request.form.get('user_id')
+            last_name = request.form.get('last_name')
+            email = request.form.get('email')
+            status = request.form.get('status')
+            expiry_date_str = request.form.get('expiry_date')
+            lo_root_ids_str = request.form.get('lo_root_ids', '').strip()
 
-        db = get_db()
-        user = db.query(User).filter(User.id == user_id).first()
-        
+        if not user_id:
+            return jsonify({"success": False, "error": "User ID is required"}), 400
+
+        user = User.get_by_id(db, user_id)
         if not user:
-            return jsonify({'success': False, 'error': 'User not found'})
+            return jsonify({"success": False, "error": "User not found"}), 404
 
-        # Update user information
-        user.last_name = last_name
-        user.email = email
-        user.status = status
-        if expiry_date:
-            user.expiry_date = datetime.strptime(expiry_date, '%Y-%m-%d').date()
+        # Update basic fields
+        if last_name:
+            user.last_name = last_name
+        if email:
+            user.email = email
+        if status:
+            user.status = status
 
-        # Update LO Root IDs
-        if lo_root_ids:
-            # Delete existing associations
-            db.query(UserLORootID).filter(UserLORootID.user_id == user_id).delete()
+        # Update expiry date
+        if expiry_date_str:
+            try:
+                expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d').date()
+                user.expiry_date = expiry_date
+            except ValueError:
+                return jsonify({"success": False, "error": "Invalid expiry date format"}), 400
+
+        # Handle LO Root IDs - FIXED PARSING
+        # Remove existing LO Root ID associations
+        db.query(UserLORootID).filter(UserLORootID.user_id == user.id).delete()
+
+        # Parse and add new LO Root IDs (support both semicolon and comma separation for compatibility)
+        if lo_root_ids_str.strip():
+            # Split by semicolon first, then by comma as fallback
+            if ';' in lo_root_ids_str:
+                lo_root_ids = [lo_id.strip() for lo_id in lo_root_ids_str.split(';') if lo_id.strip()]
+            else:
+                lo_root_ids = [lo_id.strip() for lo_id in lo_root_ids_str.split(',') if lo_id.strip()]
             
-            # Add new associations
-            lo_root_id_list = [id.strip() for id in lo_root_ids.split(';') if id.strip()]
-            for lo_root_id in lo_root_id_list:
-                db.add(UserLORootID(user_id=user.id, lo_root_id=lo_root_id))
+            logger.info(f"🔧 Updating user {user_id} LO Root IDs: {lo_root_ids}")
+
+            for lo_root_id in lo_root_ids:
+                if lo_root_id:  # Ensure it's not empty
+                    association = UserLORootID(user_id=user.id, lo_root_id=lo_root_id)
+                    db.add(association)
+                    logger.info(f"✅ Added LO Root ID {lo_root_id} for user {user_id}")
 
         db.commit()
-        return jsonify({'success': True})
+        logger.info(f"Successfully updated user: {user_id}")
+        return jsonify({"success": True, "message": "User updated successfully!"})
+
     except Exception as e:
-        db.rollback()
-        return jsonify({'success': False, 'error': str(e)})
+        if db: db.rollback()
+        logger.error(f"Error in edit_user: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
-        db.close()
+        if db: close_db(db)
 
 @app.route('/debug_quota/<program_code>')
 @requires_auth
@@ -3466,51 +3824,310 @@ def debug_quota(program_code):
             ChatHistory.program_code == program_code
         ).order_by(ChatHistory.timestamp.desc()).all()
         
-        # Count today's messages using UTC
-        from datetime import timezone
-        today_utc = datetime.now(timezone.utc).date()
-        today_start_utc = datetime.combine(today_utc, datetime.min.time()).replace(tzinfo=timezone.utc)
-        today_end_utc = datetime.combine(today_utc, datetime.max.time()).replace(tzinfo=timezone.utc)
-        
-        today_messages = db.query(ChatHistory).filter(
-            ChatHistory.user_id == user_id,
-            ChatHistory.program_code == program_code,
-            ChatHistory.timestamp >= today_start_utc,
-            ChatHistory.timestamp <= today_end_utc
-        ).all()
+        # Get today's messages using UTC
+        today_utc = datetime.utcnow().date()
+        today_messages = [h for h in all_history if h.timestamp.date() == today_utc]
         
         debug_info = {
-            "user_id": user_id,
             "program_code": program_code,
-            "program_name": chatbot.name,
+            "user_id": user_id,
             "quota": chatbot.quota,
-            "today_utc": today_utc.isoformat(),
-            "today_start_utc": today_start_utc.isoformat(),
-            "today_end_utc": today_end_utc.isoformat(),
-            "total_messages_count": len(all_history),
-            "today_messages_count": len(today_messages),
-            "remaining_questions": max(0, chatbot.quota - len(today_messages)),
-            "all_messages": [
+            "total_messages_ever": len(all_history),
+            "today_message_count": len(today_messages),
+            "remaining_today": max(0, chatbot.quota - len(today_messages)),
+            "today_date_utc": today_utc.isoformat(),
+            "server_time_utc": datetime.utcnow().isoformat(),
+            "recent_messages": [
                 {
-                    "id": h.id,
-                    "timestamp": h.timestamp.isoformat() if h.timestamp else None,
-                    "user_message": h.user_message[:100] + "..." if len(h.user_message) > 100 else h.user_message,
-                    "is_today": today_start_utc <= h.timestamp <= today_end_utc if h.timestamp else False
-                }
-                for h in all_history[:20]  # Show last 20 messages
-            ],
-            "today_messages": [
-                {
-                    "id": h.id,
-                    "timestamp": h.timestamp.isoformat() if h.timestamp else None,
+                    "timestamp": h.timestamp.isoformat(),
+                    "date": h.timestamp.date().isoformat(),
                     "user_message": h.user_message[:100] + "..." if len(h.user_message) > 100 else h.user_message
                 }
-                for h in today_messages
+                for h in today_messages[:5]
             ]
         }
         
         return jsonify(debug_info)
         
+    except Exception as e:
+        logger.error(f"Debug quota error: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        close_db(db)
+
+@app.route('/admin/upload_authorized_users_csv', methods=['POST'])
+@requires_auth
+def admin_upload_authorized_users_csv():
+    """Upload and replace the authorized users CSV file"""
+    if 'file' not in request.files:
+        flash('No file part', 'error')
+        return redirect(url_for('admin'))
+    
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file', 'error')
+        return redirect(url_for('admin'))
+
+    if not file or not file.filename.endswith('.csv'):
+        flash('Invalid file type. Please upload a CSV file.', 'error')
+        return redirect(url_for('admin'))
+
+    try:
+        # Read and validate CSV
+        csv_content = file.read().decode('utf-8-sig')
+        df = pd.read_csv(StringIO(csv_content))
+        
+        # Validate required columns
+        required_columns = ['last_name', 'email', 'status', 'lo_root_id']
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            flash(f'Error: Missing required columns: {", ".join(missing_cols)}', 'error')
+            return redirect(url_for('admin'))
+
+        # Count active users
+        active_users = df[df['status'].str.lower() == 'active']
+        active_count = len(active_users)
+        
+        if active_count == 0:
+            flash('Error: No active users found in the CSV file.', 'error')
+            return redirect(url_for('admin'))
+
+        # Save the CSV file
+        with open(AUTHORIZED_USERS_CSV, 'w', encoding='utf-8-sig') as f:
+            f.write(csv_content)
+        
+        # Clear cache to force reload
+        global authorized_users_cache, authorized_users_last_modified
+        authorized_users_cache = {}
+        authorized_users_last_modified = None
+        
+        flash(f'Authorized users CSV uploaded successfully! {active_count} active users loaded.', 'success')
+        logger.info(f"Authorized users CSV updated with {active_count} active users")
+        
+    except Exception as e:
+        flash(f'Error processing CSV file: {str(e)}', 'error')
+        logger.error(f"Error uploading authorized users CSV: {e}")
+    
+    return redirect(url_for('admin'))
+
+@app.route('/admin/download_authorized_users_csv')
+@requires_auth
+def admin_download_authorized_users_csv():
+    """Download the current authorized users CSV file"""
+    try:
+        if not os.path.exists(AUTHORIZED_USERS_CSV):
+            flash('No authorized users CSV file found.', 'error')
+            return redirect(url_for('admin'))
+        
+        return send_file(
+            AUTHORIZED_USERS_CSV,
+            as_attachment=True,
+            download_name='authorized_users.csv',
+            mimetype='text/csv'
+        )
+    except Exception as e:
+        flash(f'Error downloading CSV file: {str(e)}', 'error')
+        return redirect(url_for('admin'))
+
+@app.route('/admin/authorized_users_status')
+@requires_auth
+def admin_authorized_users_status():
+    """Get status information about the authorized users CSV"""
+    try:
+        status_info = {
+            "file_exists": os.path.exists(AUTHORIZED_USERS_CSV),
+            "total_users": 0,
+            "active_users": 0,
+            "last_modified": None
+        }
+        
+        if status_info["file_exists"]:
+            # Get file modification time
+            mtime = os.path.getmtime(AUTHORIZED_USERS_CSV)
+            status_info["last_modified"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Load and count users
+            authorized_users = load_authorized_users()
+            status_info["active_users"] = len(authorized_users)
+            
+            # Count total users in file
+            try:
+                df = pd.read_csv(AUTHORIZED_USERS_CSV)
+                status_info["total_users"] = len(df)
+            except Exception:
+                pass
+        
+        return jsonify(status_info)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/debug_user/<int:user_id>')
+@requires_auth
+def debug_user(user_id):
+    """Debug route to check a specific user's lo_root_ids"""
+    db = get_db()
+    try:
+        from sqlalchemy.orm import joinedload
+        
+        # Get user with explicit lo_root_ids loading
+        user = db.query(User).options(joinedload(User.lo_root_ids)).filter(User.id == user_id).first()
+        
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Get raw lo_root_id associations
+        raw_associations = db.query(UserLORootID).filter(UserLORootID.user_id == user_id).all()
+        
+        debug_info = {
+            "user_id": user.id,
+            "last_name": user.last_name,
+            "email": user.email,
+            "lo_root_ids_from_relationship": [assoc.lo_root_id for assoc in user.lo_root_ids],
+            "lo_root_ids_from_direct_query": [assoc.lo_root_id for assoc in raw_associations],
+            "to_dict_result": user.to_dict(),
+            "raw_associations_count": len(raw_associations),
+            "relationship_count": len(user.lo_root_ids)
+        }
+        
+        return jsonify(debug_info)
+        
+    except Exception as e:
+        logger.error(f"Debug user error: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        close_db(db)
+
+@app.route('/debug_access_control')
+@requires_auth
+def debug_access_control():
+    """Emergency debug route to check access control state"""
+    db = get_db()
+    try:
+        # Get all users with their LO Root IDs
+        users = db.query(User).all()
+        user_data = []
+        for user in users:
+            user_lo_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
+            user_data.append({
+                'id': user.id,
+                'name': user.last_name,
+                'email': user.email,
+                'lo_root_ids': user_lo_ids
+            })
+        
+        # Get all chatbots with their LO Root IDs
+        chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
+        chatbot_data = []
+        for chatbot in chatbots:
+            chatbot_lo_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+            chatbot_data.append({
+                'code': chatbot.code,
+                'name': chatbot.name,
+                'lo_root_ids': chatbot_lo_ids
+            })
+        
+        return jsonify({
+            'users': user_data,
+            'chatbots': chatbot_data,
+            'message': 'Emergency debug data - check console logs'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        close_db(db)
+
+@app.route('/emergency_disable_access_control')
+@requires_auth
+def emergency_disable_access_control():
+    """EMERGENCY: Temporarily disable access control for all chatbots"""
+    db = get_db()
+    try:
+        # Remove all LO Root ID associations from all chatbots
+        db.query(ChatbotLORootAssociation).delete()
+        db.commit()
+        
+        # Reload program content
+        load_program_content()
+        
+        logger.warning("🚨 EMERGENCY: Access control disabled for ALL chatbots!")
+        return jsonify({
+            'success': True, 
+            'message': 'EMERGENCY: Access control temporarily disabled. All users can now access all chatbots.'
+        })
+        
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        close_db(db)
+
+@app.route('/emergency_fix_user_lo_ids')
+@requires_auth
+def emergency_fix_user_lo_ids():
+    """EMERGENCY: Fix malformed LO Root IDs for users"""
+    db = get_db()
+    try:
+        fixed_users = []
+        
+        # Get all users
+        users = db.query(User).all()
+        
+        for user in users:
+            user_lo_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
+            needs_fix = False
+            
+            # Check for malformed LO Root IDs (containing commas or semicolons)
+            for lo_id in user_lo_ids:
+                if ',' in lo_id or ';' in lo_id:
+                    needs_fix = True
+                    logger.warning(f"🔧 Found malformed LO Root ID for user {user.id} ({user.last_name}): {lo_id}")
+                    
+                    # Delete the malformed association
+                    db.query(UserLORootID).filter(
+                        UserLORootID.user_id == user.id,
+                        UserLORootID.lo_root_id == lo_id
+                    ).delete()
+                    
+                    # Split and add correct IDs
+                    if ',' in lo_id:
+                        split_ids = [id.strip() for id in lo_id.split(',') if id.strip()]
+                    else:
+                        split_ids = [id.strip() for id in lo_id.split(';') if id.strip()]
+                    
+                    for new_id in split_ids:
+                        if new_id:  # Ensure it's not empty
+                            # Check if this association already exists
+                            existing = db.query(UserLORootID).filter(
+                                UserLORootID.user_id == user.id,
+                                UserLORootID.lo_root_id == new_id
+                            ).first()
+                            
+                            if not existing:
+                                new_assoc = UserLORootID(user_id=user.id, lo_root_id=new_id)
+                                db.add(new_assoc)
+                                logger.info(f"✅ Added correct LO Root ID for user {user.id}: {new_id}")
+            
+            if needs_fix:
+                fixed_users.append({
+                    'user_id': user.id,
+                    'name': user.last_name,
+                    'email': user.email
+                })
+        
+        db.commit()
+        
+        logger.warning(f"🚨 EMERGENCY FIX: Fixed LO Root IDs for {len(fixed_users)} users")
+        return jsonify({
+            'success': True,
+            'message': f'Fixed LO Root IDs for {len(fixed_users)} users',
+            'fixed_users': fixed_users
+        })
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error fixing user LO IDs: {e}")
+        return jsonify({'error': str(e)}), 500
     finally:
         close_db(db)
 

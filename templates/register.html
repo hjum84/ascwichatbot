@@ -55,38 +55,20 @@
             color: #0073b1;
             text-decoration: none;
         }
-        
-        .programs-list {
-            margin-top: 20px;
-            text-align: left;
-            font-size: 14px;
-            color: #666;
-        }
-        
-        .programs-list h3 {
-            font-size: 16px;
-            margin-bottom: 5px;
-            color: #333;
-        }
-        
-        .programs-list ul {
-            padding-left: 20px;
-            margin: 0;
-        }
     </style>
 </head>
 <body>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            <div style="padding: 10px; margin-bottom: 15px; border-radius: 5px; text-align: center; max-width: 350px; margin-left:auto; margin-right:auto;">
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category if category else 'info' }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem; margin-bottom: 5px;">{{ message }}</div>
-            {% endfor %}
-            </div>
-        {% endif %}
-    {% endwith %}
-
     <div class="register-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div style="width: 100%; text-align: center; margin-bottom: 15px;">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category | default('info') }}" style="background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; padding: .75rem 1.25rem; border-radius: 5px; margin-bottom: 5px;">{{ message }}</div>
+                {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <h2>Register for Chatbots</h2>
         <form action="/register" method="POST">
             <input type="text" id="last_name" name="last_name" placeholder="Last Name" required>
@@ -95,15 +77,6 @@
         </form>
         <div class="login-link">
             <p>Already registered? <a href="{{ url_for('login') }}">Sign-In</a></p>
-        </div>
-        
-        <div class="programs-list">
-            <h3>Available Learning Programs:</h3>
-            <ul>
-                <li>Building Coaching Competency (BCC)</li>
-                <li>Motivational Interviewing (MI)</li>
-                <li>Safety and Risk Assessment</li>
-            </ul>
         </div>
     </div>
 </body>

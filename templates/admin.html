@@ -244,6 +244,26 @@
                                                         <!-- Intro Message Section -->
                                                         <div class="row mt-2">
                                                             <div class="col-12">
+                                                                <!-- LO Root ID Management Section -->
+                                                                <div class="update-lo-root-form mb-3">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="mb-3">
+                                                                        <label for="lo_root_ids_{{ chatbot.name }}" class="form-label">
+                                                                            <i class="bi bi-shield-lock"></i> <strong>LO Root IDs (Access Control):</strong>
+                                                                        </label>
+                                                                        <textarea class="form-control lo-root-field" id="lo_root_ids_{{ chatbot.name }}" rows="3" placeholder="Enter LO Root IDs separated by semicolons">{{ chatbot.lo_root_ids | join(';') if chatbot.lo_root_ids else '' }}</textarea>
+                                                                        <div class="form-text">
+                                                                            <i class="bi bi-info-circle"></i> 
+                                                                            <strong>Access Control:</strong> Only users with matching LO Root IDs can access this chatbot.<br>
+                                                                            <strong>Format:</strong> Enter multiple IDs separated by semicolons (;)<br>
+                                                                            <small class="text-muted">Leave empty to allow access for all users</small>
+                                                                        </div>
+                                                                    </div>
+                                                                    <button type="button" class="btn btn-sm btn-warning update-lo-root-btn">
+                                                                        <i class="bi bi-shield-check"></i> Update Access Control
+                                                                    </button>
+                                                                </div>
+                                                                
                                                                 <div class="update-intro-form mb-3">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
                                                                     <div class="mb-3">
@@ -354,6 +374,19 @@
                                                     <span class="input-group-text">questions per day</span>
                                                 </div>
                                                 <div class="form-text">Maximum number of questions a user can ask per day. Default is 3.</div>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label for="lo_root_ids" class="form-label">
+                                                    <i class="bi bi-shield-lock"></i> LO Root IDs (Access Control)
+                                                </label>
+                                                <textarea class="form-control" id="lo_root_ids" name="lo_root_ids" rows="3" placeholder="Enter LO Root IDs separated by semicolons (optional)"></textarea>
+                                                <div class="form-text">
+                                                    <strong>Access Control:</strong> Only users with matching LO Root IDs can access this chatbot.<br>
+                                                    <strong>Format:</strong> Enter multiple IDs separated by semicolons (;)<br>
+                                                    <strong>Example:</strong> <code>5f09de4c-51f4-4296-a9aa-55ccb46a7f59;9412df89-80fb-4432-81ce-b521572aba71</code><br>
+                                                    <small class="text-muted">Leave empty to allow access for all users</small>
+                                                </div>
                                             </div>
                                             
                                             <div class="mb-3">
@@ -583,6 +616,87 @@
                                         <div class="tab-content" id="dataMgmtTabsContent">
                                             <!-- User Management -->
                                             <div class="tab-pane fade show active" id="users-mgmt" role="tabpanel">
+                                                <!-- Authorized Users CSV Management Section -->
+                                                <div class="card mb-4">
+                                                    <div class="card-header">
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <h6 class="mb-0">
+                                                                <i class="bi bi-file-earmark-spreadsheet"></i> Registration Authorization Management
+                                                            </h6>
+                                                            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#csvManagement" aria-expanded="false">
+                                                                <i class="bi bi-chevron-down"></i> Manage CSV
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="collapse" id="csvManagement">
+                                                        <div class="card-body">
+                                                            <div class="alert alert-info">
+                                                                <i class="bi bi-info-circle"></i> 
+                                                                <strong>CSV-based Registration Control:</strong> Only users listed in the authorized CSV file with 'active' status can register. 
+                                                                Upload a new CSV to update registration permissions.
+                                                            </div>
+                                                            
+                                                            <!-- CSV Status Display -->
+                                                            <div class="row mb-3">
+                                                                <div class="col-md-6">
+                                                                    <div class="card border-0 bg-light">
+                                                                        <div class="card-body py-2">
+                                                                            <h6 class="card-title mb-1">CSV File Status</h6>
+                                                                            <div id="csvStatus">
+                                                                                <span class="text-muted">Loading status...</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-md-6">
+                                                                    <div class="card border-0 bg-light">
+                                                                        <div class="card-body py-2">
+                                                                            <h6 class="card-title mb-1">Required CSV Format</h6>
+                                                                            <small class="text-muted">
+                                                                                Columns: <code>last_name, email, status, lo_root_id</code><br>
+                                                                                Status: <code>active</code> or <code>inactive</code>
+                                                                            </small>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <!-- CSV Management Actions -->
+                                                            <div class="row">
+                                                                <div class="col-md-6">
+                                                                    <h6>Upload New Authorized Users CSV</h6>
+                                                                    <form action="{{ url_for('admin_upload_authorized_users_csv') }}" method="post" enctype="multipart/form-data" id="csvUploadForm">
+                                                                        <div class="input-group mb-3">
+                                                                            <input type="file" class="form-control" name="file" accept=".csv" required id="csvFileInput">
+                                                                            <button type="submit" class="btn btn-primary">
+                                                                                <i class="bi bi-upload"></i> Upload CSV
+                                                                            </button>
+                                                                        </div>
+                                                                        <div class="form-text">
+                                                                            <i class="bi bi-exclamation-triangle"></i> 
+                                                                            This will replace the current CSV file and affect registration permissions immediately.
+                                                                        </div>
+                                                                    </form>
+                                                                </div>
+                                                                <div class="col-md-6">
+                                                                    <h6>Download Current CSV</h6>
+                                                                    <div class="d-grid">
+                                                                        <a href="{{ url_for('admin_download_authorized_users_csv') }}" class="btn btn-outline-secondary mb-2" id="downloadCsvBtn">
+                                                                            <i class="bi bi-download"></i> Download Current CSV
+                                                                        </a>
+                                                                        <button type="button" class="btn btn-info btn-sm" onclick="refreshCsvStatus()">
+                                                                            <i class="bi bi-arrow-clockwise"></i> Refresh Status
+                                                                        </button>
+                                                                    </div>
+                                                                    <div class="form-text">
+                                                                        Download the current file for editing or backup purposes.
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
                                                 <div class="d-flex justify-content-between mb-2">
                                                     <h5>User List</h5>
                                                     <div>
@@ -689,6 +803,7 @@
                                                                 <div class="mb-3">
                                                                     <label for="loRootIds" class="form-label">LO Root IDs (semicolon-separated)</label>
                                                                     <input type="text" class="form-control" id="loRootIds" placeholder="e.g. ID1;ID2;ID3">
+                                                                    <div class="form-text">Separate multiple IDs with semicolons (;)</div>
                                                                 </div>
                                                             </form>
                                                         </div>
@@ -1202,8 +1317,68 @@
                 addUser: "/admin/add_user",
                 getUsers: "/admin/get_users",
                 editUser: "/admin/edit_user",
-                adminBase: "{{ url_for('admin') }}"
+                adminBase: "{{ url_for('admin') }}",
+                csvUpload: "{{ url_for('admin_upload_authorized_users_csv') }}",
+                csvDownload: "{{ url_for('admin_download_authorized_users_csv') }}",
+                csvStatus: "{{ url_for('admin_authorized_users_status') }}"
             };
+            
+            // CSV Management Functions
+            function refreshCsvStatus() {
+                const statusDiv = document.getElementById('csvStatus');
+                const downloadBtn = document.getElementById('downloadCsvBtn');
+                
+                statusDiv.innerHTML = '<span class="text-muted"><i class="bi bi-arrow-clockwise spinning"></i> Checking status...</span>';
+                
+                fetch(window.adminUrls.csvStatus)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            statusDiv.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${data.error}</span>`;
+                            return;
+                        }
+                        
+                        let statusHtml = '';
+                        if (data.file_exists) {
+                            statusHtml = `
+                                <div class="text-success mb-1">
+                                    <i class="bi bi-check-circle"></i> CSV file exists
+                                </div>
+                                <small class="text-muted">
+                                    <strong>Active Users:</strong> ${data.active_users} / ${data.total_users} total<br>
+                                    <strong>Last Modified:</strong> ${data.last_modified || 'Unknown'}
+                                </small>
+                            `;
+                            downloadBtn.classList.remove('disabled');
+                        } else {
+                            statusHtml = `
+                                <div class="text-warning">
+                                    <i class="bi bi-exclamation-triangle"></i> No CSV file found
+                                </div>
+                                <small class="text-muted">Upload a CSV file to enable registration control</small>
+                            `;
+                            downloadBtn.classList.add('disabled');
+                        }
+                        statusDiv.innerHTML = statusHtml;
+                    })
+                    .catch(error => {
+                        console.error('Error checking CSV status:', error);
+                        statusDiv.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Failed to check status</span>';
+                    });
+            }
+            
+            // Add spinning animation for refresh button
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                .spinning {
+                    animation: spin 1s linear infinite;
+                }
+            `;
+            document.head.appendChild(style);
         </script>
         
         <!-- External JavaScript file -->
@@ -1212,8 +1387,28 @@
         <script>
             // Only keep page-specific JavaScript here if needed
             document.addEventListener('DOMContentLoaded', function() {
+                // Load CSV status when page loads
+                refreshCsvStatus();
+                
+                // Add event listener for CSV upload form
+                const csvUploadForm = document.getElementById('csvUploadForm');
+                if (csvUploadForm) {
+                    csvUploadForm.addEventListener('submit', function(e) {
+                        const fileInput = document.getElementById('csvFileInput');
+                        if (!fileInput.files.length) {
+                            e.preventDefault();
+                            alert('Please select a CSV file to upload.');
+                            return;
+                        }
+                        
+                        const submitBtn = csvUploadForm.querySelector('button[type="submit"]');
+                        submitBtn.innerHTML = '<i class="bi bi-arrow-clockwise spinning"></i> Uploading...';
+                        submitBtn.disabled = true;
+                    });
+                }
+                
                 // Any remaining page-specific JS can stay here
-        });
-    </script>
+            });
+        </script>
 </body>
 </html> 

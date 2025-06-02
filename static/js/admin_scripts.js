@@ -878,6 +878,66 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // Update LO Root IDs
+    document.querySelectorAll('.update-lo-root-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const parentForm = this.closest('.update-lo-root-form');
+            const chatbotName = parentForm.querySelector('.chatbot-name').value;
+            const loRootIds = parentForm.querySelector('.lo-root-field').value.trim();
+
+            // Show a brief loading indicator on the button
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+            this.disabled = true;
+
+            fetch('/admin/update_lo_root_ids', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    chatbot_code: chatbotName,
+                    lo_root_ids: loRootIds
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Reset button state
+                this.innerHTML = originalText;
+                this.disabled = false;
+                
+                if (data.success) {
+                    // Show temporary success message next to the button
+                    const successMsg = document.createElement('span');
+                    successMsg.className = 'text-success ms-2';
+                    successMsg.innerHTML = '<i class="bi bi-check-circle"></i> Access Control Updated!';
+                    this.parentNode.appendChild(successMsg);
+                    
+                    // Remove success message after 3 seconds
+                    setTimeout(() => {
+                        successMsg.remove();
+                    }, 3000);
+                    
+                    // Show additional info about access control
+                    if (loRootIds) {
+                        console.log(`Access control updated for ${chatbotName}: ${loRootIds.split(';').length} LO Root IDs`);
+                    } else {
+                        console.log(`Access control removed for ${chatbotName}: All users can now access`);
+                    }
+                } else {
+                    alert('Error: ' + (data.error || 'Could not update LO Root IDs.'));
+                }
+            })
+            .catch(error => {
+                // Reset button state
+                this.innerHTML = originalText;
+                this.disabled = false;
+                alert('Network error while updating LO Root IDs. Please try again.');
+                console.error('Error updating LO Root IDs:', error);
+            });
+        });
+    });
+
     // Preview Files button handler in edit modal
     document.getElementById('editPreviewBtn').addEventListener('click', function() {
         const fileInput = document.getElementById('editFiles');

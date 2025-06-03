@@ -29,6 +29,7 @@ import pandas as pd
 from io import StringIO, BytesIO
 from sqlalchemy import func
 import markdown2  # Add markdown2 for markdown parsing
+import pytz  # Add pytz for timezone conversion
 
 # For file content extraction - try to import, but don't fail if not available
 try:
@@ -66,6 +67,62 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Initialize Flask application
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
+
+# Add Jinja2 template filter for timezone conversion
+@app.template_filter('to_eastern')
+def to_eastern_time(dt):
+    """Convert datetime to Eastern Time"""
+    if dt is None:
+        return ''
+    
+    # Handle string timestamps
+    if isinstance(dt, str):
+        try:
+            # Try to parse common timestamp formats
+            dt = dt.strip()
+            
+            # Handle 'N/A' or empty strings
+            if dt in ['N/A', '', 'None', 'null']:
+                return ''
+            
+            # Try different datetime formats
+            formats = [
+                '%Y-%m-%d %H:%M:%S.%f',  # With microseconds
+                '%Y-%m-%d %H:%M:%S',     # Standard format
+                '%Y-%m-%d %H:%M',        # Without seconds
+                '%Y-%m-%d',              # Date only
+                '%m/%d/%Y %H:%M:%S',     # US format with time
+                '%m/%d/%Y',              # US date format
+            ]
+            
+            parsed_dt = None
+            for fmt in formats:
+                try:
+                    parsed_dt = datetime.datetime.strptime(dt, fmt)
+                    break
+                except ValueError:
+                    continue
+            
+            if parsed_dt is None:
+                # If all formats fail, return the original string
+                return dt
+            
+            dt = parsed_dt
+            
+        except Exception as e:
+            # If parsing fails, return the original string
+            return dt
+    
+    # If datetime is naive (no timezone info), assume it's UTC
+    if dt.tzinfo is None:
+        dt = pytz.utc.localize(dt)
+    
+    # Convert to Eastern Time
+    eastern = pytz.timezone('US/Eastern')
+    eastern_time = dt.astimezone(eastern)
+    
+    # Format as desired
+    return eastern_time.strftime('%Y-%m-%d %H:%M:%S ET')
 
 # Configuration for authorized users CSV file
 AUTHORIZED_USERS_CSV = os.path.join(os.path.dirname(__file__), 'authorized_users.csv')
@@ -1499,12 +1556,12 @@ def get_paired_conversations(db, page=1, per_page=10):
         
         pair_data = {
             'user_id': current_msg.user_id,  # Include user_id for filtering
-            'user_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
+            'user_timestamp': current_msg.timestamp if current_msg.timestamp else 'N/A',
             'user_name': user_name,
             'user_email': user_email,
             'chatbot_name': chatbot_name_display,
             'user_message': current_msg.user_message,
-            'bot_timestamp': current_msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') if current_msg.timestamp else 'N/A',
+            'bot_timestamp': current_msg.timestamp if current_msg.timestamp else 'N/A',
             'bot_message': current_msg.bot_message
         }
         

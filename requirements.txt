@@ -16,6 +16,7 @@ psycopg2-binary==2.9.6
 waitress==2.1.2
 pillow==9.5.0
 requests==2.31.0
+pytz==2023.3
 
 # File processing packages - optional
 textract==1.6.5

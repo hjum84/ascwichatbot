@@ -283,6 +283,7 @@
                                                                             <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
                                                                             <option value="tap" {% if chatbot is defined and chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
                                                                             <option value="jsa" {% if chatbot is defined and chatbot.category == 'jsa' %}selected{% endif %}>JSA Programs</option>
+                                                                            <option value="ild" {% if chatbot is defined and chatbot.category == 'ild' %}selected{% endif %}>ILD Programs</option>
                                                                             <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
                                                                         </select>
                                                                         <button type="button" class="btn btn-secondary update-category-btn">
@@ -401,6 +402,7 @@
                                                     <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
                                                     <option value="tap" {% if chatbot is defined and chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
                                                     <option value="jsa" {% if chatbot is defined and chatbot.category == 'jsa' %}selected{% endif %}>JSA Programs</option>
+                                                    <option value="ild" {% if chatbot is defined and chatbot.category == 'ild' %}selected{% endif %}>ILD Programs</option>
                                                     <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
                                                 </select>
                                                 <div class="form-text">Category determines how the program is grouped on the selection page</div>

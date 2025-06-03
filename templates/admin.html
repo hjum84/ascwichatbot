@@ -111,7 +111,6 @@
                                                         {{ db_stats.percent_used }}% of {{ db_stats.max_size_pretty }} Used
                                                     </div>
                                                 </div>
-
                                                 <h6><i class="bi bi-pie-chart-fill"></i> Storage Breakdown by Data Type (% of Maximum Capacity)</h6>
                                                 <p class="small text-muted">Shows how storage is distributed between chat history and other data</p>
                                                 <div class="progress mb-3">
@@ -126,7 +125,6 @@
                                                         Other Data ({{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}%)
                                                     </div>
                                                 </div>
-
                                                 <p class="small text-muted">
                                                     <i class="bi bi-info-circle"></i> Maximum database size is set to {{ db_stats.max_size_pretty }}. 
                                                     <span class="{{ 'text-danger' if db_stats.percent_used > 80 else '' }}">
@@ -143,7 +141,6 @@
                                                 <p><strong>Last Updated:</strong> {{ db_stats.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
                                             </div>
                                         </div>
-
                                         <div class="mt-4">
                                             <h5><i class="bi bi-info-circle"></i> About Database Limits</h5>
                                             <p>Your database is hosted on Render with a maximum capacity of {{ db_stats.max_size_pretty }}. Storage usage is monitored automatically, and alerts will be displayed when approaching capacity limits.</p>
@@ -154,7 +151,6 @@
                                                 <li>Navigate to the database settings</li>
                                                 <li>Upgrade your database plan or increase storage capacity</li>
                                             </ol>
-
                                             <div class="alert alert-info">
                                                 <i class="bi bi-lightbulb"></i> <strong>Tip:</strong> Regular monitoring of database usage helps prevent unexpected service interruptions due to storage limits.
                                             </div>
@@ -162,7 +158,6 @@
                                     </div>
                                 </div>
                             </div>
-
                             <!-- MANAGE EXISTING CHATBOTS TAB -->
                             <div class="tab-pane fade show active" id="manage-content" role="tabpanel" aria-labelledby="manage-tab">
                                 <div class="card mb-4">
@@ -174,126 +169,172 @@
                                             <strong>Note:</strong> Here you can manage all your active chatbots. You can edit content, update descriptions, set quotas, or delete chatbots.
                                         </div>
                                         
+                                        <!-- Search and Stats Bar -->
+                                        <div class="chatbot-search-container">
+                                            <div class="chatbot-search-box">
+                                                <input type="text" class="form-control" id="chatbotSearchInput" placeholder="Search chatbots by name, ID, or category...">
+                                                <i class="bi bi-search search-icon"></i>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="chatbot-stats-bar">
+                                            <div class="chatbot-count">
+                                                <i class="bi bi-robot"></i> Total Chatbots: <span id="totalChatbotCount">{{ available_chatbots|length if available_chatbots else 0 }}</span>
+                                            </div>
+                                            <div class="chatbot-view-toggle">
+                                                <button type="button" class="btn btn-sm btn-outline-secondary active" id="gridViewBtn">
+                                                    <i class="bi bi-grid-3x3-gap"></i> Grid
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" id="listViewBtn">
+                                                    <i class="bi bi-list"></i> List
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
                                         <div class="chatbot-list">
                                             {% if available_chatbots %}
                                                 {% for chatbot in available_chatbots %}
-                                                <div class="card chatbot-card">
-                                                    <div class="card-header bg-light">
+                                                <div class="card chatbot-card" data-chatbot-name="{{ chatbot.display_name|lower }}" data-chatbot-id="{{ chatbot.code|lower }}" data-chatbot-category="{{ chatbot.category|lower if chatbot.category else 'standard' }}">
+                                                    <div class="card-header chatbot-card-header">
                                                         <div class="d-flex justify-content-between align-items-center">
                                                             <h5 class="mb-0">{{ chatbot.display_name }}</h5>
-                                                            <div>
-                                                                <button type="button" class="btn btn-info btn-sm edit-content-btn me-2"
-                                                                        data-chatbot-code="{{ chatbot.code }}" data-chatbot-display-name="{{ chatbot.display_name }}"><i class="bi bi-pencil-square"></i> Edit Content</button>
-                                                                <button type="button" class="btn btn-danger btn-sm delete-btn" 
-                                                                        data-chatbot-name="{{ chatbot.code }}"><i class="bi bi-trash"></i> Delete</button>
-                                                            </div>
+                                                            <div class="chatbot-id-badge">{{ chatbot.code }}</div>
                                                         </div>
                                                     </div>
-                                                    <div class="card-body">
-                                                        <div class="text-muted small mb-2">ID: {{ chatbot.name }}</div>
-                                                        
-                                                        <div class="row">
-                                                            <div class="col-md-6">
-                                                                <div class="mb-3">
-                                                                    <h6>Description</h6>
-                                                                    <p class="text-muted">{{ chatbot.description or 'No description available' }}</p>
-                                                                    
-                                                                    <div class="update-desc-form mb-2">
-                                                                        <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                        <div class="mb-2">
-                                                                            <label for="description_{{ chatbot.name }}" class="form-label">Update Description:</label>
-                                                                            <textarea class="form-control description-field" id="description_{{ chatbot.name }}" rows="2">{{ chatbot.description }}</textarea>
-                                                                        </div>
-                                                                        <button type="button" class="btn btn-sm btn-primary update-desc-btn"><i class="bi bi-check-circle"></i> Update Description</button>
-                                                                    </div>
-                                                                </div>
+                                                    <div class="card-body chatbot-card-body">
+                                                        <!-- Quick Info Summary -->
+                                                        <div class="chatbot-quick-info">
+                                                            <div class="chatbot-quota-info">
+                                                                <i class="bi bi-clock-history"></i>
+                                                                <span>{{ chatbot.quota | default(3) }} questions/day</span>
                                                             </div>
-                                                            <div class="col-md-6">
-                                                                <div class="update-quota-form mb-3">
-                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="mb-2">
-                                                                        <label for="quota_{{ chatbot.name }}" class="form-label">Daily Question Quota:</label>
-                                                                        <div class="input-group">
-                                                                            <input type="number" class="form-control form-control-sm quota-field" id="quota_{{ chatbot.name }}" value="{{ chatbot.quota | default(3) }}" min="1">
-                                                                            <button type="button" class="btn btn-sm btn-secondary update-quota-btn"><i class="bi bi-arrow-clockwise"></i> Update</button>
-                                                                        </div>
-                                                                        <div class="form-text">Maximum questions a user can ask per day</div>
-                                                                    </div>
-                                                                </div>
-                                                                
-                                                                <!-- Category Selection -->
-                                                                <div class="update-category-form mb-3">
-                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="mb-2">
-                                                                        <label for="category_{{ chatbot.name }}" class="form-label">Program Category:</label>
-                                                                        <div class="input-group">
-                                                                            <select class="form-select form-select-sm category-field" id="category_{{ chatbot.name }}">
-                                                                                <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
-                                                                                <option value="tap" {% if chatbot is defined and chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
-                                                                                <option value="jsa" {% if chatbot is defined and chatbot.category == 'jsa' %}selected{% endif %}>JSA Programs</option>
-                                                                                <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
-                                                                            </select>
-                                                                            <button type="button" class="btn btn-sm btn-secondary update-category-btn"><i class="bi bi-arrow-clockwise"></i> Update</button>
-                                                                        </div>
-                                                                        <div class="form-text">Category determines how the program is grouped on the selection page</div>
-                                                                    </div>
-                                                                </div>
+                                                            <div class="chatbot-category-badge {{ chatbot.category if chatbot.category else 'standard' }}">
+                                                                {{ chatbot.category if chatbot.category else 'standard' }}
                                                             </div>
                                                         </div>
                                                         
-                                                        <!-- Intro Message Section -->
-                                                        <div class="row mt-2">
-                                                            <div class="col-12">
-                                                                <!-- LO Root ID Management Section -->
-                                                                <div class="update-lo-root-form mb-3">
+                                                        <!-- Action Buttons -->
+                                                        <div class="chatbot-actions-row">
+                                                            <button type="button" class="btn btn-info edit-content-btn"
+                                                                    data-chatbot-code="{{ chatbot.code }}" data-chatbot-display-name="{{ chatbot.display_name }}">
+                                                                <i class="bi bi-pencil-square"></i> Edit Content
+                                                            </button>
+                                                            <button type="button" class="btn btn-danger delete-btn" 
+                                                                    data-chatbot-name="{{ chatbot.code }}">
+                                                                <i class="bi bi-trash"></i> Delete
+                                                            </button>
+                                                        </div>
+                                                        
+                                                        <!-- Toggle for Details -->
+                                                        <button class="chatbot-details-toggle collapsed" type="button" data-bs-toggle="collapse" 
+                                                                data-bs-target="#details-{{ chatbot.code }}" aria-expanded="false">
+                                                            <div class="d-flex justify-content-between align-items-center">
+                                                                <span><i class="bi bi-gear"></i> Advanced Settings</span>
+                                                                <i class="bi bi-chevron-down toggle-icon"></i>
+                                                            </div>
+                                                        </button>
+                                                        
+                                                        <!-- Collapsible Details Content -->
+                                                        <div class="collapse chatbot-details-content" id="details-{{ chatbot.code }}">
+                                                            <!-- Description Section -->
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-card-text"></i> Description</h6>
+                                                                <p class="text-muted small mb-2">{{ chatbot.description or 'No description available' }}</p>
+                                                                <div class="update-desc-form">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="mb-3">
-                                                                        <label for="lo_root_ids_{{ chatbot.name }}" class="form-label">
-                                                                            <i class="bi bi-shield-lock"></i> <strong>LO Root IDs (Access Control):</strong>
-                                                                        </label>
-                                                                        <textarea class="form-control lo-root-field" id="lo_root_ids_{{ chatbot.name }}" rows="3" placeholder="Enter LO Root IDs separated by semicolons">{{ chatbot.lo_root_ids | join(';') if chatbot.lo_root_ids else '' }}</textarea>
-                                                                        <div class="form-text">
-                                                                            <i class="bi bi-info-circle"></i> 
-                                                                            <strong>Access Control:</strong> Only users with matching LO Root IDs can access this chatbot.<br>
+                                                                    <div class="mb-2">
+                                                                        <textarea class="form-control description-field" rows="2" placeholder="Update description...">{{ chatbot.description }}</textarea>
+                                                                    </div>
+                                                                    <button type="button" class="btn btn-primary update-desc-btn">
+                                                                        <i class="bi bi-check-circle"></i> Update Description
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <!-- Daily Quota Section -->
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-speedometer2"></i> Daily Quota</h6>
+                                                                <div class="update-quota-form">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="input-group">
+                                                                        <input type="number" class="form-control quota-field" value="{{ chatbot.quota | default(3) }}" min="1">
+                                                                        <button type="button" class="btn btn-secondary update-quota-btn">
+                                                                            <i class="bi bi-arrow-clockwise"></i> Update
+                                                                        </button>
+                                                                    </div>
+                                                                    <div class="form-text small mt-2">
+                                                                        <i class="bi bi-info-circle"></i> Maximum questions a user can ask per day
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <!-- Category Section -->
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-tags"></i> Category</h6>
+                                                                <div class="update-category-form">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="input-group">
+                                                                        <select class="form-select category-field">
+                                                                            <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
+                                                                            <option value="tap" {% if chatbot is defined and chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
+                                                                            <option value="jsa" {% if chatbot is defined and chatbot.category == 'jsa' %}selected{% endif %}>JSA Programs</option>
+                                                                            <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
+                                                                        </select>
+                                                                        <button type="button" class="btn btn-secondary update-category-btn">
+                                                                            <i class="bi bi-arrow-clockwise"></i> Update
+                                                                        </button>
+                                                                    </div>
+                                                                    <div class="form-text small mt-2">
+                                                                        <i class="bi bi-info-circle"></i> Category determines how the program is grouped on the selection page
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-shield-lock"></i> Access Control</h6>
+                                                                <div class="update-lo-root-form">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="mb-2">
+                                                                        <textarea class="form-control lo-root-field" rows="4" placeholder="Enter LO Root IDs separated by semicolons">{{ chatbot.lo_root_ids | join(';') if chatbot.lo_root_ids else '' }}</textarea>
+                                                                        <div class="form-text small">
+                                                                            <i class="bi bi-info-circle"></i> Only users with matching LO Root IDs can access this chatbot<br>
                                                                             <strong>Format:</strong> Enter multiple IDs separated by semicolons (;)<br>
+                                                                            <strong>Example:</strong> <code>5f09de4c-51f4-4296-a9aa-55ccb46a7f59;9412df89-80fb-4432-81ce-b521572aba71</code><br>
                                                                             <small class="text-muted">Leave empty to allow access for all users</small>
                                                                         </div>
                                                                     </div>
-                                                                    <button type="button" class="btn btn-sm btn-warning update-lo-root-btn">
+                                                                    <button type="button" class="btn btn-warning update-lo-root-btn">
                                                                         <i class="bi bi-shield-check"></i> Update Access Control
                                                                     </button>
                                                                 </div>
-                                                                
-                                                                <div class="update-intro-form mb-3">
+                                                            </div>
+                                                            
+                                                            <!-- Intro Message Section -->
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-chat-left-quote"></i> Intro Message</h6>
+                                                                <div class="update-intro-form">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="mb-3">
-                                                                        <label for="intro_{{ chatbot.name }}" class="form-label">
-                                                                            <strong>Chatbot Intro Message:</strong>
-                                                                            <span class="text-muted ms-2">(Default: 3 questions per day)</span>
-                                                                        </label>
-                                                                        
-                                                                        <div class="card mb-2 bg-light">
-                                                                            <div class="card-body py-2">
-                                                                                <div class="intro-message-preview">
-                                                                                    <strong>Preview:</strong> <span class="preview-text">
-                                                                                        {% if 'intro_message' in chatbot %}
-                                                                                            {{ chatbot.intro_message.replace('{program}', chatbot.display_name).replace('{quota}', chatbot.quota | string) }}
-                                                                                        {% else %}
-                                                                                            Hi, I am the {{ chatbot.display_name }} chatbot. I can answer up to {{ chatbot.quota }} question(s) related to this program per day.
-                                                                                        {% endif %}
-                                                                                    </span>
-                                                                                </div>
+                                                                    <div class="card mb-2 bg-light">
+                                                                        <div class="card-body py-2">
+                                                                            <div class="intro-message-preview">
+                                                                                <strong>Preview:</strong> <span class="preview-text">
+                                                                                    {% if 'intro_message' in chatbot %}
+                                                                                        {{ chatbot.intro_message.replace('{program}', chatbot.display_name).replace('{quota}', chatbot.quota | string) }}
+                                                                                    {% else %}
+                                                                                        Hi, I am the {{ chatbot.display_name }} chatbot. I can answer up to {{ chatbot.quota }} question(s) related to this program per day.
+                                                                                    {% endif %}
+                                                                                </span>
                                                                             </div>
                                                                         </div>
-                                                                        
-                                                                        <textarea class="form-control intro-field" id="intro_{{ chatbot.name }}" rows="2">{% if 'intro_message' in chatbot %}{{ chatbot.intro_message }}{% else %}Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.{% endif %}</textarea>
-                                                                        <div class="form-text">
-                                                                            <i class="bi bi-info-circle"></i> 
-                                                                            Use <code>{program}</code> to insert program name and <code>{quota}</code> to insert daily quota value.
+                                                                    </div>
+                                                                    <div class="mb-2">
+                                                                        <textarea class="form-control intro-field" rows="2">{% if 'intro_message' in chatbot %}{{ chatbot.intro_message }}{% else %}Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.{% endif %}</textarea>
+                                                                        <div class="form-text small">
+                                                                            <i class="bi bi-info-circle"></i> Use <code>{program}</code> and <code>{quota}</code> placeholders
                                                                             <button type="button" class="btn btn-sm btn-link text-decoration-none reset-intro-btn p-0 ms-2">Reset to default</button>
                                                                         </div>
                                                                     </div>
-                                                                    <button type="button" class="btn btn-sm btn-primary update-intro-btn">
+                                                                    <button type="button" class="btn btn-primary update-intro-btn">
                                                                         <i class="bi bi-check-circle"></i> Update Intro Message
                                                                     </button>
                                                                 </div>
@@ -303,7 +344,9 @@
                                                 </div>
                                                 {% endfor %}
                                             {% else %}
-                                                <div class="alert alert-info">No chatbots are currently registered. Click on the "Create New Chatbot" tab to create your first chatbot.</div>
+                                                <div class="alert alert-info chatbot-no-results">
+                                                    <i class="bi bi-info-circle"></i> No chatbots are currently registered. Click on the "Create New Chatbot" tab to create your first chatbot.
+                                                </div>
                                             {% endif %}
                                         </div>
                                     </div>
@@ -593,7 +636,6 @@
                                     </div>
                                 </div>
                             </div>
-
                             <!-- DATA MANAGEMENT TAB -->
                             <div class="tab-pane fade" id="data-mgmt-content" role="tabpanel" aria-labelledby="data-mgmt-tab">
                                 <div class="card mb-4">
@@ -814,7 +856,6 @@
                                                     </div>
                                                 </div>
                                             </div>
-
                                             <!-- Delete Users Modal -->
                                             <div class="modal fade" id="deleteUsersModal" tabindex="-1">
                                                 <div class="modal-dialog">
@@ -833,7 +874,6 @@
                                                     </div>
                                                 </div>
                                             </div>
-
                                             <!-- Conversation Logs -->
                                             <div class="tab-pane fade" id="convo-logs" role="tabpanel">
                                                 <div class="d-flex justify-content-between mb-2 align-items-center">
@@ -970,7 +1010,6 @@
                 </div>
             </div>
         </div>
-
         <!-- Delete by Chatbot Modal -->
         <div class="modal fade" id="deleteByChatbotModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog">
@@ -1003,7 +1042,6 @@
                 </div>
             </div>
         </div>
-
         <!-- Delete by User Modal -->
         <div class="modal fade" id="deleteByUserModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog">
@@ -1037,7 +1075,6 @@
             </div>
         </div>
     </div>
-
     <!-- Modal for Editing Content -->
     <div class="modal fade" id="editContentModal" tabindex="-1" aria-labelledby="editContentModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -1221,7 +1258,6 @@
                 </div>
             </div>
         </div>
-
         <!-- Warning Modal for Edit -->
         <div class="modal fade" id="editWarningModal" tabindex="-1" aria-labelledby="editWarningModalLabel" aria-hidden="true">
             <div class="modal-dialog">
@@ -1250,7 +1286,6 @@
                 </div>
             </div>
         </div>
-
         <!-- Edit User Modal - Moved outside other modals to fix display issues -->
         <div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
             <div class="modal-dialog">
@@ -1295,7 +1330,6 @@
                 </div>
             </div>
         </div>
-
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
         
         <!-- Global variables for Flask URLs -->
@@ -1383,7 +1417,6 @@
         
         <!-- External JavaScript file -->
         <script src="{{ url_for('static', filename='js/admin_scripts.js') }}"></script>
-
         <script>
             // Only keep page-specific JavaScript here if needed
             document.addEventListener('DOMContentLoaded', function() {

@@ -3088,4 +3088,177 @@ document.addEventListener('DOMContentLoaded', function() {
     } else {
         console.error('Submit Edit User button not found');
     }
-}); 
+
+    // Initialize new chatbot management features
+    initializeChatbotManagement();
+    enhanceChatbotCardInteractions();
+
+}); // End of first DOMContentLoaded
+
+// New Modern Chatbot Management Functions
+function initializeChatbotManagement() {
+    // Search functionality
+    const searchInput = document.getElementById('chatbotSearchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            filterChatbots(this.value.toLowerCase());
+        });
+    }
+
+    // View toggle functionality
+    const gridViewBtn = document.getElementById('gridViewBtn');
+    const listViewBtn = document.getElementById('listViewBtn');
+    const chatbotList = document.querySelector('.chatbot-list');
+
+    if (gridViewBtn && listViewBtn && chatbotList) {
+        gridViewBtn.addEventListener('click', function() {
+            chatbotList.classList.remove('list-view');
+            gridViewBtn.classList.add('active');
+            listViewBtn.classList.remove('active');
+            localStorage.setItem('chatbotViewMode', 'grid');
+        });
+
+        listViewBtn.addEventListener('click', function() {
+            chatbotList.classList.add('list-view');
+            listViewBtn.classList.add('active');
+            gridViewBtn.classList.remove('active');
+            localStorage.setItem('chatbotViewMode', 'list');
+        });
+
+        // Restore saved view mode
+        const savedViewMode = localStorage.getItem('chatbotViewMode');
+        if (savedViewMode === 'list') {
+            listViewBtn.click();
+        }
+    }
+
+    // Initialize intro message preview updates
+    initializeIntroMessagePreviews();
+    
+    // Initialize collapsible sections
+    initializeCollapsibleSections();
+}
+
+function filterChatbots(searchTerm) {
+    const chatbotCards = document.querySelectorAll('.chatbot-card');
+    let visibleCount = 0;
+
+    chatbotCards.forEach(card => {
+        const name = card.getAttribute('data-chatbot-name') || '';
+        const id = card.getAttribute('data-chatbot-id') || '';
+        const category = card.getAttribute('data-chatbot-category') || '';
+        
+        const matches = name.includes(searchTerm) || 
+                      id.includes(searchTerm) || 
+                      category.includes(searchTerm);
+
+        if (matches) {
+            card.style.display = '';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+
+    // Update the count
+    const countElement = document.getElementById('totalChatbotCount');
+    if (countElement) {
+        const totalCount = chatbotCards.length;
+        if (searchTerm) {
+            countElement.textContent = `${visibleCount} of ${totalCount}`;
+        } else {
+            countElement.textContent = totalCount;
+        }
+    }
+
+    // Show/hide no results message
+    showNoResultsMessage(visibleCount === 0 && searchTerm);
+}
+
+function showNoResultsMessage(show) {
+    let noResultsElement = document.querySelector('.chatbot-no-search-results');
+    
+    if (show && !noResultsElement) {
+        noResultsElement = document.createElement('div');
+        noResultsElement.className = 'chatbot-no-results chatbot-no-search-results';
+        noResultsElement.innerHTML = '<i class="bi bi-search"></i> No chatbots match your search criteria.';
+        document.querySelector('.chatbot-list').appendChild(noResultsElement);
+    } else if (!show && noResultsElement) {
+        noResultsElement.remove();
+    }
+}
+
+function initializeIntroMessagePreviews() {
+    // Update intro message previews when quota or intro text changes
+    document.querySelectorAll('.update-intro-form').forEach(form => {
+        const introField = form.querySelector('.intro-field');
+        const quotaField = form.closest('.card-body').querySelector('.quota-field');
+        const previewElement = form.querySelector('.preview-text');
+        const chatbotName = form.querySelector('.chatbot-name').value;
+        const displayName = form.closest('.chatbot-card').querySelector('.chatbot-card-header h5').textContent;
+
+        function updatePreview() {
+            if (introField && previewElement) {
+                let message = introField.value;
+                const quota = quotaField ? quotaField.value : '3';
+                
+                message = message.replace(/{program}/g, displayName);
+                message = message.replace(/{quota}/g, quota);
+                
+                previewElement.textContent = message;
+            }
+        }
+
+        if (introField) {
+            introField.addEventListener('input', updatePreview);
+        }
+        if (quotaField) {
+            quotaField.addEventListener('input', updatePreview);
+        }
+    });
+}
+
+function initializeCollapsibleSections() {
+    // Add smooth animations to collapsible sections
+    document.querySelectorAll('.collapse').forEach(collapse => {
+        collapse.addEventListener('show.bs.collapse', function() {
+            const toggle = document.querySelector(`[data-bs-target="#${this.id}"]`);
+            if (toggle) {
+                toggle.classList.remove('collapsed');
+            }
+        });
+
+        collapse.addEventListener('hide.bs.collapse', function() {
+            const toggle = document.querySelector(`[data-bs-target="#${this.id}"]`);
+            if (toggle) {
+                toggle.classList.add('collapsed');
+            }
+        });
+    });
+}
+
+function enhanceChatbotCardInteractions() {
+    // Add keyboard shortcuts for chatbot management
+    document.addEventListener('keydown', function(e) {
+        // Ctrl/Cmd + F to focus search
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            const searchInput = document.getElementById('chatbotSearchInput');
+            if (searchInput && document.querySelector('.tab-pane.active#manage-content')) {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+    });
+
+    // Enhanced hover effects for cards
+    document.querySelectorAll('.chatbot-card').forEach(card => {
+        card.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateY(-4px)';
+        });
+
+        card.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateY(-2px)';
+        });
+    });
+}

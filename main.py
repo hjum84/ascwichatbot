@@ -1005,7 +1005,11 @@ def login_page():
                 return render_template('login.html')
             
             if not user.check_password(password):
-                flash("Invalid email or password.", "danger")
+                # Check if this is a scrypt hash compatibility issue
+                if user.password_hash and user.password_hash.startswith('scrypt:'):
+                    flash("Your password needs to be reset due to a system update. Please use 'Forgot Password?' to reset it.", "warning")
+                else:
+                    flash("Invalid email or password.", "danger")
                 close_db(db)
                 return render_template('login.html')
             

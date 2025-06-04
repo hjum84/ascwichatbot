@@ -54,14 +54,33 @@ class User(UserMixin, Base):
     lo_root_ids = relationship("UserLORootID", backref="user")
 
     def set_password(self, password):
-        """Hash and set password"""
-        self.password_hash = generate_password_hash(password)
+        """Hash and set password using pbkdf2:sha256 (compatible with Render)"""
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
 
     def check_password(self, password):
-        """Check if provided password matches hash"""
+        """Check if provided password matches hash with backward compatibility"""
         if not self.password_hash:
             return False
-        return check_password_hash(self.password_hash, password)
+        
+        # Check if this is an old scrypt hash that needs conversion
+        if self.password_hash.startswith('scrypt:'):
+            try:
+                # Try to verify with Werkzeug (might fail on Render)
+                is_valid = check_password_hash(self.password_hash, password)
+                if is_valid:
+                    # Auto-upgrade to pbkdf2:sha256 for future compatibility
+                    self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+                    return True
+                return False
+            except ValueError as e:
+                if 'unsupported hash type scrypt' in str(e):
+                    # Cannot verify scrypt hash on this platform
+                    # User will need to reset password
+                    return False
+                raise e
+        else:
+            # Standard verification for pbkdf2 and other supported methods
+            return check_password_hash(self.password_hash, password)
     
     def has_password(self):
         """Check if user has a password set"""

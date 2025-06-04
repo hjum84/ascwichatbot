@@ -458,9 +458,9 @@
             <div class="logo-container">
                 <img src="{{ url_for('static', filename='images/logo-banner.png') }}" alt="Logo" class="logo-banner">
             </div>
-            {% if session.user_email %}
+            {% if current_user and current_user.is_authenticated %}
             <div class="user-info">
-                Logged in as: <strong>{{ session.user_email }}</strong> | 
+                Logged in as: <strong>{{ current_user.email }}</strong> | 
                 <a href="{{ url_for('logout') }}">Logout</a>
                 <a href="{{ url_for('admin') }}" style="font-size: 0.9em; color: #666; padding-left:8px;">Go to Admin Page</a>
             </div>

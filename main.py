@@ -31,6 +31,12 @@ from sqlalchemy import func
 import markdown2  # Add markdown2 for markdown parsing
 import pytz  # Add pytz for timezone conversion
 
+# Authentication imports
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_mail import Mail, Message
+from flask_bcrypt import Bcrypt
+from itsdangerous import URLSafeTimedSerializer
+
 # For file content extraction - try to import, but don't fail if not available
 try:
     import PyPDF2
@@ -67,6 +73,140 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Initialize Flask application
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
+
+# Initialize Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login_page'
+login_manager.login_message = 'Please log in to access this page.'
+login_manager.login_message_category = 'info'
+
+# Initialize Flask-Mail
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'
+app.config['MAIL_USE_SSL'] = os.getenv('MAIL_USE_SSL', 'False').lower() == 'true'
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'])
+
+mail = Mail(app)
+
+# Initialize Flask-Bcrypt
+bcrypt = Bcrypt(app)
+
+# User loader for Flask-Login
+@login_manager.user_loader
+def load_user(user_id):
+    """Load user by ID for Flask-Login"""
+    db = get_db()
+    try:
+        user = User.get_by_id(db, int(user_id))
+        return user
+    except Exception as e:
+        logger.error(f"Error loading user {user_id}: {e}")
+        return None
+    finally:
+        close_db(db)
+
+# Authentication helper functions
+def generate_reset_token(email):
+    """Generate secure reset token for password reset"""
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps(email, salt='password-reset-salt')
+
+def verify_reset_token(token, expiration=3600):
+    """Verify reset token (default 1 hour expiration)"""
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        email = serializer.loads(
+            token,
+            salt='password-reset-salt',
+            max_age=expiration
+        )
+        return email
+    except Exception as e:
+        logger.debug(f"Token verification failed: {e}")
+        return None
+
+def generate_password_setup_token(email):
+    """Generate secure token for initial password setup"""
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps(email, salt='password-setup-salt')
+
+def verify_password_setup_token(token, expiration=86400):
+    """Verify password setup token (default 24 hours expiration)"""
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        email = serializer.loads(
+            token,
+            salt='password-setup-salt',
+            max_age=expiration
+        )
+        return email
+    except Exception as e:
+        logger.debug(f"Password setup token verification failed: {e}")
+        return None
+
+def send_password_reset_email(email, name):
+    """Send password reset email"""
+    try:
+        token = generate_reset_token(email)
+        reset_url = url_for('reset_password', token=token, _external=True)
+        
+        msg = Message(
+            subject='Password Reset Request',
+            recipients=[email]
+        )
+        
+        msg.html = f"""
+        <h2>Password Reset Request</h2>
+        <p>Hi {name},</p>
+        <p>You requested a password reset for your account. Click the link below to reset your password:</p>
+        <p><a href="{reset_url}">Reset Password</a></p>
+        <p>This link will expire in 1 hour.</p>
+        <p>If you didn't request this reset, please ignore this email.</p>
+        <p>Best regards,<br>ACS Chatbot System</p>
+        """
+        
+        mail.send(msg)
+        logger.info(f"Password reset email sent to {email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send password reset email to {email}: {e}")
+        return False
+
+def send_password_setup_email(email, name, is_admin_added=False):
+    """Send initial password setup email"""
+    try:
+        token = generate_password_setup_token(email)
+        setup_url = url_for('setup_password', token=token, _external=True)
+        
+        msg = Message(
+            subject='Set Up Your Account Password',
+            recipients=[email]
+        )
+        
+        if is_admin_added:
+            intro = f"<p>Hi {name},</p><p>An account has been created for you by an administrator."
+        else:
+            intro = f"<p>Hi {name},</p><p>Welcome! Your account has been verified."
+        
+        msg.html = f"""
+        <h2>Set Up Your Password</h2>
+        {intro} Please set up your password to access the ACS Chatbot System:</p>
+        <p><a href="{setup_url}">Set Up Password</a></p>
+        <p>This link will expire in 24 hours.</p>
+        <p>Once you set up your password, you can log in using your email and password.</p>
+        <p>Best regards,<br>ACS Chatbot System</p>
+        """
+        
+        mail.send(msg)
+        logger.info(f"Password setup email sent to {email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send password setup email to {email}: {e}")
+        return False
 
 # Add Jinja2 template filter for timezone conversion
 @app.template_filter('to_eastern')
@@ -642,11 +782,12 @@ def requires_auth(f):
 
 # Decorator to require login for general user routes
 def login_required(f):
+    """Custom login required decorator that works with Flask-Login"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Please log in to access this page.', 'warning')
-            return redirect(url_for('login'))
+        if not current_user.is_authenticated:
+            flash('Please log in to access this page.', 'info')
+            return redirect(url_for('login_page', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -704,7 +845,7 @@ def home():
         return redirect(url_for('program_select'))
     return redirect(url_for('login'))
 
-# Registration route
+# Registration route - Step 1: Verify credentials
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -728,62 +869,26 @@ def register():
             # Check if user already exists
             existing_user = User.get_by_credentials(db, last_name, email)
             if existing_user:
-                # User exists - check if we need to add new lo_root_ids
-                if user_data and user_data.get('lo_root_ids'):
-                    # Get user's current lo_root_ids
-                    current_lo_root_ids = {assoc.lo_root_id for assoc in existing_user.lo_root_ids}
-                    csv_lo_root_ids = set(user_data['lo_root_ids'])
-                    
-                    # Find new lo_root_ids to add
-                    new_lo_root_ids = csv_lo_root_ids - current_lo_root_ids
-                    
-                    if new_lo_root_ids:
-                        # Add new lo_root_ids
-                        for lr_id in new_lo_root_ids:
-                            user_lo_association = UserLORootID(user_id=existing_user.id, lo_root_id=lr_id)
-                            db.add(user_lo_association)
-                        
-                        db.commit()
-                        logger.info(f"Added new lo_root_ids {new_lo_root_ids} to existing user {last_name} ({email})")
-                        flash(f"Welcome back! Your account has been updated with additional access permissions.", "info")
-                    else:
-                        logger.info(f"User {last_name} ({email}) already has all required lo_root_ids")
-                        flash("User already exists. Please try logging in instead.", "warning")
-                else:
+                if existing_user.has_password():
                     flash("User already exists. Please try logging in instead.", "warning")
-                
-                close_db(db)
-                return redirect(url_for('login'))
+                    close_db(db)
+                    return redirect(url_for('login_page'))
+                else:
+                    # User exists but no password set - send setup email
+                    send_password_setup_email(email, last_name)
+                    flash("Password setup email sent! Please check your email to set up your password.", "info")
+                    close_db(db)
+                    return redirect(url_for('login_page'))
             
-            logger.debug("Creating new user with email: %s", email)
+            # Store registration data in session for step 2
+            session['registration_data'] = {
+                'last_name': last_name,
+                'email': email,
+                'user_data': user_data
+            }
             
-            # Create new user with additional data from CSV
-            expiry_date = datetime.utcnow() + timedelta(days=2*365)  # 2 years from now
-            new_user = User(
-                last_name=last_name, 
-                email=email,
-                status='Active',
-                date_added=datetime.utcnow(),
-                expiry_date=expiry_date
-            )
-            db.add(new_user)
-            db.flush()  # Get the user ID
-            
-            # Add lo_root_ids from CSV data if available (use the new list format)
-            if user_data and user_data.get('lo_root_ids'):
-                lo_root_ids = user_data['lo_root_ids']  # This is now a list
-                logger.debug(f"Adding lo_root_ids for new user {last_name}: {lo_root_ids}")
-                for lr_id in lo_root_ids:
-                    if lr_id:
-                        user_lo_association = UserLORootID(user_id=new_user.id, lo_root_id=lr_id)
-                        db.add(user_lo_association)
-            
-            db.commit()
-            logger.debug(f"User created successfully with {len(user_data.get('lo_root_ids', []))} lo_root_ids")
-            
-            flash("Registration successful! You can now log in.", "success")
             close_db(db)
-            return redirect(url_for('login'))
+            return redirect(url_for('register_password'))
             
         except Exception as e:
             db.rollback()
@@ -794,69 +899,328 @@ def register():
             
     return render_template('register.html')
 
-# Login route
+# Registration route - Step 2: Set password
+@app.route('/register/password', methods=['GET', 'POST'])
+def register_password():
+    if 'registration_data' not in session:
+        flash("Registration session expired. Please start again.", "warning")
+        return redirect(url_for('register'))
+    
+    if request.method == 'POST':
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        
+        if not password or not confirm_password:
+            flash("Both password fields are required.", "danger")
+            return render_template('register_password.html')
+        
+        if password != confirm_password:
+            flash("Passwords do not match.", "danger")
+            return render_template('register_password.html')
+        
+        if len(password) < 8:
+            flash("Password must be at least 8 characters long.", "danger")
+            return render_template('register_password.html')
+        
+        # Get registration data from session
+        reg_data = session['registration_data']
+        last_name = reg_data['last_name']
+        email = reg_data['email']
+        user_data = reg_data['user_data']
+        
+        db = get_db()
+        try:
+            # Create new user with password
+            expiry_date = datetime.utcnow() + timedelta(days=2*365)
+            new_user = User(
+                last_name=last_name, 
+                email=email,
+                status='Active',
+                date_added=datetime.utcnow(),
+                expiry_date=expiry_date
+            )
+            new_user.set_password(password)
+            db.add(new_user)
+            db.flush()  # Get the user ID
+            
+            # Add lo_root_ids from CSV data if available
+            if user_data and user_data.get('lo_root_ids'):
+                lo_root_ids = user_data['lo_root_ids']
+                logger.debug(f"Adding lo_root_ids for new user {last_name}: {lo_root_ids}")
+                for lr_id in lo_root_ids:
+                    if lr_id:
+                        user_lo_association = UserLORootID(user_id=new_user.id, lo_root_id=lr_id)
+                        db.add(user_lo_association)
+            
+            db.commit()
+            logger.info(f"User {last_name} ({email}) registered successfully with password")
+            
+            # Clear registration session data
+            session.pop('registration_data', None)
+            
+            flash("Registration successful! You can now log in with your email and password.", "success")
+            close_db(db)
+            return redirect(url_for('login_page'))
+            
+        except Exception as e:
+            db.rollback()
+            logger.error("Registration password setup error: %s", str(e))
+            close_db(db)
+            flash("Registration error occurred. Please try again.", "danger")
+            return redirect(url_for('register'))
+    
+    reg_data = session.get('registration_data', {})
+    return render_template('register_password.html', 
+                         last_name=reg_data.get('last_name', ''),
+                         email=reg_data.get('email', ''))
+
+# Login route - Email + Password
 @app.route('/login', methods=['GET', 'POST'])
-def login():
+def login_page():
     # If already logged in, redirect to program_select
-    if 'user_id' in session:
+    if current_user.is_authenticated:
         return redirect(url_for('program_select'))
+        
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        remember = bool(request.form.get('remember'))
+        
+        if not email or not password:
+            flash("Email and password are required.", "danger")
+            return render_template('login.html')
+        
+        db = get_db()
+        try:
+            user = User.get_by_email(db, email)
+            
+            if not user:
+                flash("Invalid email or password.", "danger")
+                close_db(db)
+                return render_template('login.html')
+            
+            if not user.has_password():
+                flash("Password not set. Please check your email for password setup instructions.", "warning")
+                close_db(db)
+                return render_template('login.html')
+            
+            if not user.check_password(password):
+                flash("Invalid email or password.", "danger")
+                close_db(db)
+                return render_template('login.html')
+            
+            # Update visit count
+            user.visit_count += 1
+            db.commit()
+            
+            # Log in user with Flask-Login
+            login_user(user, remember=remember)
+            logger.info(f"User {user.email} logged in successfully")
+            
+            close_db(db)
+            
+            # Redirect to next page or program selection
+            next_page = request.args.get('next')
+            if next_page and next_page.startswith('/'):
+                return redirect(next_page)
+            return redirect(url_for('program_select'))
+                
+        except Exception as e:
+            db.rollback()
+            close_db(db)
+            logger.error("Login error: %s", str(e))
+            flash("Login error occurred. Please try again.", "danger")
+            return render_template('login.html')
+            
+    return render_template('login.html')
+
+# Legacy login route (for backward compatibility)
+@app.route('/login_legacy', methods=['GET', 'POST'])
+def login():
+    return redirect(url_for('login_page'))
+
+# First-time password setup for existing users
+@app.route('/first-time-password', methods=['GET', 'POST'])
+def first_time_password():
     if request.method == 'POST':
         last_name = request.form.get('last_name')
         email = request.form.get('email')
         
-        logger.debug("Login attempt for email: %s", email)
+        if not last_name or not email:
+            flash("Last name and email are required.", "danger")
+            return render_template('first_time_password.html')
         
-        # Get DB session
         db = get_db()
         try:
-            # Query user with class method
             user = User.get_by_credentials(db, last_name, email)
             
-            if not user:
-                logger.debug("User not found")
-                close_db(db)
-                flash("User not found. Please register first.", "danger")
-                return redirect(url_for('login'))
-                
-            # Update visit count
-            logger.debug("User found with ID: %s", user.id)
-            user.visit_count += 1
+            if user and not user.has_password():
+                # Send password setup email
+                if send_password_setup_email(email, last_name):
+                    flash("Password setup email sent! Please check your email.", "success")
+                else:
+                    flash("Failed to send email. Please try again later.", "danger")
+            else:
+                # Don't reveal if user exists or already has password for security
+                flash("If your account exists and needs password setup, an email has been sent.", "info")
             
-            # Store data before committing
-            user_data = user.to_dict()
-            
-            # Commit changes safely
-            db.commit()
-            
-            # Store in session
-            session['user_id'] = user_data['id']
-            session['user_email'] = user_data['email']
-            session['last_name'] = user_data['last_name']
-            
-            # Cleanup
             close_db(db)
+            return redirect(url_for('login_page'))
             
-            # Always direct users to program selection after login
-            # This ensures they can choose their program every time
-            logger.debug("Redirecting to program selection after login")
-            return redirect(url_for('program_select'))
+        except Exception as e:
+            close_db(db)
+            logger.error("First-time password error: %s", str(e))
+            flash("An error occurred. Please try again.", "danger")
+            return render_template('first_time_password.html')
+    
+    return render_template('first_time_password.html')
+
+# Forgot password route
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        
+        if not email:
+            flash("Email is required.", "danger")
+            return render_template('forgot_password.html')
+        
+        db = get_db()
+        try:
+            user = User.get_by_email(db, email)
+            
+            if user and user.has_password():
+                # Send password reset email
+                if send_password_reset_email(email, user.last_name):
+                    flash("Password reset email sent! Please check your email.", "success")
+                else:
+                    flash("Failed to send email. Please try again later.", "danger")
+            else:
+                # Don't reveal if user exists for security
+                flash("If your account exists, a password reset email has been sent.", "info")
+            
+            close_db(db)
+            return redirect(url_for('login_page'))
+            
+        except Exception as e:
+            close_db(db)
+            logger.error("Forgot password error: %s", str(e))
+            flash("An error occurred. Please try again.", "danger")
+            return render_template('forgot_password.html')
+    
+    return render_template('forgot_password.html')
+
+# Password reset route
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    email = verify_reset_token(token)
+    if not email:
+        flash("Invalid or expired reset link.", "danger")
+        return redirect(url_for('forgot_password'))
+    
+    if request.method == 'POST':
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        
+        if not password or not confirm_password:
+            flash("Both password fields are required.", "danger")
+            return render_template('reset_password.html')
+        
+        if password != confirm_password:
+            flash("Passwords do not match.", "danger")
+            return render_template('reset_password.html')
+        
+        if len(password) < 8:
+            flash("Password must be at least 8 characters long.", "danger")
+            return render_template('reset_password.html')
+        
+        db = get_db()
+        try:
+            user = User.get_by_email(db, email)
+            if user:
+                user.set_password(password)
+                db.commit()
+                logger.info(f"Password reset successful for {email}")
+                flash("Password reset successful! You can now log in.", "success")
+                close_db(db)
+                return redirect(url_for('login_page'))
+            else:
+                flash("User not found.", "danger")
+                close_db(db)
+                return redirect(url_for('forgot_password'))
                 
         except Exception as e:
-            # Rollback on error
             db.rollback()
             close_db(db)
-            logger.error("Login error: %s", str(e))
-            return f"Login error: {str(e)}", 500
+            logger.error("Password reset error: %s", str(e))
+            flash("An error occurred. Please try again.", "danger")
+            return render_template('reset_password.html')
+    
+    return render_template('reset_password.html')
+
+# Password setup route (for new users and admin-added users)
+@app.route('/setup-password/<token>', methods=['GET', 'POST'])
+def setup_password(token):
+    email = verify_password_setup_token(token)
+    if not email:
+        flash("Invalid or expired setup link.", "danger")
+        return redirect(url_for('first_time_password'))
+    
+    db = get_db()
+    try:
+        user = User.get_by_email(db, email)
+        if not user:
+            flash("User not found.", "danger")
+            close_db(db)
+            return redirect(url_for('register'))
+        
+        if user.has_password():
+            flash("Password already set. Please use the login page.", "info")
+            close_db(db)
+            return redirect(url_for('login_page'))
+        
+        if request.method == 'POST':
+            password = request.form.get('password')
+            confirm_password = request.form.get('confirm_password')
             
-    # GET request - show login form
-    return render_template('login.html')
+            if not password or not confirm_password:
+                flash("Both password fields are required.", "danger")
+                return render_template('setup_password.html', user=user)
+            
+            if password != confirm_password:
+                flash("Passwords do not match.", "danger")
+                return render_template('setup_password.html', user=user)
+            
+            if len(password) < 8:
+                flash("Password must be at least 8 characters long.", "danger")
+                return render_template('setup_password.html', user=user)
+            
+            # Set password
+            user.set_password(password)
+            db.commit()
+            logger.info(f"Password setup successful for {email}")
+            
+            flash("Password set successfully! You can now log in.", "success")
+            close_db(db)
+            return redirect(url_for('login_page'))
+        
+        close_db(db)
+        return render_template('setup_password.html', user=user)
+        
+    except Exception as e:
+        db.rollback()
+        close_db(db)
+        logger.error("Password setup error: %s", str(e))
+        flash("An error occurred. Please try again.", "danger")
+        return redirect(url_for('first_time_password'))
 
 # Program selection route
 @app.route('/program_select')
 @login_required
 def program_select():
     # Verify user is logged in (handled by decorator)
-    user_id = session['user_id']
+    user_id = current_user.id
+    user = current_user  # Get current user object
     
     # Get all available programs from database
     db = get_db()
@@ -897,7 +1261,8 @@ def program_select():
         logger.info(f"Program select page for user: {user_id}, showing {len(available_programs)} accessible programs out of {len(chatbots)} total")
         return render_template('program_select.html', 
                               available_programs=available_programs,
-                              available_program_codes=available_program_codes)
+                              available_program_codes=available_program_codes,
+                              current_user=user)  # Pass current_user to template
     finally:
         close_db(db)
 
@@ -906,29 +1271,22 @@ def program_select():
 @login_required
 def set_program(program):
     # Verify if content exists for this program in the database
-    program_upper = program.upper()
-    user_id = session['user_id']
+    user_id = current_user.id
     
     db = get_db()
     try:
-        chatbot = ChatbotContent.get_by_code(db, program_upper)
+        chatbot = ChatbotContent.get_by_code(db, program.upper())
         if not chatbot or not chatbot.is_active:
             logger.warning(f"Attempt to access non-existent program: {program}")
             close_db(db)
             return redirect(url_for('program_select'))
         
         # Check if user has access to this chatbot
-        if not has_chatbot_access(user_id, program_upper):
-            logger.warning(f"User {user_id} denied access to chatbot {program_upper} - insufficient LO Root ID permissions")
+        if not has_chatbot_access(user_id, program.upper()):
+            logger.warning(f"User {user_id} denied access to chatbot {program.upper()} - insufficient LO Root ID permissions")
             flash(f"Access denied: You don't have permission to access the {chatbot.name} program.", "danger")
             close_db(db)
             return redirect(url_for('program_select'))
-            
-        # Verify user is logged in
-        if 'user_id' not in session:
-            logger.warning("User not in session, redirecting to login")
-            close_db(db)
-            return redirect(url_for('login'))
             
         logger.debug("Setting program %s for user %s", program, user_id)
         
@@ -939,7 +1297,7 @@ def set_program(program):
             logger.warning("User not found in database")
             close_db(db)
             # Clear session and redirect to login
-            session.clear()
+            logout_user()
             return redirect(url_for('login'))
             
         # Get lo_root_ids for the chatbot
@@ -953,10 +1311,13 @@ def set_program(program):
                 db.add(new_assoc)
         
         # Set in session for current view
-        session['current_program'] = program_upper
+        session['current_program'] = program.upper()
         
         # Commit changes
         db.commit()
+        
+        # Fix variable name
+        program_upper = program.upper()
         
         logger.info(f"User {user_id} successfully accessed chatbot {program_upper}")
         
@@ -1038,109 +1399,102 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
 @app.route('/index_bcc')
 @login_required
 def index_bcc():
-    session['current_program'] = 'BCC'
-    user_id = session['user_id']
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, 'BCC')
-    db = get_db()
-    try:
-        chatbot = ChatbotContent.get_by_code(db, 'BCC')
-        program_display_name = chatbot.name if chatbot else "Building Coaching Competency"
-        intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
-    finally:
-        close_db(db)
-    # Format the intro message by replacing placeholders
-    formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
-    return render_template('index.html',
-                         program='BCC',
-                         program_display_name=program_display_name,
+    program_code = 'BCC'
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program_code)
+    
+    intro_message = get_intro_message(program_code)
+    if intro_message is None:  # Handle None case
+        intro_message = "Welcome to Building Coaching Competency Chatbot! How can I help you today?"
+    
+    return render_template('index.html', 
+                         program_display_name='Building Coaching Competency',
+                         program_code=program_code,
+                         intro_message=intro_message,
                          chat_history=chat_history,
                          remaining_questions=remaining_questions,
                          quota=quota,
-                         intro_message=formatted_intro)
+                         current_user=current_user)
 
 # MI Chatbot interface
 @app.route('/index_mi')
 @login_required
 def index_mi():
-    session['current_program'] = 'MI'
-    user_id = session['user_id']
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, 'MI')
-    db = get_db()
-    try:
-        chatbot = ChatbotContent.get_by_code(db, 'MI')
-        program_display_name = chatbot.name if chatbot else "Motivational Interviewing"
-        intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
-    finally:
-        close_db(db)
-    # Format the intro message by replacing placeholders
-    formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
-    return render_template('index.html',
-                         program='MI',
-                         program_display_name=program_display_name,
+    program_code = 'MI'
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program_code)
+    
+    intro_message = get_intro_message(program_code)
+    if intro_message is None:  # Handle None case
+        intro_message = "Welcome to Motivational Interviewing Chatbot! How can I help you today?"
+    
+    return render_template('index.html', 
+                         program_display_name='Motivational Interviewing',
+                         program_code=program_code,
+                         intro_message=intro_message,
                          chat_history=chat_history,
                          remaining_questions=remaining_questions,
                          quota=quota,
-                         intro_message=formatted_intro)
+                         current_user=current_user)
 
 # Safety Chatbot interface
 @app.route('/index_safety')
 @login_required
 def index_safety():
-    session['current_program'] = 'Safety'
-    user_id = session['user_id']
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, 'Safety')
-    db = get_db()
-    try:
-        chatbot = ChatbotContent.get_by_code(db, 'Safety')
-        program_display_name = chatbot.name if chatbot else "Safety and Risk Assessment"
-        intro_message = chatbot.intro_message if chatbot else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
-    finally:
-        close_db(db)
-    # Format the intro message by replacing placeholders
-    formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
-    return render_template('index.html',
-                         program='Safety',
-                         program_display_name=program_display_name,
+    program_code = 'S&R'
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program_code)
+    
+    intro_message = get_intro_message(program_code)
+    if intro_message is None:  # Handle None case
+        intro_message = "Welcome to Safety & Resilience Chatbot! How can I help you today?"
+    
+    return render_template('index.html', 
+                         program_display_name='Safety & Resilience',
+                         program_code=program_code,
+                         intro_message=intro_message,
                          chat_history=chat_history,
                          remaining_questions=remaining_questions,
                          quota=quota,
-                         intro_message=formatted_intro)
+                         current_user=current_user)
 
 # Generic chatbot interface for custom programs
 @app.route('/index_generic/<program>')
 @login_required
 def index_generic(program):
-    program_upper = program.upper()
+    # Check if user has access to this program
+    if not has_chatbot_access(current_user.id, program):
+        flash('Access denied to this program.', 'error')
+        return redirect(url_for('program_select'))
+    
+    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program)
+    
+    # Get chatbot info from database for display name and intro message
     db = get_db()
     try:
-        chatbot = ChatbotContent.get_by_code(db, program_upper)
-        if not chatbot or not chatbot.is_active:
-            logger.warning(f"Attempt to access non-existent program: {program}")
-            close_db(db)
-            return redirect(url_for('program_select'))
-        session['current_program'] = program_upper
-        program_display_name = chatbot.name
-        quota = chatbot.quota
-        intro_message = chatbot.intro_message if hasattr(chatbot, 'intro_message') and chatbot.intro_message else "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day."
-        user_id = session['user_id']
-        chat_history, remaining_questions, quota = get_chat_history_and_remaining(user_id, program_upper)
+        chatbot = ChatbotContent.get_by_code(db, program)
+        program_display_name = chatbot.name if chatbot else program
+        
+        # Format intro message with placeholders
+        if chatbot and chatbot.intro_message:
+            intro_message = chatbot.intro_message.format(
+                program=chatbot.name,
+                quota=chatbot.quota
+            )
+        else:
+            intro_message = f"Welcome to {program_display_name} Chatbot! How can I help you today?"
+        
         close_db(db)
         
-        # Format the intro message by replacing placeholders
-        formatted_intro = intro_message.replace("{program}", f"**{program_display_name}**").replace("{quota}", f"**{quota}**")
-        
-        return render_template('index.html',
-                            program=program_upper,
-                            program_display_name=program_display_name,
-                            chat_history=chat_history,
-                            remaining_questions=remaining_questions,
-                            quota=quota,
-                            intro_message=formatted_intro)
+        return render_template('index.html', 
+                             program_display_name=program_display_name,
+                             program_code=program,
+                             intro_message=intro_message,
+                             chat_history=chat_history,
+                             remaining_questions=remaining_questions,
+                             quota=quota,
+                             current_user=current_user)
     except Exception as e:
-        if 'db' in locals():
-            close_db(db)
-        logger.error(f"Error loading generic chatbot: {str(e)}")
-        return redirect(url_for('program_select'))
+        close_db(db)
+        logger.error(f"Error in index_generic for program {program}: {e}")
+        return f"Error: {e}", 500
 
 # Legacy index route - redirect to program selection
 @app.route('/index')
@@ -1178,12 +1532,17 @@ def parse_markdown(text):
 @app.route('/chat', methods=['POST'])
 @login_required
 def chat():
-    user_message = request.json.get("message")
-    if not user_message:
-        return jsonify({"error": "A question is required."}), 400
+    user_id = current_user.id
+    user_message = request.json.get('message')
+    current_program = session.get('current_program')
 
-    current_program = session.get('current_program', 'BCC')
-    user_id = session['user_id']
+    if not user_message:
+        return jsonify({"error": "Message is required"}), 400
+
+    if not current_program:
+        logger.error(f"No current program set for user {user_id}")
+        return jsonify({"error": "No program selected. Please select a program first."}), 400
+
     db = get_db()
     try:
         # Get the chatbot's quota from database
@@ -1380,7 +1739,7 @@ CONTENT:
 @app.route('/clear_chat_history', methods=['POST'])
 @login_required
 def clear_chat_history():
-    user_id = session['user_id']
+    user_id = current_user.id
     # Ensure program_code is fetched from the request body, not session, for robustness
     data = request.get_json()
     program_code = data.get('program')
@@ -1419,13 +1778,9 @@ def switch_program():
 # Logout route
 @app.route('/logout')
 def logout():
-    session.pop('user_id', None)
-    session.pop('user_email', None)
-    session.pop('last_name', None)
-    session.pop('current_program', None)
-    # session.clear() # Alternatively, clear the entire session
-    flash('You have been successfully logged out.', 'success')
-    return redirect(url_for('login'))
+    logout_user()  # Flask-Login logout
+    flash('Successfully logged out.', 'success')
+    return redirect(url_for('login_page'))
 
 # Delete Registration Route
 @app.route('/delete_registration', methods=['GET', 'POST'])
@@ -2628,17 +2983,35 @@ Your role is to provide accurate, helpful, and relevant information while mainta
         return """You are an AI assistant specialized in understanding and explaining the provided content. Your role is to provide accurate, helpful, and relevant information while maintaining a professional tone and basing all responses solely on the provided content."""
 
 def generate_default_guidelines():
-    """Generate default guidelines for system prompt."""
-    return """1. Only answer questions based on the provided content
-2. If the answer is not in the content, say "I don't have enough information to answer that question"
-3. Be concise but thorough in your responses
-4. Maintain a professional and helpful tone
-5. If asked about something not covered in the content, do not make assumptions
-6. Preserve all important facts, key concepts, and essential information
-7. Present information in a clear and organized manner
-8. Use examples from the content when relevant
-9. If multiple interpretations are possible, explain the different perspectives
-10. Always cite specific parts of the content when providing detailed answers"""
+    return """
+    <h2>Chatbot Guidelines</h2>
+    <ul>
+        <li>Please be respectful in your conversation</li>
+        <li>Keep questions relevant to the program</li>
+        <li>For technical issues, contact your administrator</li>
+    </ul>
+    """
+
+def get_intro_message(program_code):
+    """Get intro message for a program from the database and format placeholders"""
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, program_code)
+        if not chatbot:
+            close_db(db)
+            return None
+            
+        # Format the intro message with actual program name and quota
+        formatted_message = chatbot.intro_message.format(
+            program=chatbot.name,
+            quota=chatbot.quota
+        )
+        close_db(db)
+        return formatted_message
+    except Exception as e:
+        close_db(db)
+        logger.error(f"Error getting intro message for {program_code}: {e}")
+        return None
 
 @app.route('/admin/delete_chatbot', methods=['POST'])
 @requires_auth
@@ -3755,7 +4128,16 @@ def add_user():
                 db.add(user_lo)
 
         db.commit()
-        return jsonify({'success': True, 'message': 'User added successfully'})
+        
+        # Send password setup email
+        try:
+            send_password_setup_email(email, last_name, is_admin_added=True)
+            logger.info(f"Password setup email sent to {email} for admin-added user")
+        except Exception as e:
+            logger.error(f"Failed to send password setup email to {email}: {e}")
+            # Don't fail the user creation if email fails
+        
+        return jsonify({'success': True, 'message': 'User added successfully. Password setup email sent.'})
     except Exception as e:
         db.rollback()
         return jsonify({'success': False, 'error': str(e)})
@@ -3863,10 +4245,12 @@ def edit_user():
 @requires_auth
 def debug_quota(program_code):
     """Debug route to check quota system for a specific program"""
-    if 'user_id' not in session:
-        return jsonify({"error": "Not logged in"}), 401
-        
-    user_id = session['user_id']
+    # For admin debugging, we can use a test user ID or current user
+    # Since this is an admin route, let's allow specifying a user_id parameter
+    user_id = request.args.get('user_id', type=int)
+    
+    if not user_id:
+        return jsonify({"error": "user_id parameter required for debugging"}), 400
     
     db = get_db()
     try:

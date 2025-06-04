@@ -6,6 +6,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session, relationship
 from sqlalchemy.sql import func
 from dotenv import load_dotenv
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
 load_dotenv()
 
 # Get the database URL from your Render environment
@@ -37,11 +39,12 @@ class UserLORootID(Base):
     lo_root_id = Column(String, primary_key=True)
 
 # User model
-class User(Base):
+class User(UserMixin, Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     last_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=True)  # New: for password authentication
     visit_count = Column(Integer, default=0)
     status = Column(String, default="Inactive", nullable=False)  # Active/Inactive
     date_added = Column(DateTime, default=datetime.datetime.utcnow)
@@ -50,6 +53,20 @@ class User(Base):
     # Relationship to handle multiple lo_root_ids
     lo_root_ids = relationship("UserLORootID", backref="user")
 
+    def set_password(self, password):
+        """Hash and set password"""
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        """Check if provided password matches hash"""
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+    
+    def has_password(self):
+        """Check if user has a password set"""
+        return self.password_hash is not None
+
     @classmethod
     def get_by_credentials(cls, db, last_name, email):
         """Safely get user by credentials"""
@@ -57,6 +74,11 @@ class User(Base):
             cls.last_name == last_name,
             cls.email == email
         ).first()
+    
+    @classmethod
+    def get_by_email(cls, db, email):
+        """Safely get user by email"""
+        return db.query(cls).filter(cls.email == email).first()
     
     @classmethod
     def get_by_id(cls, db, user_id):
@@ -69,6 +91,7 @@ class User(Base):
             "id": self.id,
             "last_name": self.last_name,
             "email": self.email,
+            "has_password": self.has_password(),
             "visit_count": self.visit_count,
             "status": self.status,
             "date_added": self.date_added.isoformat() if self.date_added else None,

@@ -8,6 +8,7 @@ from sqlalchemy.sql import func
 from dotenv import load_dotenv
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import timedelta
 load_dotenv()
 
 # Get the database URL from your Render environment
@@ -173,9 +174,20 @@ class ChatbotContent(Base):
     category = Column(String(50), nullable=False, default="standard")  # Program category: standard, tap, elearning
     system_prompt_role = Column(Text, nullable=True)  # System prompt: Role section
     system_prompt_guidelines = Column(Text, nullable=True)  # System prompt: Important Guidelines section
+    auto_delete_days = Column(Integer, nullable=True, default=None)  # Auto-delete conversations after N days (NULL = never delete)
 
     # Relationship to handle multiple lo_root_ids
     lo_root_ids = relationship("ChatbotLORootAssociation", backref="chatbot")
+
+    def should_auto_delete(self):
+        """Check if auto-delete is enabled for this chatbot"""
+        return self.auto_delete_days is not None and self.auto_delete_days > 0
+    
+    def get_auto_delete_text(self):
+        """Get human-readable text for auto-delete setting (for UI display)"""
+        if not self.should_auto_delete():
+            return "Keep conversations (never delete)"
+        return f"Auto-delete after {self.auto_delete_days} days"
 
     @classmethod
     def get_by_code(cls, db, code):
@@ -192,7 +204,8 @@ class ChatbotContent(Base):
     def create_or_update(cls, db, code, name, content, description=None, quota=3, 
                         intro_message="Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.",
                         char_limit=50000, is_active=True, category="standard",
-                        system_prompt_role=None, system_prompt_guidelines=None):
+                        system_prompt_role=None, system_prompt_guidelines=None,
+                        auto_delete_days=None):  # 👈 NEW: Auto-delete setting (maintains backward compatibility)
         """Create or update chatbot content"""
         existing = cls.get_by_code(db, code)
         if existing:
@@ -210,6 +223,9 @@ class ChatbotContent(Base):
                 existing.system_prompt_role = system_prompt_role
             if system_prompt_guidelines is not None:
                 existing.system_prompt_guidelines = system_prompt_guidelines
+            # 👈 NEW: Only update auto_delete_days if explicitly provided
+            if auto_delete_days is not None:
+                existing.auto_delete_days = auto_delete_days
             return existing
         else:
             new_content = cls(
@@ -223,7 +239,8 @@ class ChatbotContent(Base):
                 is_active=is_active,
                 category=category,
                 system_prompt_role=system_prompt_role,
-                system_prompt_guidelines=system_prompt_guidelines
+                system_prompt_guidelines=system_prompt_guidelines,
+                auto_delete_days=auto_delete_days  # 👈 NEW: Auto-delete setting for new chatbots
                 # lo_root_ids will be handled separately after creation/update
             )
             db.add(new_content)
@@ -243,6 +260,8 @@ class ChatbotContent(Base):
             "category": self.category,
             "system_prompt_role": self.system_prompt_role,
             "system_prompt_guidelines": self.system_prompt_guidelines,
+            "auto_delete_days": self.auto_delete_days,  # 👈 NEW: Include auto-delete setting
+            "auto_delete_text": self.get_auto_delete_text(),  # 👈 NEW: Human-readable text
             "lo_root_ids": [assoc.lo_root_id for assoc in self.lo_root_ids]
         }
 
@@ -255,7 +274,29 @@ class ChatHistory(Base):
     user_message = Column(Text, nullable=False)
     bot_message = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-    is_visible = Column(Boolean, nullable=False, default=True)  # New: for UI hiding
+    is_visible = Column(Boolean, nullable=False, default=True)  # For UI hiding
+    deletion_notified_at = Column(DateTime, nullable=True, default=None)  # 👈 NEW: Track when deletion notification was sent
+    
+    def is_eligible_for_deletion(self, chatbot):
+        """Check if this conversation is eligible for auto-deletion"""
+        if not chatbot.should_auto_delete():
+            return False
+        
+        cutoff_date = datetime.datetime.utcnow() - timedelta(days=chatbot.auto_delete_days)
+        return self.timestamp < cutoff_date
+    
+    def needs_deletion_notification(self, chatbot):
+        """Check if this conversation needs a deletion warning notification (3 days before deletion)"""
+        if not chatbot.should_auto_delete():
+            return False
+        
+        if self.deletion_notified_at:  # Already notified
+            return False
+            
+        # Calculate warning date (3 days before deletion)
+        warning_days = max(3, chatbot.auto_delete_days // 10)  # At least 3 days, or 10% of retention period
+        warning_date = datetime.datetime.utcnow() - timedelta(days=chatbot.auto_delete_days - warning_days)
+        return self.timestamp < warning_date
 
 # Create database tables
 Base.metadata.create_all(bind=engine)

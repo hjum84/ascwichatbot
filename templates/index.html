@@ -135,6 +135,135 @@
     .questions-remaining-indicator.danger svg {
       color: #ef4444;
     }
+
+    /* Small deletion notice styles */
+    .deletion-notice {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 4px;
+      opacity: 0.7;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .deletion-notice.warning {
+      color: #f59e0b;
+    }
+
+    .deletion-notice.urgent {
+      color: #ef4444;
+    }
+
+    .deletion-notice svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+    }
+
+    /* Bot message deletion notices */
+    .message.bot .deletion-notice {
+      position: absolute;
+      bottom: -18px;
+      left: 8px;
+      margin-top: 0;
+      font-style: normal;
+      background: linear-gradient(135deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.02));
+      backdrop-filter: blur(10px);
+      color: rgba(0, 0, 0, 0.6);
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-weight: 400;
+      font-size: 8px;
+      opacity: 1;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    .message.bot {
+      position: relative;
+      margin-bottom: 25px;
+    }
+
+    .message.bot .deletion-notice:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .message.bot .deletion-notice.warning {
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.06));
+      color: rgba(180, 83, 9, 0.8);
+      border: 1px solid rgba(251, 191, 36, 0.2);
+    }
+
+    .message.bot .deletion-notice.urgent {
+      background: linear-gradient(135deg, rgba(248, 113, 113, 0.12), rgba(248, 113, 113, 0.06));
+      color: rgba(153, 27, 27, 0.8);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+    }
+
+    .message.bot .deletion-notice svg {
+      width: 8px;
+      height: 8px;
+      opacity: 0.7;
+    }
+
+    /* User message deletion notices - modern & sleek */
+    .message.user .deletion-notice {
+      position: absolute;
+      bottom: -18px;
+      right: 8px;
+      margin-top: 0;
+      font-style: normal;
+      background: linear-gradient(135deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.02));
+      backdrop-filter: blur(10px);
+      color: rgba(0, 0, 0, 0.6);
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-weight: 400;
+      font-size: 8px;
+      opacity: 1;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    .message.user {
+      position: relative;
+      margin-bottom: 25px;
+    }
+
+    .message.user .deletion-notice:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .message.user .deletion-notice.warning {
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.06));
+      color: rgba(180, 83, 9, 0.8);
+      border: 1px solid rgba(251, 191, 36, 0.2);
+    }
+
+    .message.user .deletion-notice.urgent {
+      background: linear-gradient(135deg, rgba(248, 113, 113, 0.12), rgba(248, 113, 113, 0.06));
+      color: rgba(153, 27, 27, 0.8);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+    }
+
+    .message.user .deletion-notice svg {
+      width: 8px;
+      height: 8px;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
@@ -179,13 +308,30 @@
       </div>
     </div>
     <div id="chat-box" class="chat-box">
+      {% if deletion_warning %}
+      <div class="message bot deletion-warning-message" style="background-color: #fff3cd; border-left: 4px solid #ffc107; margin-bottom: 15px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: #f59e0b;">
+            <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <strong style="color: #92400e;">Privacy Notice</strong>
+        </div>
+        <p style="margin: 0; color: #92400e;">
+          <strong>{{ deletion_warning.count }}</strong> of your {{ deletion_warning.chatbot_name }} conversations will be automatically deleted on 
+          <strong>{{ deletion_warning.deletion_date }}</strong> ({{ deletion_warning.days_remaining }} days from now) as part of our privacy protection policy.
+        </p>
+      </div>
+      {% endif %}
       <div class="message bot system-welcome-message">
         <p id="intro-message" data-content='{{ intro_message|tojson|safe }}'></p>
       </div>
       {# Placeholder for chat history messages - will be populated by JS #}
       {% if chat_history %}
         {% for chat in chat_history %}
-          <div class="message {{ chat.sender }}" data-sender="{{ chat.sender }}" data-raw='{{ chat.message|tojson|safe }}'></div>
+          <div class="message {{ chat.sender }}" 
+               data-sender="{{ chat.sender }}" 
+               data-raw='{{ chat.message|tojson|safe }}'
+               {% if chat.deletion_info %}data-deletion-info='{{ chat.deletion_info|tojson|safe }}'{% endif %}></div>
         {% endfor %}
       {% endif %}
     </div>
@@ -318,7 +464,7 @@
       }
     }
 
-    function addMessage(text, sender, isHTML = true) {
+    function addMessage(text, sender, isHTML = true, deletionInfo = null) {
         const messageDiv = document.createElement('div');
         // 여러 클래스 지원: sender가 공백 포함 문자열이면 분리해서 각각 class로 추가
         if (Array.isArray(sender)) {
@@ -342,9 +488,50 @@
             p.textContent = text;
         }
         messageDiv.appendChild(p);
+        
+        // Add deletion notice if provided
+        if (deletionInfo) {
+            const deletionNotice = createDeletionNotice(deletionInfo);
+            if (deletionNotice) {
+                messageDiv.appendChild(deletionNotice);
+            }
+        }
+        
         chatBox.appendChild(messageDiv);
         scrollToBottom();
         return p; // Return the paragraph element for typing animation
+    }
+
+    function createDeletionNotice(deletionInfo) {
+        if (!deletionInfo || deletionInfo.days_until_deletion < 0) {
+            return null; // Message already deleted or no auto-delete
+        }
+        
+        const noticeDiv = document.createElement('div');
+        noticeDiv.className = 'deletion-notice';
+        
+        const daysUntil = deletionInfo.days_until_deletion;
+        let noticeText, iconSvg, extraClass;
+        
+        if (daysUntil <= 1) {
+            noticeText = daysUntil === 0 ? 'Deletes today' : 'Deletes tomorrow';
+            extraClass = 'urgent';
+            iconSvg = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
+        } else if (daysUntil <= 7) {
+            noticeText = `Deletes in ${daysUntil} days`;
+            extraClass = 'warning';
+            iconSvg = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
+        } else {
+            noticeText = `Deletes in ${daysUntil} days`;
+            iconSvg = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+        }
+        
+        if (extraClass) {
+            noticeDiv.classList.add(extraClass);
+        }
+        
+        noticeDiv.innerHTML = iconSvg + '<span>' + noticeText + '</span>';
+        return noticeDiv;
     }
 
     function updateRemainingQuestions(remaining, quota) {
@@ -423,19 +610,46 @@
             introMessageElement.textContent = introContent;
         }
 
-        // Process existing chat messages
-        const existingMessages = chatBox.querySelectorAll('.message[data-raw]');
-        existingMessages.forEach(msgDiv => {
-            const rawMessage = JSON.parse(msgDiv.getAttribute('data-raw'));
-            const sender = msgDiv.getAttribute('data-sender');
-            const p = document.createElement('p');
-            if (typeof marked !== 'undefined') {
-                p.innerHTML = DOMPurify.sanitize(marked.parse(rawMessage));
-            } else {
-                p.textContent = rawMessage;
+        // Process existing messages on page load
+        const existingMessages = document.querySelectorAll('.message[data-raw]');
+        existingMessages.forEach(messageDiv => {
+            const rawData = messageDiv.getAttribute('data-raw');
+            const deletionData = messageDiv.getAttribute('data-deletion-info');
+            
+            if (rawData) {
+                try {
+                    const messageText = JSON.parse(rawData);
+                    const p = messageDiv.querySelector('p') || document.createElement('p');
+                    
+                    if (typeof marked !== 'undefined') {
+                        const parsedContent = marked.parse(messageText);
+                        p.innerHTML = typeof DOMPurify !== 'undefined' ? 
+                                      DOMPurify.sanitize(parsedContent) : 
+                                      parsedContent;
+                    } else {
+                        p.textContent = messageText;
+                    }
+                    
+                    if (!messageDiv.querySelector('p')) {
+                        messageDiv.appendChild(p);
+                    }
+                } catch (e) {
+                    console.error('Error parsing message data:', e);
+                }
             }
-            msgDiv.appendChild(p);
-            msgDiv.removeAttribute('data-raw'); // Clean up
+            
+            // Add deletion notice if available
+            if (deletionData && !messageDiv.querySelector('.deletion-notice')) {
+                try {
+                    const deletionInfo = JSON.parse(deletionData);
+                    const deletionNotice = createDeletionNotice(deletionInfo);
+                    if (deletionNotice) {
+                        messageDiv.appendChild(deletionNotice);
+                    }
+                } catch (e) {
+                    console.error('Error parsing deletion data:', e);
+                }
+            }
         });
         
         // Set initial state for questions remaining indicator

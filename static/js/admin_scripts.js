@@ -3093,6 +3093,71 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeChatbotManagement();
     enhanceChatbotCardInteractions();
 
+    // 👈 NEW: Setup event listeners for auto-delete setting updates
+    document.querySelectorAll('.update-auto-delete-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const form = this.closest('.update-auto-delete-form');
+            const chatbotCode = form.querySelector('.chatbot-name').value;
+            const autoDeleteDays = form.querySelector('.auto-delete-field').value;
+            
+            // Show a brief loading indicator on the button
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+            this.disabled = true;
+            
+            // Create form data for POST request
+            const formData = new FormData();
+            formData.append('chatbot_code', chatbotCode);
+            formData.append('auto_delete_days', autoDeleteDays);
+            
+            fetch('/admin/update_auto_delete_days', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Reset button state
+                this.innerHTML = originalText;
+                this.disabled = false;
+                
+                if (data.success) {
+                    // Show temporary success message next to the button
+                    const successMsg = document.createElement('span');
+                    successMsg.className = 'text-success ms-2';
+                    successMsg.innerHTML = '<i class="bi bi-check-circle"></i> Updated!';
+                    this.parentNode.appendChild(successMsg);
+                    
+                    // Update the current setting text
+                    const settingText = form.querySelector('.form-text small');
+                    if (settingText && data.auto_delete_text) {
+                        settingText.textContent = `Current setting: ${data.auto_delete_text}`;
+                    }
+                    
+                    // Remove success message after 2.5 seconds
+                    setTimeout(() => {
+                        successMsg.remove();
+                    }, 2500);
+                    
+                    // Log the update
+                    if (autoDeleteDays) {
+                        console.log(`Auto-delete setting updated for ${chatbotCode}: ${autoDeleteDays} days`);
+                    } else {
+                        console.log(`Auto-delete disabled for ${chatbotCode}: conversations will be kept indefinitely`);
+                    }
+                } else {
+                    alert('Error updating auto-delete setting: ' + data.error);
+                }
+            })
+            .catch(error => {
+                // Reset button state
+                this.innerHTML = originalText;
+                this.disabled = false;
+                alert('Network error occurred. Please try again.');
+                console.error('Error updating auto-delete settings:', error);
+            });
+        });
+    });
+
 }); // End of first DOMContentLoaded
 
 // New Modern Chatbot Management Functions

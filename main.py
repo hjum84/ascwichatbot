@@ -27,7 +27,7 @@ from database_monitor import get_database_size, check_database_limits, setup_dat
 from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO, BytesIO
-from sqlalchemy import func
+from sqlalchemy import func, and_
 import markdown2  # Add markdown2 for markdown parsing
 import pytz  # Add pytz for timezone conversion
 
@@ -1359,18 +1359,28 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
         
         result = []
         for h in history:
+            # Get deletion info for this chat
+            deletion_info = get_chat_deletion_info(h.timestamp, program_code)
+            
             # Add user message
-            result.append({
+            user_msg = {
                 'message': h.user_message,
                 'sender': 'user',
                 'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
-            })
+            }
+            if deletion_info:
+                user_msg['deletion_info'] = deletion_info
+            result.append(user_msg)
+            
             # Add bot message
-            result.append({
+            bot_msg = {
                 'message': h.bot_message,
                 'sender': 'bot',
                 'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
-            })
+            }
+            if deletion_info:
+                bot_msg['deletion_info'] = deletion_info
+            result.append(bot_msg)
         
         # Calculate remaining questions for today
         chatbot = ChatbotContent.get_by_code(db, program_code)
@@ -1403,102 +1413,136 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
 @app.route('/index_bcc')
 @login_required
 def index_bcc():
-    program_code = 'BCC'
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program_code)
+    user_id = current_user.id
     
-    intro_message = get_intro_message(program_code)
-    if intro_message is None:  # Handle None case
-        intro_message = "Welcome to Building Coaching Competency Chatbot! How can I help you today?"
+    # Check access for BCC program
+    if not has_chatbot_access(user_id, 'BCC'):
+        flash("You don't have access to this chatbot program.", "error")
+        return redirect(url_for('program_select'))
+    
+    chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'BCC')
+    deletion_warning = get_deletion_warning_for_user(user_id, 'BCC')
+    intro_message = get_intro_message('BCC')
     
     return render_template('index.html', 
-                         program_display_name='Building Coaching Competency',
-                         program_code=program_code,
+                         program_display_name="Building Coaching Competency",
+                         program_code="BCC",
                          intro_message=intro_message,
                          chat_history=chat_history,
-                         remaining_questions=remaining_questions,
+                         remaining_questions=remaining_quota,
                          quota=quota,
-                         current_user=current_user)
+                         current_user=current_user,
+                         deletion_warning=deletion_warning)
 
 # MI Chatbot interface
 @app.route('/index_mi')
 @login_required
 def index_mi():
-    program_code = 'MI'
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program_code)
+    user_id = current_user.id
     
-    intro_message = get_intro_message(program_code)
-    if intro_message is None:  # Handle None case
-        intro_message = "Welcome to Motivational Interviewing Chatbot! How can I help you today?"
+    # Check access for MI program
+    if not has_chatbot_access(user_id, 'MI'):
+        flash("You don't have access to this chatbot program.", "error")
+        return redirect(url_for('program_select'))
+    
+    chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'MI')
+    deletion_warning = get_deletion_warning_for_user(user_id, 'MI')
+    intro_message = get_intro_message('MI')
     
     return render_template('index.html', 
-                         program_display_name='Motivational Interviewing',
-                         program_code=program_code,
+                         program_display_name="Motivational Interviewing",
+                         program_code="MI",
                          intro_message=intro_message,
                          chat_history=chat_history,
-                         remaining_questions=remaining_questions,
+                         remaining_questions=remaining_quota,
                          quota=quota,
-                         current_user=current_user)
+                         current_user=current_user,
+                         deletion_warning=deletion_warning)
 
 # Safety Chatbot interface
 @app.route('/index_safety')
 @login_required
 def index_safety():
-    program_code = 'S&R'
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program_code)
+    user_id = current_user.id
     
-    intro_message = get_intro_message(program_code)
-    if intro_message is None:  # Handle None case
-        intro_message = "Welcome to Safety & Resilience Chatbot! How can I help you today?"
+    # Check access for Safety program
+    if not has_chatbot_access(user_id, 'S&R'):
+        flash("You don't have access to this chatbot program.", "error")
+        return redirect(url_for('program_select'))
+    
+    chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'S&R')
+    deletion_warning = get_deletion_warning_for_user(user_id, 'S&R')
+    intro_message = get_intro_message('S&R')
     
     return render_template('index.html', 
-                         program_display_name='Safety & Resilience',
-                         program_code=program_code,
+                         program_display_name="Safety and Risk",
+                         program_code="S&R",
                          intro_message=intro_message,
                          chat_history=chat_history,
-                         remaining_questions=remaining_questions,
+                         remaining_questions=remaining_quota,
                          quota=quota,
-                         current_user=current_user)
+                         current_user=current_user,
+                         deletion_warning=deletion_warning)
 
 # Generic chatbot interface for custom programs
 @app.route('/index_generic/<program>')
 @login_required
 def index_generic(program):
     # Check if user has access to this program
-    if not has_chatbot_access(current_user.id, program):
-        flash('Access denied to this program.', 'error')
+    user_id = current_user.id
+    if not has_chatbot_access(user_id, program):
+        flash("You don't have access to this chatbot program.", "error")
         return redirect(url_for('program_select'))
     
-    chat_history, remaining_questions, quota = get_chat_history_and_remaining(current_user.id, program)
+    # Check if the program exists in our chatbot content
+    if program not in program_content:
+        flash(f"Program '{program}' not found.", "error")
+        return redirect(url_for('program_select'))
     
-    # Get chatbot info from database for display name and intro message
+    # Get chat history and quota information
+    chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, program)
+    
+    # Check for deletion warning
+    deletion_warning = get_deletion_warning_for_user(user_id, program)
+    
+    # Get the intro message for this program
+    intro_message = get_intro_message(program)
+    
+    # Load all available chatbots for the sidebar
+    all_available_chatbots = []
     db = get_db()
     try:
-        chatbot = ChatbotContent.get_by_code(db, program)
-        program_display_name = chatbot.name if chatbot else program
-        
-        # Format intro message with placeholders
-        if chatbot and chatbot.intro_message:
-            intro_message = chatbot.intro_message.format(
-                program=chatbot.name,
-                quota=chatbot.quota
-            )
-        else:
-            intro_message = f"Welcome to {program_display_name} Chatbot! How can I help you today?"
-        
+        # Get all active chatbots from database instead of using program_content
+        active_chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
+        for chatbot in active_chatbots:
+            if has_chatbot_access(user_id, chatbot.code):
+                all_available_chatbots.append({
+                    'code': chatbot.code,
+                    'name': chatbot.name,
+                    'category': chatbot.category or 'standard'
+                })
+    finally:
         close_db(db)
-        
-        return render_template('index.html', 
-                             program_display_name=program_display_name,
-                             program_code=program,
-                             intro_message=intro_message,
-                             chat_history=chat_history,
-                             remaining_questions=remaining_questions,
-                             quota=quota,
-                             current_user=current_user)
-    except Exception as e:
+    
+    # Get the current program's name from database
+    db = get_db()
+    try:
+        current_chatbot = ChatbotContent.get_by_code(db, program)
+        program_display_name = current_chatbot.name if current_chatbot else program
+    finally:
         close_db(db)
-        logger.error(f"Error in index_generic for program {program}: {e}")
-        return f"Error: {e}", 500
+    
+    return render_template(
+        'index.html', 
+        program_display_name=program_display_name,
+        program_code=program,
+        chat_history=chat_history,
+        remaining_questions=remaining_quota,
+        quota=quota,
+        intro_message=intro_message,
+        current_user=current_user,
+        deletion_warning=deletion_warning
+    )
 
 # Legacy index route - redirect to program selection
 @app.route('/index')
@@ -2246,7 +2290,8 @@ def get_available_chatbots():
                 "quota": chatbot.quota,
                 "intro_message": chatbot.intro_message,
                 "lo_root_ids": lo_root_ids,  # Add LO Root IDs for admin display
-                "category": chatbot.category or "standard"
+                "category": chatbot.category or "standard",
+                "auto_delete_days": chatbot.auto_delete_days  # 👈 NEW: Add auto-delete setting
             }
             result.append(chatbot_data)
         return result
@@ -2779,6 +2824,20 @@ def admin_upload():
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
+        
+        # 👈 NEW: Handle auto-delete setting safely
+        auto_delete_days = request.form.get('auto_delete_days')
+        if auto_delete_days and auto_delete_days.strip():
+            try:
+                auto_delete_days = int(auto_delete_days)
+                logger.info(f"Auto-delete setting: {auto_delete_days} days")
+            except ValueError:
+                logger.warning(f"Invalid auto_delete_days value: {auto_delete_days}, using None")
+                auto_delete_days = None
+        else:
+            auto_delete_days = None
+            logger.info("Auto-delete setting: disabled (conversations will be kept indefinitely)")
+        
         final_content = ""
         content_source = "unknown"
         
@@ -2936,7 +2995,8 @@ def admin_upload():
             is_active=True,
             category=category,
             system_prompt_role=system_prompt_role,
-            system_prompt_guidelines=system_prompt_guidelines
+            system_prompt_guidelines=system_prompt_guidelines,
+            auto_delete_days=auto_delete_days  # 👈 NEW: Auto-delete setting
         )
         db.flush()  # Ensure we get the chatbot ID
         
@@ -4573,6 +4633,130 @@ def emergency_fix_user_lo_ids():
         db.rollback()
         logger.error(f"Error fixing user LO IDs: {e}")
         return jsonify({'error': str(e)}), 500
+    finally:
+        close_db(db)
+
+@app.route('/admin/update_auto_delete_days', methods=['POST'])
+@requires_auth  
+def admin_update_auto_delete_days():
+    """Update auto-delete settings for a chatbot"""
+    db = get_db()
+    try:
+        # Accept both chatbot_code and chatbot_name for compatibility
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        auto_delete_days = request.form.get('auto_delete_days')
+        
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+        
+        # Validate and convert auto_delete_days
+        if auto_delete_days and auto_delete_days.strip():
+            try:
+                auto_delete_days = int(auto_delete_days)
+                if auto_delete_days <= 0:
+                    return jsonify({"success": False, "error": "Auto-delete days must be a positive number"}), 400
+            except ValueError:
+                return jsonify({"success": False, "error": "Auto-delete days must be a valid number"}), 400
+        else:
+            auto_delete_days = None  # Disable auto-delete
+            
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+            
+        chatbot.auto_delete_days = auto_delete_days
+        db.commit()
+        
+        # Reload content to reflect changes
+        load_program_content()
+        
+        logger.info(f"Successfully updated auto-delete setting for chatbot {chatbot_code}: {auto_delete_days} days")
+        
+        # Generate user-friendly message
+        if auto_delete_days:
+            message = f"Auto-delete setting updated: conversations will be automatically deleted after {auto_delete_days} days."
+        else:
+            message = "Auto-delete disabled: conversations will be kept indefinitely."
+        
+        return jsonify({
+            "success": True, 
+            "message": message,
+            "auto_delete_text": chatbot.get_auto_delete_text()
+        })
+        
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error in admin_update_auto_delete_days: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+def get_deletion_warning_for_user(user_id, program_code):
+    """
+    Check if user has conversations that will be deleted soon and return warning message
+    """
+    db = get_db()
+    try:
+        # Get chatbot info
+        chatbot = ChatbotContent.get_by_code(db, program_code)
+        if not chatbot or not chatbot.should_auto_delete():
+            return None
+        
+        # Calculate warning period (3 days before deletion)
+        warning_days = max(3, chatbot.auto_delete_days // 10)
+        deletion_cutoff = datetime.datetime.utcnow() - timedelta(days=chatbot.auto_delete_days)
+        warning_cutoff = datetime.datetime.utcnow() - timedelta(days=chatbot.auto_delete_days - warning_days)
+        
+        # Check for conversations that will be deleted soon
+        conversations_at_risk = db.query(ChatHistory).filter(
+            and_(
+                ChatHistory.user_id == user_id,
+                ChatHistory.program_code == program_code.upper(),
+                ChatHistory.timestamp < warning_cutoff,
+                ChatHistory.timestamp >= deletion_cutoff,  # Not yet eligible for deletion
+                ChatHistory.is_visible == True
+            )
+        ).count()
+        
+        if conversations_at_risk > 0:
+            deletion_date = datetime.datetime.utcnow() + timedelta(days=warning_days)
+            return {
+                'count': conversations_at_risk,
+                'deletion_date': deletion_date.strftime('%B %d, %Y'),
+                'days_remaining': warning_days,
+                'chatbot_name': chatbot.name
+            }
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error checking deletion warning: {e}")
+        return None
+    finally:
+        if db:
+            close_db(db)
+
+def get_chat_deletion_info(chat_timestamp, program_code):
+    """
+    Get deletion information for a specific chat message
+    Returns dict with deletion info or None if no auto-delete
+    """
+    db = get_db()
+    try:
+        # Get chatbot auto-delete setting
+        chatbot = ChatbotContent.get_by_code(db, program_code)
+        if not chatbot or not chatbot.should_auto_delete():
+            return None
+        
+        # Calculate deletion date for this specific chat
+        deletion_date = chat_timestamp + timedelta(days=chatbot.auto_delete_days)
+        days_until_deletion = (deletion_date - datetime.utcnow()).days
+        
+        return {
+            'deletion_date': deletion_date,
+            'days_until_deletion': days_until_deletion,
+            'auto_delete_days': chatbot.auto_delete_days
+        }
     finally:
         close_db(db)
 

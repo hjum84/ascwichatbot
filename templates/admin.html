@@ -345,6 +345,36 @@
                                                                     </button>
                                                                 </div>
                                                             </div>
+                                                            
+                                                            <!-- 👈 NEW: Auto-delete setting section for existing chatbots -->
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-clock-history"></i> Conversation Auto-Delete</h6>
+                                                                <div class="update-auto-delete-form">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="input-group">
+                                                                        <select class="form-select auto-delete-field">
+                                                                            <option value="" {% if not chatbot.auto_delete_days %}selected{% endif %}>Keep (never delete)</option>
+                                                                            <option value="7" {% if chatbot.auto_delete_days == 7 %}selected{% endif %}>Delete after 7 days</option>
+                                                                            <option value="30" {% if chatbot.auto_delete_days == 30 %}selected{% endif %}>Delete after 30 days</option>
+                                                                            <option value="60" {% if chatbot.auto_delete_days == 60 %}selected{% endif %}>Delete after 60 days</option>
+                                                                            <option value="90" {% if chatbot.auto_delete_days == 90 %}selected{% endif %}>Delete after 90 days</option>
+                                                                            <option value="180" {% if chatbot.auto_delete_days == 180 %}selected{% endif %}>Delete after 180 days</option>
+                                                                        </select>
+                                                                        <button type="button" class="btn btn-secondary update-auto-delete-btn">
+                                                                            <i class="bi bi-arrow-clockwise"></i> Update
+                                                                        </button>
+                                                                    </div>
+                                                                    <div class="form-text small mt-2">
+                                                                        <i class="bi bi-shield-check"></i> Current setting: 
+                                                                        {% if chatbot.auto_delete_days %}
+                                                                            Auto-delete after {{ chatbot.auto_delete_days }} days
+                                                                        {% else %}
+                                                                            Keep conversations (never delete)
+                                                                        {% endif %}<br>
+                                                                        <small class="text-muted">Users will be notified 3 days before deletion.</small>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -424,6 +454,29 @@
                                                     <span class="input-group-text">questions per day</span>
                                                 </div>
                                                 <div class="form-text">Maximum number of questions a user can ask per day. Default is 3.</div>
+                                            </div>
+                                            
+                                            <!-- 👈 NEW: Auto-delete setting for conversations -->
+                                            <div class="mb-3">
+                                                <label for="auto_delete_days" class="form-label">
+                                                    <i class="bi bi-clock-history"></i> Conversation Auto-Delete Settings
+                                                </label>
+                                                <div class="input-group">
+                                                    <select class="form-select" id="auto_delete_days" name="auto_delete_days">
+                                                        <option value="">Keep conversations (never delete)</option>
+                                                        <option value="7">Auto-delete after 7 days</option>
+                                                        <option value="30" selected>Auto-delete after 30 days (recommended)</option>
+                                                        <option value="60">Auto-delete after 60 days</option>
+                                                        <option value="90">Auto-delete after 90 days</option>
+                                                        <option value="180">Auto-delete after 180 days</option>
+                                                    </select>
+                                                    <span class="input-group-text"><i class="bi bi-shield-check"></i></span>
+                                                </div>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i> 
+                                                    <strong>Privacy Protection:</strong> User conversations will be automatically deleted after the specified period.<br>
+                                                    <small class="text-muted">Users will be notified 3 days before deletion. Leave empty to keep conversations indefinitely.</small>
+                                                </div>
                                             </div>
                                             
                                             <div class="mb-3">

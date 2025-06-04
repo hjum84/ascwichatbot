@@ -47,22 +47,22 @@
         }
         
         .header {
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(248, 250, 252, 0.8);
             backdrop-filter: saturate(180%) blur(20px);
             -webkit-backdrop-filter: saturate(180%) blur(20px);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
             padding: 0;
             margin: 0;
             position: sticky;
             top: 0;
             z-index: 100;
-            height: 52px;
+            height: 44px;
         }
         
         .header-inner {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 0 1.5rem;
+            padding: 0 20px;
             height: 100%;
             display: flex;
             justify-content: space-between;
@@ -72,68 +72,79 @@
         .logo-container {
             display: flex;
             align-items: center;
+            flex-shrink: 0;
         }
         
         .logo-banner {
-            height: 28px;
+            height: 24px;
             width: auto;
-            transition: all 0.2s ease;
+            transition: opacity 0.2s ease;
+            opacity: 0.9;
         }
         
         .logo-banner:hover {
-            opacity: 0.8;
+            opacity: 0.7;
         }
         
         .nav-menu {
             display: flex;
             align-items: center;
-            gap: 2rem;
+            gap: 20px;
         }
         
         .user-greeting {
-            font-size: 0.875rem;
+            font-size: 13px;
             color: #1d1d1f;
             font-weight: 400;
-            display: block;
+            letter-spacing: -0.01em;
+            opacity: 0.8;
+            white-space: nowrap;
         }
         
         .nav-links {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 8px;
         }
         
         .nav-link {
             color: #1d1d1f;
             text-decoration: none;
-            font-size: 0.875rem;
+            font-size: 14px;
             font-weight: 400;
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            transition: all 0.2s ease;
+            letter-spacing: -0.01em;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.15s ease;
             position: relative;
+            opacity: 0.8;
+            line-height: 1.2;
         }
         
         .nav-link:hover {
+            opacity: 1;
             background-color: rgba(0, 0, 0, 0.04);
         }
         
         .nav-link.admin {
-            background: #007aff;
-            color: white;
-            font-weight: 500;
+            color: #007aff;
+            font-weight: 400;
+            opacity: 0.9;
         }
         
         .nav-link.admin:hover {
-            background: #0056cc;
+            opacity: 1;
+            background-color: rgba(0, 122, 255, 0.06);
         }
         
         .nav-link.logout {
             color: #ff3b30;
+            opacity: 0.8;
         }
         
         .nav-link.logout:hover {
-            background-color: rgba(255, 59, 48, 0.1);
+            opacity: 1;
+            background-color: rgba(255, 59, 48, 0.06);
         }
         
         .main-content {
@@ -469,12 +480,14 @@
             font-weight: 600;
             letter-spacing: 0.5px;
             text-transform: uppercase;
-            border-radius: 8px;
+            border-radius: 6px;
             background: var(--primary-gradient);
             color: white;
-            margin-top: 0.5rem;
-            position: relative;
-            z-index: 2;
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .wheel-program-card.center .wheel-program-badge {
@@ -608,15 +621,19 @@
             align-items: center;
             justify-content: center;
             height: 20px;
-            padding: 0 0.75rem;
-            font-size: 0.6875rem;
+            padding: 0 0.5rem;
+            font-size: 0.625rem;
             font-weight: 600;
             letter-spacing: 0.5px;
             text-transform: uppercase;
-            border-radius: 12px;
-            margin-left: 0.75rem;
+            border-radius: 8px;
             background: var(--primary-gradient);
             color: white;
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
         
         .program-body {
@@ -748,33 +765,46 @@
 
         /* Mobile-specific styles - Only affects mobile/tablet devices */
         @media (max-width: 768px) {
+            .header {
+                height: 44px;
+                background: rgba(248, 250, 252, 0.85);
+            }
+            
             .header-inner {
-                padding: 0 1rem;
+                padding: 0 16px;
             }
             
             .logo-banner {
-                height: 24px;
+                height: 22px;
             }
             
             .nav-menu {
-                gap: 1rem;
+                gap: 16px;
             }
             
             .user-greeting {
-                font-size: 0.75rem;
-                white-space: nowrap;
+                font-size: 12px;
+                max-width: 70px;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                max-width: 100px;
             }
             
             .nav-links {
-                gap: 0.25rem;
+                gap: 6px;
             }
             
             .nav-link {
-                font-size: 0.75rem;
-                padding: 0.375rem 0.5rem;
+                font-size: 13px;
+                padding: 3px 6px;
+                border-radius: 5px;
+            }
+            
+            .nav-link.admin {
+                font-size: 13px;
+            }
+            
+            .nav-link.logout {
+                font-size: 13px;
             }
             
             .main-content {
@@ -982,6 +1012,22 @@
                 font-size: 0.875rem;
                 padding: 0.5rem 1rem;
             }
+            
+            /* Mobile adjustments for badges */
+            .program-badge {
+                top: 8px;
+                right: 8px;
+                font-size: 0.5625rem;
+                padding: 0 0.375rem;
+                height: 18px;
+            }
+            
+            .wheel-program-badge {
+                top: 6px;
+                right: 6px;
+                font-size: 0.5625rem;
+                padding: 0.1875rem 0.375rem;
+            }
         }
         
         /* Tablet improvements (styles for screens between mobile and desktop) */
@@ -1023,9 +1069,9 @@
                 <nav class="nav-menu">
                     <div class="user-greeting">{{ current_user.email.split('@')[0] }}</div>
                     <div class="nav-links">
-                        <a href="{{ url_for('admin') }}" class="nav-link admin">Admin</a>
                         <a href="{{ url_for('logout') }}" class="nav-link logout">Sign Out</a>
-            </div>
+                        <a href="{{ url_for('admin') }}" class="nav-link admin">Admin</a>
+                    </div>
                 </nav>
             {% endif %}
         </div>
@@ -1096,17 +1142,15 @@
                    data-description="{{ program.description.lower() }}"
                    data-category="{% if program.show_new_badge %}new{% endif %} {% if program.category %}{{ program.category | lower }}{% else %}standard{% endif %} all">
                     <div class="wheel-program-card">
+                        {% if program.show_new_badge %}
+                            <span class="wheel-program-badge badge-new">NEW</span>
+                        {% endif %}
                         <div class="wheel-program-icon">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                                 <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
                             </svg>
                         </div>
-                        <div class="wheel-program-title">
-                            {{ program.name }}
-                            {% if program.show_new_badge %}
-                                <span class="wheel-program-badge badge-new">NEW</span>
-                            {% endif %}
-                        </div>
+                        <div class="wheel-program-title">{{ program.name }}</div>
                         <div class="wheel-program-description">
                             {{ program.description }}
                         </div>
@@ -1143,6 +1187,9 @@
                    data-name="{{ program.name.lower() }}" 
                    data-description="{{ program.description.lower() }}"
                    data-category="{% if program.show_new_badge %}new{% endif %} {% if program.category %}{{ program.category | lower }}{% else %}standard{% endif %} all">
+                    {% if program.show_new_badge %}
+                        <span class="program-badge badge-new">NEW</span>
+                    {% endif %}
                     <div class="program-header">
                         <div style="display: flex; align-items: center;">
                             <div class="program-icon">
@@ -1151,12 +1198,7 @@
                                 </svg>
                             </div>
                             <div class="program-title-wrapper">
-                                <h3 class="program-title">
-                                    {{ program.name }}
-                                    {% if program.show_new_badge %}
-                                        <span class="program-badge badge-new">NEW</span>
-                                    {% endif %}
-                                </h3>
+                                <h3 class="program-title">{{ program.name }}</h3>
                             </div>
                         </div>
                     </div>

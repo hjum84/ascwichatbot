@@ -33,39 +33,40 @@
             overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
         }
         
         .page-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1.5rem;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
         }
         
         .header {
-            background: white;
-            border-radius: 12px;
-            padding: 1.25rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--shadow-md);
-            position: relative;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: saturate(180%) blur(20px);
+            -webkit-backdrop-filter: saturate(180%) blur(20px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            padding: 0;
+            margin: 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            height: 52px;
+        }
+        
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+            height: 100%;
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-
-        .header::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: var(--primary-gradient);
-            border-bottom-left-radius: 12px;
-            border-bottom-right-radius: 12px;
         }
         
         .logo-container {
@@ -74,31 +75,72 @@
         }
         
         .logo-banner {
-            height: auto;
-            max-width: 360px;
-            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+            height: 28px;
+            width: auto;
+            transition: all 0.2s ease;
         }
         
-        .user-info {
+        .logo-banner:hover {
+            opacity: 0.8;
+        }
+        
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+        
+        .user-greeting {
             font-size: 0.875rem;
-            color: #64748b;
+            color: #1d1d1f;
+            font-weight: 400;
+            display: block;
+        }
+        
+        .nav-links {
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
         
-        .user-info a {
-            color: #126A3E;
+        .nav-link {
+            color: #1d1d1f;
             text-decoration: none;
-            font-weight: 500;
+            font-size: 0.875rem;
+            font-weight: 400;
             padding: 0.5rem 0.75rem;
-            border-radius: 6px;
-            transition: all 0.2s;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            position: relative;
         }
         
-        .user-info a:hover {
-            background-color: #f1f5f9;
-            color: #34C759;
+        .nav-link:hover {
+            background-color: rgba(0, 0, 0, 0.04);
+        }
+        
+        .nav-link.admin {
+            background: #007aff;
+            color: white;
+            font-weight: 500;
+        }
+        
+        .nav-link.admin:hover {
+            background: #0056cc;
+        }
+        
+        .nav-link.logout {
+            color: #ff3b30;
+        }
+        
+        .nav-link.logout:hover {
+            background-color: rgba(255, 59, 48, 0.1);
+        }
+        
+        .main-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+            flex: 1;
         }
 
         .flash-messages {
@@ -200,7 +242,7 @@
         
         .category-tabs {
             display: flex;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
@@ -239,6 +281,251 @@
             color: #126A3E;
         }
         
+        /* View Toggle Buttons */
+        .view-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background: white;
+            border-radius: 12px;
+            box-shadow: var(--shadow-sm);
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+            border: 1px solid #e2e8f0;
+        }
+
+        .view-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #64748b;
+            background: transparent;
+            border: none;
+        }
+
+        .view-toggle.active {
+            background: var(--primary-gradient);
+            color: white;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .view-toggle:hover:not(.active) {
+            background-color: #f8fafc;
+            color: #126A3E;
+        }
+
+        .view-toggle svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Wheel View Styles */
+        .wheel-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 50vh;
+            perspective: 1000px;
+            position: relative;
+            margin-bottom: 2rem;
+            margin-top: 0rem;
+        }
+
+        .program-wheel {
+            position: relative;
+            width: 600px;
+            height: 600px;
+            transform-style: preserve-3d;
+            transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            cursor: grab;
+            user-select: none;
+        }
+
+        .wheel-item {
+            position: absolute;
+            width: 280px;
+            height: 180px;
+            left: 50%;
+            top: 50%;
+            margin-left: -140px;
+            margin-top: -90px;
+            transform-origin: center center;
+            transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            text-decoration: none;
+        }
+
+        .wheel-program-card {
+            width: 100%;
+            height: 100%;
+            background: white;
+            border-radius: 16px;
+            box-shadow: var(--shadow-lg);
+            border: 2px solid #e2e8f0;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+            transform-style: preserve-3d;
+            position: relative;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .wheel-program-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--primary-gradient);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1;
+            border-radius: 16px;
+        }
+
+        .wheel-program-card.center {
+            transform: scale(1.2) translateZ(50px);
+            border-color: #34C759;
+            box-shadow: 0 20px 40px rgba(52, 199, 89, 0.3);
+            z-index: 10;
+        }
+
+        .wheel-program-card.center::before {
+            opacity: 0.05;
+        }
+
+        .wheel-program-card.side {
+            transform: scale(0.85) translateZ(-20px);
+            opacity: 0.6;
+        }
+
+        .wheel-program-card.far {
+            transform: scale(0.7) translateZ(-40px);
+            opacity: 0.3;
+        }
+
+        .wheel-program-icon {
+            display: none;
+        }
+
+        .wheel-program-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 0.75rem;
+            line-height: 1.3;
+            position: relative;
+            z-index: 2;
+        }
+
+        .wheel-program-card.center .wheel-program-title {
+            color: #126A3E;
+        }
+
+        .wheel-program-description {
+            font-size: 0.75rem;
+            color: #64748b;
+            line-height: 1.4;
+            text-align: center;
+            margin-bottom: 0.5rem;
+            position: relative;
+            z-index: 2;
+            max-height: 2.8em;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .wheel-program-card.center .wheel-program-description {
+            color: #126A3E;
+        }
+
+        .wheel-program-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.625rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border-radius: 8px;
+            background: var(--primary-gradient);
+            color: white;
+            margin-top: 0.5rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .wheel-program-card.center .wheel-program-badge {
+            background: var(--primary-gradient);
+            color: white;
+        }
+
+        .wheel-navigation {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: var(--shadow-md);
+            z-index: 20;
+        }
+
+        .wheel-navigation:hover {
+            border-color: #34C759;
+            background: var(--primary-gradient);
+            color: white;
+            transform: translateY(-50%) scale(1.1);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .wheel-navigation.prev {
+            left: -80px;
+        }
+
+        .wheel-navigation.next {
+            right: -80px;
+        }
+
+        .wheel-navigation svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .wheel-center-info {
+            display: none;
+        }
+
+        /* Grid View (existing) */
         .programs-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -247,6 +534,14 @@
             width: 100%;
             overflow-y: auto;
             padding: 0.25rem;
+        }
+
+        .programs-grid.hidden {
+            display: none;
+        }
+
+        .wheel-container.hidden {
+            display: none;
         }
         
         .program-card {
@@ -419,53 +714,324 @@
             to { opacity: 1; }
         }
         
+        /* Mobile panorama styles for horizontal scrolling cards */
+        .programs-grid.mobile-panorama {
+            display: flex !important;
+            flex-direction: row !important; /* Ensure cards are in a row */
+            flex-wrap: nowrap !important; /* Prevent wrapping to next line */
+            overflow-x: auto !important; /* Allow horizontal scrolling */
+            overflow-y: hidden !important; /* Hide vertical scrollbar if any */
+            gap: 1rem !important;
+            padding: 0.5rem 1rem !important; /* Add some padding for scroll area */
+            scroll-snap-type: x mandatory !important;
+            scroll-behavior: smooth !important;
+            -webkit-overflow-scrolling: touch !important;
+            scrollbar-width: none !important; /* Hide scrollbar for Firefox */
+        }
+        
+        .programs-grid.mobile-panorama::-webkit-scrollbar {
+            display: none !important; /* Hide scrollbar for Webkit browsers */
+        }
+        
+        .programs-grid.mobile-panorama .program-card {
+            flex: 0 0 auto !important; /* Prevent shrinking/growing, auto width based on content or fixed width */
+            width: 80vw !important; /* Adjust card width for panorama view, e.g., 80% of viewport width */
+            max-width: 300px !important; /* Optional: max width for a card */
+            min-height: 220px !important; /* Ensure cards have enough height */
+            margin: 0 !important; /* Remove extra margins */
+            scroll-snap-align: center !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important; /* Better content distribution */
+            animation: none !important;
+        }
+
+        /* Mobile-specific styles - Only affects mobile/tablet devices */
         @media (max-width: 768px) {
-            .page-container {
-                padding: 1rem;
-            }
-            
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 1rem;
+            .header-inner {
+                padding: 0 1rem;
             }
             
             .logo-banner {
-                max-width: 280px;
+                height: 24px;
+            }
+            
+            .nav-menu {
+                gap: 1rem;
+            }
+            
+            .user-greeting {
+                font-size: 0.75rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 100px;
+            }
+            
+            .nav-links {
+                gap: 0.25rem;
+            }
+            
+            .nav-link {
+                font-size: 0.75rem;
+                padding: 0.375rem 0.5rem;
+            }
+            
+            .main-content {
+                padding: 1rem;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            
+            .title-section {
+                margin-bottom: 1.5rem;
+                padding: 0;
+                width: 100%;
+            }
+
+            .search-bar {
+                margin-bottom: 1.5rem;
+                padding: 0;
+                width: 100%;
+                max-width: 100%;
             }
             
             .title-section h1 {
                 font-size: 1.5rem;
+                line-height: 1.2;
             }
             
-            .programs-grid {
-                grid-template-columns: 1fr;
+            .title-section p {
+                font-size: 0.875rem;
+                margin-bottom: 1rem;
+                line-height: 1.4;
             }
             
-            .program-card {
-                max-width: 100%;
+            .search-input {
+                font-size: 0.875rem;
+                padding: 0.75rem 1rem;
+                padding-left: 3rem;
+                width: 100%;
+                box-sizing: border-box;
             }
             
             .category-tabs {
-                padding-bottom: 0.5rem;
+                padding: 0;
+                margin-bottom: 1.5rem;
+                overflow-x: auto;
+                white-space: nowrap;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+                width: 100%;
+            }
+            
+            .category-tabs::-webkit-scrollbar {
+                display: none;
+            }
+            
+            .category-tab {
+                flex-shrink: 0;
+                font-size: 0.75rem;
+                padding: 0.5rem 0.75rem;
+                margin-right: 0.5rem;
+            }
+            
+            .category-tab:last-child {
+                margin-right: 1rem;
+            }
+            
+            /* Mobile View Controls - IMPORTANT: Make sure they're visible */
+            .view-controls {
+                display: flex !important;
+                justify-content: center;
+                align-items: center;
+                margin: 0 auto 1.5rem auto;
+                width: fit-content;
+                gap: 0.5rem;
+                padding: 0.5rem;
+                background: white;
+                border-radius: 12px;
+                box-shadow: var(--shadow-sm);
+                border: 1px solid #e2e8f0;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+            
+            .view-toggle {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.75rem;
+                border-radius: 8px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s;
+                color: #64748b;
+                background: transparent;
+                border: none;
+                display: flex;
+                align-items: center;
+                gap: 0.375rem;
+            }
+            
+            .view-toggle.active {
+                background: var(--primary-gradient);
+                color: white;
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .view-toggle:hover:not(.active) {
+                background-color: #f8fafc;
+                color: #126A3E;
+            }
+            
+            .view-toggle svg {
+                width: 16px;
+                height: 16px;
+            }
+            
+            /* Mobile Wheel View (Panorama) */
+            .wheel-container.mobile-wheel {
+                display: block !important;
+                min-height: 40vh;
+                padding: 1rem 0;
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                scroll-snap-type: x mandatory;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+                width: 100%;
+            }
+            
+            .wheel-container.mobile-wheel::-webkit-scrollbar {
+                display: none;
+            }
+            
+            .wheel-container.mobile-wheel .program-wheel {
+                display: flex !important;
+                flex-direction: row;
+                width: auto;
+                height: auto;
+                gap: 1rem;
+                padding: 0 1rem;
+                transform: none !important;
+            }
+            
+            .wheel-container.mobile-wheel .wheel-item {
+                position: static !important;
+                width: 80vw !important;
+                max-width: 300px !important;
+                height: auto !important;
+                margin: 0 !important;
+                transform: none !important;
+                flex: 0 0 auto;
+                scroll-snap-align: center;
+            }
+            
+            .wheel-container.mobile-wheel .wheel-program-card {
+                transform: none !important;
+                opacity: 1 !important;
+                box-shadow: var(--shadow-md) !important;
+                border-color: #e2e8f0 !important;
+                min-height: 200px;
+            }
+            
+            .wheel-container.mobile-wheel .wheel-program-card.center,
+            .wheel-container.mobile-wheel .wheel-program-card.side,
+            .wheel-container.mobile-wheel .wheel-program-card.far {
+                transform: none !important;
+                opacity: 1 !important;
+                z-index: auto !important;
+            }
+            
+            .wheel-container.mobile-wheel .wheel-navigation {
+                display: none !important;
+            }
+            
+            /* Mobile Grid View */
+            .programs-grid.mobile-grid {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 1rem !important;
+                padding: 0 !important;
+                overflow-x: visible !important;
+                overflow-y: visible !important;
+                width: 100%;
+            }
+            
+            .programs-grid.mobile-grid .program-card {
+                width: 100% !important;
+                max-width: none !important;
+                flex: none !important;
+                margin: 0 !important;
+                scroll-snap-align: none !important;
+            }
+            
+            .program-title {
+                font-size: 1rem;
+                margin-bottom: 0.5rem;
+            }
+            
+            .program-description {
+                font-size: 0.875rem;
+                line-height: 1.4;
+                margin-bottom: 0.75rem;
+            }
+            
+            .program-button {
+                font-size: 0.875rem;
+                padding: 0.5rem 1rem;
+            }
+        }
+        
+        /* Tablet improvements (styles for screens between mobile and desktop) */
+        @media (min-width: 769px) and (max-width: 1024px) {
+            /* Tablet styles remain largely the same as desktop, but you can add specifics here */
+            .header-inner {
+                padding: 0 1.5rem;
+            }
+            
+            .nav-menu {
+                gap: 1.5rem;
+            }
+            
+            .user-greeting {
+                font-size: 0.8rem;
+            }
+            
+             .programs-grid:not(.mobile-grid):not(.mobile-panorama) {
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                gap: 1.5rem;
+                overflow-x: visible !important; 
+            }
+
+            .program-card:not(.mobile-grid .program-card):not(.mobile-panorama .program-card) {
+                width: auto !important;
+                flex: 1 1 280px !important; 
             }
         }
     </style>
 </head>
 <body>
     <div class="page-container">
-        <div class="header">
+        <header class="header">
+            <div class="header-inner">
             <div class="logo-container">
-                <img src="{{ url_for('static', filename='images/logo-banner.png') }}" alt="Logo" class="logo-banner">
+                    <img src="{{ url_for('static', filename='images/logo-banner.png') }}" alt="NYC DOE Training and Workforce Development" class="logo-banner">
             </div>
-            {% if current_user and current_user.is_authenticated %}
-            <div class="user-info">
-                Logged in as: <strong>{{ current_user.email }}</strong> | 
-                <a href="{{ url_for('logout') }}">Logout</a>
-                <a href="{{ url_for('admin') }}" style="font-size: 0.9em; color: #666; padding-left:8px;">Go to Admin Page</a>
+                {% if current_user and current_user.is_authenticated %}
+                <nav class="nav-menu">
+                    <div class="user-greeting">{{ current_user.email.split('@')[0] }}</div>
+                    <div class="nav-links">
+                        <a href="{{ url_for('admin') }}" class="nav-link admin">Admin</a>
+                        <a href="{{ url_for('logout') }}" class="nav-link logout">Sign Out</a>
             </div>
+                </nav>
             {% endif %}
         </div>
+        </header>
+        
+        <main class="main-content">
         
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -502,7 +1068,65 @@
             <button class="category-tab" data-category="elearning">eLearning</button>
         </div>
         
-        <div class="programs-grid">
+        <div class="view-controls">
+            <button class="view-toggle active" data-view="wheel">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <circle cx="12" cy="12" r="6"/>
+                    <circle cx="12" cy="12" r="2"/>
+                </svg>
+                Wheel View
+            </button>
+            <button class="view-toggle" data-view="grid">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"/>
+                    <rect x="14" y="3" width="7" height="7"/>
+                    <rect x="14" y="14" width="7" height="7"/>
+                    <rect x="3" y="14" width="7" height="7"/>
+                </svg>
+                Grid View
+            </button>
+        </div>
+        
+        <div class="wheel-container" id="wheelContainer">
+            <div class="program-wheel">
+                {% for program in available_programs %}
+                <a href="{{ url_for('set_program', program=program.code) }}" class="wheel-item" 
+                   data-name="{{ program.name.lower() }}" 
+                   data-description="{{ program.description.lower() }}"
+                   data-category="{% if program.show_new_badge %}new{% endif %} {% if program.category %}{{ program.category | lower }}{% else %}standard{% endif %} all">
+                    <div class="wheel-program-card">
+                        <div class="wheel-program-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                                <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
+                            </svg>
+                        </div>
+                        <div class="wheel-program-title">
+                            {{ program.name }}
+                            {% if program.show_new_badge %}
+                                <span class="wheel-program-badge badge-new">NEW</span>
+                            {% endif %}
+                        </div>
+                        <div class="wheel-program-description">
+                            {{ program.description }}
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            <div class="wheel-navigation prev">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M15 19l-7-7 7-7"/>
+                </svg>
+            </div>
+            <div class="wheel-navigation next">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 5l7 7-7 7"/>
+                </svg>
+            </div>
+        </div>
+        
+        <div class="programs-grid hidden" id="programsGrid">
             {% if available_programs|length == 0 %}
                 <div class="empty-state">
                     <div class="empty-state-icon">
@@ -551,6 +1175,7 @@
                 {% endfor %}
             {% endif %}
         </div>
+        </main>
     </div>
 
     <script>
@@ -558,50 +1183,8 @@
         const programSearch = document.getElementById('programSearch');
         const programCards = document.querySelectorAll('.program-card');
         
-        programSearch.addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase().trim();
-            
-            programCards.forEach(card => {
-                const name = card.getAttribute('data-name');
-                const description = card.getAttribute('data-description');
-                
-                if (name.includes(searchTerm) || description.includes(searchTerm)) {
-                    card.style.display = '';
-                } else {
-                    card.style.display = 'none';
-                }
-            });
-            
-            checkEmptyState();
-        });
-        
-        // Filter programs by category
+        // Removed old event listeners - replaced with unified ones below
         const categoryTabs = document.querySelectorAll('.category-tab');
-        
-        categoryTabs.forEach(tab => {
-            tab.addEventListener('click', function() {
-                // Remove active class from all tabs
-                categoryTabs.forEach(t => t.classList.remove('active'));
-                
-                // Add active class to clicked tab
-                this.classList.add('active');
-                
-                const category = this.getAttribute('data-category');
-                
-                // Filter cards by category
-                programCards.forEach(card => {
-                    const categories = card.getAttribute('data-category').split(' ');
-                    
-                    if (categories.includes(category)) {
-                        card.style.display = '';
-                    } else {
-                        card.style.display = 'none';
-                    }
-                });
-                
-                checkEmptyState();
-            });
-        });
         
         // Check if no programs are visible and show empty state
         function checkEmptyState() {
@@ -628,6 +1211,541 @@
                 emptyState.remove();
             }
         }
+
+        // View toggle functionality (kept for backward compatibility)
+        const viewControls = document.querySelector('.view-controls');
+        const wheelContainer = document.querySelector('.wheel-container');
+        const programsGrid = document.querySelector('.programs-grid');
+
+        // Wheel View Functionality
+        let currentWheelIndex = 0;
+        let wheelItems = [];
+        let isWheelAnimating = false;
+        
+        // Drag functionality variables
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragCurrentX = 0;
+        let dragThreshold = 50; // minimum pixels to trigger rotation
+
+        function initWheelView() {
+            wheelItems = Array.from(document.querySelectorAll('.wheel-item'));
+            if (wheelItems.length === 0) return;
+            
+            const isMobile = window.innerWidth <= 480;
+            
+            if (isMobile) {
+                // Mobile: 파노라마 스크롤 설정
+                setupMobileScrollWheel();
+            } else {
+                // Desktop: 기존 3D 휠 설정
+                setupWheelPositions();
+                updateWheelDisplay();
+                
+                // Add navigation listeners
+                const prevBtn = document.querySelector('.wheel-navigation.prev');
+                const nextBtn = document.querySelector('.wheel-navigation.next');
+                
+                prevBtn.addEventListener('click', () => rotateWheel(-1));
+                nextBtn.addEventListener('click', () => rotateWheel(1));
+                
+                // Add keyboard navigation
+                document.addEventListener('keydown', handleWheelKeyboard);
+                
+                // Desktop-only features
+                const wheelElement = document.querySelector('.program-wheel');
+                wheelElement.addEventListener('wheel', handleWheelMouse);
+                wheelElement.addEventListener('mousedown', handleWheelDragStart);
+                document.addEventListener('mousemove', handleWheelDragMove);
+                document.addEventListener('mouseup', handleWheelDragEnd);
+                
+                // Add click handlers to wheel items
+                wheelItems.forEach((item, index) => {
+                    const card = item.querySelector('.wheel-program-card');
+                    card.addEventListener('click', (e) => {
+                        if (isDragging || Math.abs(dragCurrentX - dragStartX) > 10) {
+                            e.preventDefault();
+                            return;
+                        }
+                        
+                        if (index !== currentWheelIndex) {
+                            e.preventDefault();
+                            const diff = index - currentWheelIndex;
+                            rotateWheel(diff);
+                        }
+                    });
+                });
+            }
+            
+            // Show wheel by default
+            wheelContainer.classList.remove('hidden');
+            programsGrid.classList.add('hidden');
+        }
+        
+        function setupMobileScrollWheel() {
+            const wheelElement = document.querySelector('.program-wheel');
+            if (!wheelElement) return;
+            
+            // 모바일에서는 모든 카드가 현재 상태(center)로 표시되도록
+            wheelItems.forEach((item, index) => {
+                const card = item.querySelector('.wheel-program-card');
+                card.classList.remove('side', 'far');
+                card.classList.add('center');
+                
+                // 카드 클릭 시 해당 프로그램으로 이동
+                card.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const href = item.getAttribute('href');
+                    if (href) {
+                        window.location.href = href;
+                    }
+                });
+            });
+            
+            // 스크롤을 부드럽게 만들기
+            wheelElement.style.scrollBehavior = 'smooth';
+            
+            // 첫 번째 카드가 중앙에 오도록 초기 스크롤 위치 설정
+            setTimeout(() => {
+                if (wheelItems.length > 0) {
+                    const firstCard = wheelItems[0];
+                    firstCard.scrollIntoView({ 
+                        behavior: 'smooth', 
+                        block: 'nearest', 
+                        inline: 'center' 
+                    });
+                }
+            }, 100);
+        }
+
+        function setupMobileWheelView() {
+            wheelItems = Array.from(document.querySelectorAll('.wheel-item'));
+            if (wheelItems.length === 0) return;
+            
+            const wheelElement = document.querySelector('.program-wheel');
+            if (!wheelElement) return;
+            
+            // 모바일에서는 모든 카드가 일반 상태로 표시되도록
+            wheelItems.forEach((item, index) => {
+                const card = item.querySelector('.wheel-program-card');
+                card.classList.remove('side', 'far', 'center');
+                
+                // 카드 클릭 시 해당 프로그램으로 이동 (기존 href 사용)
+                card.addEventListener('click', (e) => {
+                    const href = item.getAttribute('href');
+                    if (href) {
+                        window.location.href = href;
+                    }
+                });
+            });
+            
+            // 스크롤을 부드럽게 만들기
+            wheelElement.style.scrollBehavior = 'smooth';
+        }
+
+        function setupWheelPositions() {
+            const isMobile = window.innerWidth <= 480;
+            
+            if (isMobile) {
+                // Mobile: Simple positioning
+                wheelItems.forEach((item, index) => {
+                    item.style.transform = 'none';
+                    item.style.setProperty('--wheel-angle', '0deg');
+                });
+            } else {
+                // Desktop: 3D positioning
+                const totalItems = wheelItems.length;
+                const angleStep = 360 / totalItems;
+                
+                wheelItems.forEach((item, index) => {
+                    const angle = index * angleStep;
+                    item.style.setProperty('--wheel-angle', `${angle}deg`);
+                    item.style.transform = `rotateY(${angle}deg) translateZ(300px)`;
+                });
+            }
+        }
+
+        function rotateWheel(direction) {
+            const isMobile = window.innerWidth <= 480;
+            
+            // 모바일에서는 rotateWheel 사용하지 않음
+            if (isMobile) return;
+            
+            if (isWheelAnimating || wheelItems.length === 0) return;
+            
+            isWheelAnimating = true;
+            currentWheelIndex = (currentWheelIndex + direction + wheelItems.length) % wheelItems.length;
+            
+            updateWheelDisplay();
+            
+            setTimeout(() => {
+                isWheelAnimating = false;
+            }, 800);
+        }
+
+        function updateWheelDisplay() {
+            const isMobile = window.innerWidth <= 480;
+            
+            if (isMobile) {
+                // Mobile: 파노라마 스크롤은 별도 처리 필요 없음
+                return;
+            } else {
+                // Desktop: 3D wheel
+                const wheel = document.querySelector('.program-wheel');
+                const totalItems = wheelItems.length;
+                const angleStep = 360 / totalItems;
+                const currentAngle = -currentWheelIndex * angleStep;
+                
+                // Rotate the wheel
+                wheel.style.transform = `rotateY(${currentAngle}deg)`;
+                
+                // Update card states
+                wheelItems.forEach((item, index) => {
+                    const card = item.querySelector('.wheel-program-card');
+                    const distance = Math.abs(index - currentWheelIndex);
+                    const normalizedDistance = Math.min(distance, totalItems - distance);
+                    
+                    // Reset classes
+                    card.classList.remove('center', 'side', 'far');
+                    
+                    // Add appropriate class based on position
+                    if (normalizedDistance === 0) {
+                        card.classList.add('center');
+                    } else if (normalizedDistance === 1) {
+                        card.classList.add('side');
+                    } else {
+                        card.classList.add('far');
+                    }
+                });
+            }
+        }
+
+        function updateCenterInfo() {
+            // Center info functionality removed since description is now in cards
+        }
+
+        function handleWheelKeyboard(e) {
+            if (!wheelContainer.classList.contains('hidden')) {
+                switch(e.key) {
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        rotateWheel(-1);
+                        break;
+                    case 'ArrowRight':
+                        e.preventDefault();
+                        rotateWheel(1);
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        if (wheelItems[currentWheelIndex]) {
+                            window.location.href = wheelItems[currentWheelIndex].getAttribute('href');
+                        }
+                        break;
+                }
+            }
+        }
+
+        function handleWheelMouse(e) {
+            if (!wheelContainer.classList.contains('hidden')) {
+                e.preventDefault();
+                
+                // Determine wheel direction
+                const delta = e.deltaY || e.deltaX;
+                if (delta > 0) {
+                    rotateWheel(1); // Wheel down/right
+                } else if (delta < 0) {
+                    rotateWheel(-1); // Wheel up/left
+                }
+            }
+        }
+
+        function handleWheelDragStart(e) {
+            if (!wheelContainer.classList.contains('hidden') && !isWheelAnimating) {
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragCurrentX = e.clientX;
+                
+                // Prevent text selection during drag
+                e.preventDefault();
+                
+                // Add visual feedback
+                const wheelElement = document.querySelector('.program-wheel');
+                wheelElement.style.cursor = 'grabbing';
+            }
+        }
+
+        function handleWheelDragMove(e) {
+            if (!isDragging || wheelContainer.classList.contains('hidden')) return;
+            
+            e.preventDefault();
+            dragCurrentX = e.clientX;
+            
+            // Optional: Add visual drag feedback here if needed
+            // You could show the drag distance or animate the wheel slightly
+        }
+
+        function handleWheelDragEnd(e) {
+            if (!isDragging) return;
+            
+            isDragging = false;
+            const wheelElement = document.querySelector('.program-wheel');
+            wheelElement.style.cursor = 'grab';
+            
+            // Calculate drag distance and direction
+            const dragDistance = dragCurrentX - dragStartX;
+            
+            // If drag distance exceeds threshold, rotate wheel
+            if (Math.abs(dragDistance) >= dragThreshold) {
+                if (dragDistance > 0) {
+                    // Dragged right, rotate wheel left (previous item)
+                    rotateWheel(-1);
+                } else {
+                    // Dragged left, rotate wheel right (next item)
+                    rotateWheel(1);
+                }
+            }
+            
+            // Reset drag variables
+            dragStartX = 0;
+            dragCurrentX = 0;
+        }
+
+        // Filter wheel items based on category and search
+        function filterWheelItems() {
+            const searchTerm = programSearch.value.toLowerCase().trim();
+            const activeCategory = document.querySelector('.category-tab.active').getAttribute('data-category');
+            
+            // Get all wheel items (not just filtered ones)
+            const allWheelItems = Array.from(document.querySelectorAll('.wheel-item'));
+            
+            allWheelItems.forEach(item => {
+                const name = item.getAttribute('data-name');
+                const description = item.getAttribute('data-description');
+                const categories = item.getAttribute('data-category').split(' ');
+                
+                const matchesSearch = searchTerm === '' || name.includes(searchTerm) || description.includes(searchTerm);
+                const matchesCategory = categories.includes(activeCategory);
+                
+                if (matchesSearch && matchesCategory) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+            
+            // Update wheel items array to only include visible items
+            wheelItems = allWheelItems.filter(item => 
+                item.style.display !== 'none'
+            );
+            
+            // Reset wheel position
+            currentWheelIndex = 0;
+            const isMobile = window.innerWidth <= 768;
+            
+            if (wheelItems.length > 0) {
+                if (isMobile && wheelContainer.classList.contains('mobile-wheel')) {
+                    setupMobileWheelView();
+                } else if (!isMobile) {
+                    setupWheelPositions();
+                    updateWheelDisplay();
+                }
+            } else {
+                // If no items match, show empty wheel
+                const wheel = document.querySelector('.program-wheel');
+                if (!isMobile) {
+                    wheel.style.transform = 'rotateY(0deg)';
+                }
+            }
+        }
+
+        // Update the existing search and category filters to work with wheel view
+        programSearch.addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase().trim();
+            
+            // Filter grid view
+            programCards.forEach(card => {
+                const name = card.getAttribute('data-name');
+                const description = card.getAttribute('data-description');
+                
+                if (searchTerm === '' || name.includes(searchTerm) || description.includes(searchTerm)) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            
+            // Filter wheel view if active
+            if (!wheelContainer.classList.contains('hidden')) {
+                filterWheelItems();
+            }
+            
+            checkEmptyState();
+        });
+        
+        // Update category filtering to work with wheel view
+        categoryTabs.forEach(tab => {
+            tab.addEventListener('click', function() {
+                // Remove active class from all tabs
+                categoryTabs.forEach(t => t.classList.remove('active'));
+                
+                // Add active class to clicked tab
+                this.classList.add('active');
+                
+                const category = this.getAttribute('data-category');
+                
+                // Filter grid view cards
+                programCards.forEach(card => {
+                    const categories = card.getAttribute('data-category').split(' ');
+                    
+                    if (categories.includes(category)) {
+                        card.style.display = '';
+                    } else {
+                        card.style.display = 'none';
+                    }
+                });
+                
+                // Filter wheel view if active
+                if (!wheelContainer.classList.contains('hidden')) {
+                    filterWheelItems();
+                }
+                
+                checkEmptyState();
+            });
+        });
+        
+        // Initialize view on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const wheelToggle = document.querySelector('.view-toggle[data-view="wheel"]');
+            const gridToggle = document.querySelector('.view-toggle[data-view="grid"]');
+            const viewControls = document.querySelector('.view-controls');
+
+            function isMobileDevice() {
+                return window.innerWidth <= 768;
+            }
+
+            function forceShowViewControls() {
+                if (viewControls) {
+                    viewControls.style.display = 'flex';
+                    viewControls.style.visibility = 'visible';
+                    viewControls.style.opacity = '1';
+                }
+            }
+
+            function setMobileWheelView() {
+                if (wheelContainer) {
+                    wheelContainer.classList.remove('hidden');
+                    wheelContainer.classList.add('mobile-wheel');
+                }
+                if (programsGrid) {
+                    programsGrid.classList.add('hidden');
+                    programsGrid.classList.remove('mobile-grid');
+                }
+                setupMobileWheelView();
+            }
+
+            function setMobileGridView() {
+                if (programsGrid) {
+                    programsGrid.classList.remove('hidden');
+                    programsGrid.classList.add('mobile-grid');
+                }
+                if (wheelContainer) {
+                    wheelContainer.classList.add('hidden');
+                    wheelContainer.classList.remove('mobile-wheel');
+                }
+            }
+
+            function setDesktopWheelView() {
+                if (wheelContainer) {
+                    wheelContainer.classList.remove('hidden', 'mobile-wheel');
+                }
+                if (programsGrid) {
+                    programsGrid.classList.add('hidden');
+                    programsGrid.classList.remove('mobile-grid');
+                }
+                initWheelView();
+            }
+
+            function setDesktopGridView() {
+                if (wheelContainer) {
+                    wheelContainer.classList.add('hidden');
+                    wheelContainer.classList.remove('mobile-wheel');
+                }
+                if (programsGrid) {
+                    programsGrid.classList.remove('hidden', 'mobile-grid');
+                }
+            }
+
+            function updateViewBasedOnToggle() {
+                const isMobile = isMobileDevice();
+                const isWheelActive = wheelToggle && wheelToggle.classList.contains('active');
+
+                // Always ensure view controls are visible
+                forceShowViewControls();
+
+                if (isMobile) {
+                    if (isWheelActive) {
+                        setMobileWheelView();
+                    } else {
+                        setMobileGridView();
+                    }
+                } else {
+                    if (isWheelActive) {
+                        setDesktopWheelView();
+                    } else {
+                        setDesktopGridView();
+                    }
+                }
+            }
+
+            // Debug logging
+            console.log('Initializing view controls');
+            console.log('Is mobile:', isMobileDevice());
+            console.log('View controls element:', viewControls);
+            console.log('Wheel toggle:', wheelToggle);
+            console.log('Grid toggle:', gridToggle);
+            
+            // Force show view controls first
+            forceShowViewControls();
+            
+            // Initial setup
+            if (wheelToggle && !gridToggle.classList.contains('active')) {
+                wheelToggle.classList.add('active');
+                console.log('Set wheel toggle as active');
+            }
+            
+            // Small delay to ensure DOM is ready
+            setTimeout(() => {
+                console.log('Running delayed initialization');
+                forceShowViewControls();
+                updateViewBasedOnToggle();
+            }, 100);
+
+            // Handle view toggle clicks
+            if (wheelToggle) {
+                wheelToggle.addEventListener('click', function() {
+                    this.classList.add('active');
+                    if (gridToggle) gridToggle.classList.remove('active');
+                    updateViewBasedOnToggle();
+                });
+            }
+
+            if (gridToggle) {
+                gridToggle.addEventListener('click', function() {
+                    this.classList.add('active');
+                    if (wheelToggle) wheelToggle.classList.remove('active');
+                    updateViewBasedOnToggle();
+                });
+            }
+
+            // Handle window resize
+            let resizeTimeout;
+            window.addEventListener('resize', function() {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(function() {
+                    updateViewBasedOnToggle();
+                }, 250);
+            });
+        });
     </script>
 </body>
 </html>

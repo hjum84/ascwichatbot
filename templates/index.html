@@ -621,14 +621,14 @@
                     const messageText = JSON.parse(rawData);
                     const p = messageDiv.querySelector('p') || document.createElement('p');
                     
-                    if (typeof marked !== 'undefined') {
+            if (typeof marked !== 'undefined') {
                         const parsedContent = marked.parse(messageText);
                         p.innerHTML = typeof DOMPurify !== 'undefined' ? 
                                       DOMPurify.sanitize(parsedContent) : 
                                       parsedContent;
-                    } else {
+            } else {
                         p.textContent = messageText;
-                    }
+            }
                     
                     if (!messageDiv.querySelector('p')) {
                         messageDiv.appendChild(p);

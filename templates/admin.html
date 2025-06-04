@@ -204,15 +204,15 @@
                                                         <div class="d-flex justify-content-between align-items-center">
                                                             <h5 class="mb-0">{{ chatbot.display_name }}</h5>
                                                             <div class="chatbot-id-badge">{{ chatbot.code }}</div>
+                                                            </div>
                                                         </div>
-                                                    </div>
                                                     <div class="card-body chatbot-card-body">
                                                         <!-- Quick Info Summary -->
                                                         <div class="chatbot-quick-info">
                                                             <div class="chatbot-quota-info">
                                                                 <i class="bi bi-clock-history"></i>
                                                                 <span>{{ chatbot.quota | default(3) }} questions/day</span>
-                                                            </div>
+                                                    </div>
                                                             <div class="chatbot-category-badge {{ chatbot.category if chatbot.category else 'standard' }}">
                                                                 {{ chatbot.category if chatbot.category else 'standard' }}
                                                             </div>
@@ -246,56 +246,56 @@
                                                                 <h6><i class="bi bi-card-text"></i> Description</h6>
                                                                 <p class="text-muted small mb-2">{{ chatbot.description or 'No description available' }}</p>
                                                                 <div class="update-desc-form">
-                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="mb-2">
+                                                                        <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                        <div class="mb-2">
                                                                         <textarea class="form-control description-field" rows="2" placeholder="Update description...">{{ chatbot.description }}</textarea>
-                                                                    </div>
+                                                                        </div>
                                                                     <button type="button" class="btn btn-primary update-desc-btn">
                                                                         <i class="bi bi-check-circle"></i> Update Description
                                                                     </button>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
                                                             
                                                             <!-- Daily Quota Section -->
                                                             <div class="chatbot-form-section">
                                                                 <h6><i class="bi bi-speedometer2"></i> Daily Quota</h6>
                                                                 <div class="update-quota-form">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="input-group">
+                                                                        <div class="input-group">
                                                                         <input type="number" class="form-control quota-field" value="{{ chatbot.quota | default(3) }}" min="1">
                                                                         <button type="button" class="btn btn-secondary update-quota-btn">
                                                                             <i class="bi bi-arrow-clockwise"></i> Update
                                                                         </button>
-                                                                    </div>
+                                                                        </div>
                                                                     <div class="form-text small mt-2">
                                                                         <i class="bi bi-info-circle"></i> Maximum questions a user can ask per day
                                                                     </div>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                            
+                                                                
                                                             <!-- Category Section -->
                                                             <div class="chatbot-form-section">
                                                                 <h6><i class="bi bi-tags"></i> Category</h6>
                                                                 <div class="update-category-form">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="input-group">
+                                                                        <div class="input-group">
                                                                         <select class="form-select category-field">
-                                                                            <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
-                                                                            <option value="tap" {% if chatbot is defined and chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
-                                                                            <option value="jsa" {% if chatbot is defined and chatbot.category == 'jsa' %}selected{% endif %}>JSA Programs</option>
+                                                                                <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
+                                                                                <option value="tap" {% if chatbot is defined and chatbot.category == 'tap' %}selected{% endif %}>TAP Programs</option>
+                                                                                <option value="jsa" {% if chatbot is defined and chatbot.category == 'jsa' %}selected{% endif %}>JSA Programs</option>
                                                                             <option value="ild" {% if chatbot is defined and chatbot.category == 'ild' %}selected{% endif %}>ILD Programs</option>
-                                                                            <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
-                                                                        </select>
+                                                                                <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
+                                                                            </select>
                                                                         <button type="button" class="btn btn-secondary update-category-btn">
                                                                             <i class="bi bi-arrow-clockwise"></i> Update
                                                                         </button>
-                                                                    </div>
+                                                                        </div>
                                                                     <div class="form-text small mt-2">
                                                                         <i class="bi bi-info-circle"></i> Category determines how the program is grouped on the selection page
-                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                            
+                                                        </div>
+                                                        
                                                             <div class="chatbot-form-section">
                                                                 <h6><i class="bi bi-shield-lock"></i> Access Control</h6>
                                                                 <div class="update-lo-root-form">
@@ -313,26 +313,26 @@
                                                                         <i class="bi bi-shield-check"></i> Update Access Control
                                                                     </button>
                                                                 </div>
-                                                            </div>
-                                                            
+                                                                </div>
+                                                                
                                                             <!-- Intro Message Section -->
                                                             <div class="chatbot-form-section">
                                                                 <h6><i class="bi bi-chat-left-quote"></i> Intro Message</h6>
                                                                 <div class="update-intro-form">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
-                                                                    <div class="card mb-2 bg-light">
-                                                                        <div class="card-body py-2">
-                                                                            <div class="intro-message-preview">
-                                                                                <strong>Preview:</strong> <span class="preview-text">
-                                                                                    {% if 'intro_message' in chatbot %}
-                                                                                        {{ chatbot.intro_message.replace('{program}', chatbot.display_name).replace('{quota}', chatbot.quota | string) }}
-                                                                                    {% else %}
-                                                                                        Hi, I am the {{ chatbot.display_name }} chatbot. I can answer up to {{ chatbot.quota }} question(s) related to this program per day.
-                                                                                    {% endif %}
-                                                                                </span>
+                                                                        <div class="card mb-2 bg-light">
+                                                                            <div class="card-body py-2">
+                                                                                <div class="intro-message-preview">
+                                                                                    <strong>Preview:</strong> <span class="preview-text">
+                                                                                        {% if 'intro_message' in chatbot %}
+                                                                                            {{ chatbot.intro_message.replace('{program}', chatbot.display_name).replace('{quota}', chatbot.quota | string) }}
+                                                                                        {% else %}
+                                                                                            Hi, I am the {{ chatbot.display_name }} chatbot. I can answer up to {{ chatbot.quota }} question(s) related to this program per day.
+                                                                                        {% endif %}
+                                                                                    </span>
+                                                                                </div>
                                                                             </div>
                                                                         </div>
-                                                                    </div>
                                                                     <div class="mb-2">
                                                                         <textarea class="form-control intro-field" rows="2">{% if 'intro_message' in chatbot %}{{ chatbot.intro_message }}{% else %}Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.{% endif %}</textarea>
                                                                         <div class="form-text small">

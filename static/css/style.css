@@ -971,7 +971,7 @@
           background-color: #0dcaf0 !important;
           border-color: #0dcaf0 !important;
           color: #000 !important; /* Black text for better contrast on light blue */
-        }
+        } 
 
         /* New Modern Chatbot Management Styles */
         .chatbot-search-container {

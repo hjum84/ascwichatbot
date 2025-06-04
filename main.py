@@ -3191,15 +3191,36 @@ def admin_permanent_delete_chatbot():
         if not chatbot:
             return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found."}), 404
 
-        # Permanently delete the chatbot
+        chatbot_id = chatbot.id
+        chatbot_name = chatbot.name
+
+        # Delete related data first to avoid foreign key constraints
+        logger.info(f"Starting permanent deletion process for chatbot: {chatbot_code} (ID: {chatbot_id})")
+        
+        # 1. Delete chat history for this chatbot
+        chat_history_count = db.query(ChatHistory).filter(ChatHistory.program_code == chatbot_code).count()
+        if chat_history_count > 0:
+            db.query(ChatHistory).filter(ChatHistory.program_code == chatbot_code).delete()
+            logger.info(f"Deleted {chat_history_count} chat history records for chatbot {chatbot_code}")
+        
+        # 2. Delete LO Root ID associations
+        lo_associations_count = db.query(ChatbotLORootAssociation).filter(ChatbotLORootAssociation.chatbot_id == chatbot_id).count()
+        if lo_associations_count > 0:
+            db.query(ChatbotLORootAssociation).filter(ChatbotLORootAssociation.chatbot_id == chatbot_id).delete()
+            logger.info(f"Deleted {lo_associations_count} LO Root ID associations for chatbot {chatbot_code}")
+        
+        # 3. Finally, delete the chatbot itself
         db.delete(chatbot)
         db.commit()
         
         # Also update the in-memory program content
         load_program_content()
 
-        logger.info(f"Successfully permanently deleted chatbot: {chatbot_code}")
-        return jsonify({"success": True, "message": "Chatbot permanently deleted successfully!"})
+        logger.info(f"Successfully permanently deleted chatbot: {chatbot_code} ({chatbot_name})")
+        return jsonify({
+            "success": True, 
+            "message": f"Chatbot '{chatbot_name}' and all associated data have been permanently deleted!"
+        })
 
     except Exception as e:
         if db: db.rollback()

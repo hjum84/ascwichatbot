@@ -1488,6 +1488,8 @@
                             `;
                             downloadBtn.classList.remove('disabled');
                         } else {
+                            const isProductionWarning = data.registration_restricted ? 
+                                '<div class="text-danger mt-1"><strong>⚠️ Registration is currently disabled!</strong></div>' : '';
                             statusHtml = `
                                 <div class="text-warning">
                                     <i class="bi bi-exclamation-triangle"></i> No CSV file found ${envIcon}
@@ -1496,6 +1498,7 @@
                                     Upload a CSV file to enable registration control<br>
                                     <em>Environment: ${data.environment || 'unknown'} storage</em>
                                 </small>
+                                ${isProductionWarning}
                             `;
                             downloadBtn.classList.add('disabled');
                         }

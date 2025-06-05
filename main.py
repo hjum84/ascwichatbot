@@ -400,9 +400,18 @@ def is_user_authorized(last_name, email):
     """Check if user is authorized to register"""
     authorized_users = load_authorized_users()
     
+    # Check if we're in a production environment
+    is_production = bool(os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'))
+    
     if not authorized_users:
-        logger.warning("No authorized users loaded - allowing registration")
-        return True, None  # If no CSV file, allow registration
+        if is_production:
+            # In production, if no CSV file is loaded, deny registration for security
+            logger.warning("No authorized users loaded in production - denying registration")
+            return False, None
+        else:
+            # In local development, allow registration if no CSV file
+            logger.warning("No authorized users loaded in development - allowing registration")
+            return True, None
     
     key = (last_name.lower().strip(), email.lower().strip())
     user_data = authorized_users.get(key)
@@ -914,7 +923,12 @@ def register():
         
         if not is_authorized:
             logger.warning(f"Unauthorized registration attempt: {last_name} ({email})")
-            flash("Registration is restricted. Please contact an administrator if you believe this is an error.", "danger")
+            # Check if it's a CSV loading issue vs unauthorized user
+            authorized_users = load_authorized_users()
+            if not authorized_users:
+                flash("Registration is currently unavailable due to system configuration. Please contact an administrator.", "danger")
+            else:
+                flash("Registration is restricted to authorized users only. Please contact an administrator if you believe this is an error.", "danger")
             return redirect(url_for('register'))
         
         db = get_db()
@@ -4745,13 +4759,16 @@ def admin_authorized_users_status():
     """Get status information about the authorized users CSV"""
     try:
         csv_file_path = get_csv_file_path()
+        is_production = bool(os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'))
+        
         status_info = {
             "file_exists": os.path.exists(csv_file_path),
             "total_users": 0,
             "active_users": 0,
             "last_modified": None,
             "file_path": csv_file_path,
-            "environment": "cloud" if (os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME')) else "local"
+            "environment": "cloud" if is_production else "local",
+            "registration_restricted": is_production  # Show if registration is restricted
         }
         
         if status_info["file_exists"]:
@@ -4769,6 +4786,10 @@ def admin_authorized_users_status():
                 status_info["total_users"] = len(df)
             except Exception:
                 pass
+        else:
+            # If file doesn't exist in production, show warning
+            if is_production:
+                status_info["warning"] = "CSV file not found - registration is currently disabled"
         
         return jsonify(status_info)
     except Exception as e:

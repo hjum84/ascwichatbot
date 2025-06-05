@@ -401,10 +401,10 @@ def is_user_authorized(last_name, email):
     authorized_users = load_authorized_users()
     
     if not authorized_users:
-        logger.warning("No authorized users loaded - allowing registration")
+        logger.warning("No authorized users loaded - denying registration")
         logger.warning(f"CSV file path: {get_csv_file_path()}")
         logger.warning(f"CSV file exists: {os.path.exists(get_csv_file_path())}")
-        return True, None  # If no CSV file, allow registration
+        return False, None  # If no CSV file, deny registration
     
     key = (last_name.lower().strip(), email.lower().strip())
     user_data = authorized_users.get(key)

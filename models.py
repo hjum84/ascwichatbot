@@ -150,6 +150,117 @@ class User(UserMixin, Base):
             db.rollback()
             raise e
 
+# Authorized Users model (replaces CSV file storage)
+class AuthorizedUser(Base):
+    __tablename__ = "authorized_users"
+    id = Column(Integer, primary_key=True, index=True)
+    user_code = Column(String, nullable=True)
+    last_name = Column(String, nullable=False)
+    email = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False)  # 'active' or 'inactive'
+    class_name = Column(String, nullable=True)
+    date = Column(String, nullable=True)
+    lo_root_ids = Column(Text, nullable=True)  # Semicolon-separated LO Root IDs
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    @classmethod
+    def get_by_credentials(cls, db, last_name, email):
+        """Get authorized user by last name and email"""
+        return db.query(cls).filter(
+            func.lower(cls.last_name) == func.lower(last_name.strip()),
+            func.lower(cls.email) == func.lower(email.strip()),
+            func.lower(cls.status) == 'active'
+        ).first()
+    
+    @classmethod
+    def get_all_active(cls, db):
+        """Get all active authorized users"""
+        return db.query(cls).filter(func.lower(cls.status) == 'active').all()
+    
+    @classmethod
+    def clear_all(cls, db):
+        """Delete all authorized users (for CSV replacement)"""
+        try:
+            deleted_count = db.query(cls).delete()
+            # Remove commit - let the caller handle the transaction
+            return deleted_count
+        except Exception as e:
+            raise e
+    
+    @classmethod
+    def bulk_insert(cls, db, users_data):
+        """Bulk insert authorized users from CSV data with guaranteed no duplicates"""
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"Starting bulk insert of {len(users_data)} users")
+            
+            # Strategy: Clear ALL, then insert, then remove any duplicates that might slip through
+            
+            # Step 1: Clear existing data first (no commit here)
+            deleted_count = cls.clear_all(db)
+            logger.info(f"Cleared {deleted_count} existing authorized users")
+            
+            # Step 2: Insert new data
+            inserted_count = 0
+            for user_data in users_data:
+                new_user = cls(
+                    user_code=user_data.get('user_code'),
+                    last_name=user_data.get('last_name'),
+                    email=user_data.get('email'),
+                    status=user_data.get('status'),
+                    class_name=user_data.get('class_name'),
+                    date=user_data.get('date'),
+                    lo_root_ids=user_data.get('lo_root_ids')
+                )
+                db.add(new_user)
+                inserted_count += 1
+            
+            # Step 3: Commit the transaction
+            logger.info(f"Added {inserted_count} users to session, committing as single transaction...")
+            db.commit()
+            
+            # Step 4: Safety check - remove any duplicates that might have slipped through
+            from sqlalchemy import text
+            duplicate_removal_sql = text("""
+                DELETE FROM authorized_users 
+                WHERE id NOT IN (
+                    SELECT min_id FROM (
+                        SELECT MIN(id) as min_id
+                        FROM authorized_users 
+                        GROUP BY email
+                    ) AS subquery
+                )
+            """)
+            
+            result = db.execute(duplicate_removal_sql)
+            duplicates_removed = result.rowcount
+            
+            if duplicates_removed > 0:
+                logger.warning(f"Removed {duplicates_removed} unexpected duplicates after insert")
+                db.commit()
+            
+            final_count = db.query(cls).count()
+            logger.info(f"Bulk insert completed successfully: deleted {deleted_count}, inserted {inserted_count}, final count {final_count}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error in bulk_insert: {str(e)}")
+            db.rollback()
+            raise e
+    
+    def to_dict(self):
+        """Convert to dictionary format compatible with existing code"""
+        return {
+            'last_name': self.last_name,
+            'email': self.email,
+            'status': self.status,
+            'lo_root_ids': self.lo_root_ids.split(';') if self.lo_root_ids else [],
+            'lo_root_id': self.lo_root_ids  # For backward compatibility
+        }
+
 # Association table for ChatbotContent and LORootID (Many-to-Many)
 class ChatbotLORootAssociation(Base):
     __tablename__ = 'chatbot_lo_root_association'

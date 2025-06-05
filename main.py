@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash, send_file
 from functools import wraps
 import re
-from models import User, ChatbotContent, get_db, close_db, ChatHistory, UserLORootID, ChatbotLORootAssociation
+from models import (
+    User, UserLORootID, ChatbotContent, ChatbotLORootAssociation, ChatHistory, 
+    AuthorizedUser, get_db, close_db, Base, engine
+)
 import werkzeug
 import glob
 import shutil
@@ -282,85 +285,51 @@ authorized_users_cache = {}  # Cache for authorized users
 authorized_users_last_modified = None  # Track file modification time
 
 def load_authorized_users():
-    """Load authorized users from CSV file with caching"""
-    global authorized_users_cache, authorized_users_last_modified
-    
+    """Load authorized users from database"""
     try:
-        # Check if file exists
-        if not os.path.exists(AUTHORIZED_USERS_CSV):
-            logger.warning(f"Authorized users CSV file not found: {AUTHORIZED_USERS_CSV}")
-            logger.info("No CSV restriction active - allowing all registrations")
-            return {}
-        
-        # Check file modification time for cache invalidation
-        current_mtime = os.path.getmtime(AUTHORIZED_USERS_CSV)
-        
-        # If cache is empty or file was modified, reload
-        if not authorized_users_cache or current_mtime != authorized_users_last_modified:
-            logger.info("Loading authorized users from CSV...")
+        db = get_db()
+        try:
+            # Get all active users from database
+            active_users = AuthorizedUser.get_all_active(db)
             
-            # Read CSV with actual format: user_code,last_name,email,status,class_name,date,lo_root_id
-            df = pd.read_csv(AUTHORIZED_USERS_CSV, header=None, names=[
-                'user_code', 'last_name', 'email', 'status', 'class_name', 'date', 'lo_root_id'
-            ])
+            if not active_users:
+                logger.warning("No authorized users found in database")
+                return {}
             
-            # Group by (last_name, email) and collect all lo_root_ids for each user
-            new_cache = {}
-            active_count = 0
+            authorized_users = {}
             
-            # Group by user (last_name + email combination)
-            user_groups = df.groupby(['last_name', 'email'])
+            for user in active_users:
+                key = (user.last_name.lower(), user.email.lower())
+                
+                # Convert semicolon-separated lo_root_ids to list
+                lo_root_ids = []
+                if user.lo_root_ids:
+                    lo_root_ids = [id.strip() for id in user.lo_root_ids.split(';') if id.strip()]
+                
+                authorized_users[key] = {
+                    'user_code': user.user_code,
+                    'last_name': user.last_name,
+                    'email': user.email,
+                    'status': user.status,
+                    'class_name': user.class_name,
+                    'date': user.date,
+                    'lo_root_ids': lo_root_ids,  # List of all lo_root_ids
+                    'lo_root_id': user.lo_root_ids  # Keep original field name for compatibility
+                }
             
-            for (last_name, email), group in user_groups:
-                try:
-                    # Clean the data
-                    last_name = str(last_name).strip()
-                    email = str(email).strip().lower()
-                    
-                    # Check if any row for this user has 'active' status
-                    statuses = group['status'].str.strip().str.lower()
-                    is_active = any(status == 'active' for status in statuses)
-                    
-                    if is_active and last_name and email:
-                        # Collect all unique lo_root_ids for this user
-                        lo_root_ids = []
-                        for lo_root_id in group['lo_root_id']:
-                            lo_root_id_clean = str(lo_root_id).strip()
-                            if lo_root_id_clean and lo_root_id_clean not in lo_root_ids:
-                                lo_root_ids.append(lo_root_id_clean)
-                        
-                        if lo_root_ids:  # Only add users with at least one lo_root_id
-                            key = (last_name.lower(), email)
-                            new_cache[key] = {
-                                'last_name': last_name,
-                                'email': email,
-                                'status': 'active',
-                                'lo_root_ids': lo_root_ids,  # List of all lo_root_ids
-                                'lo_root_id': ';'.join(lo_root_ids)  # Semicolon-separated for backward compatibility
-                            }
-                            active_count += 1
-                            logger.debug(f"Loaded user {last_name} ({email}) with {len(lo_root_ids)} lo_root_ids: {lo_root_ids}")
-                            
-                except Exception as e:
-                    logger.warning(f"Error processing user group {last_name}, {email}: {e}")
-                    continue
+            logger.info(f"Loaded {len(authorized_users)} authorized users from database")
+            return authorized_users
             
-            authorized_users_cache = new_cache
-            authorized_users_last_modified = current_mtime
-            
-            logger.info(f"Loaded {active_count} authorized users from CSV")
-            
-        return authorized_users_cache
-        
+        finally:
+            close_db(db)
+    
     except Exception as e:
-        logger.error(f"Error loading authorized users CSV: {e}")
+        logger.error(f"Error loading authorized users from database: {str(e)}")
         return {}
 
 def clear_authorized_users_cache():
-    """Clear the authorized users cache to force reload"""
-    global authorized_users_cache, authorized_users_last_modified
-    authorized_users_cache = {}
-    authorized_users_last_modified = None
+    """Deprecated: No longer needed with database storage"""
+    pass
 
 def cleanup_old_csv_backups():
     """Clean up any existing CSV backup files to save space"""
@@ -400,34 +369,12 @@ def is_user_authorized(last_name, email):
     """Check if user is authorized to register"""
     authorized_users = load_authorized_users()
     
-    # More detailed debugging
-    csv_file_path = get_csv_file_path()
-    csv_exists = os.path.exists(csv_file_path)
-    
     logger.warning(f"🔍 AUTHORIZATION CHECK DEBUG:")
-    logger.warning(f"   CSV file path: {csv_file_path}")
-    logger.warning(f"   CSV file exists: {csv_exists}")
-    logger.warning(f"   Authorized users loaded: {len(authorized_users) if authorized_users else 0}")
-    
-    if csv_exists:
-        try:
-            # Try to read CSV file directly to debug
-            import pandas as pd
-            df = pd.read_csv(csv_file_path, header=None, names=[
-                'user_code', 'last_name', 'email', 'status', 'class_name', 'date', 'lo_root_id'
-            ])
-            logger.warning(f"   CSV file has {len(df)} total rows")
-            active_df = df[df['status'].str.lower() == 'active']
-            logger.warning(f"   CSV file has {len(active_df)} active rows")
-        except Exception as e:
-            logger.warning(f"   Error reading CSV directly: {e}")
+    logger.warning(f"   Authorized users loaded from database: {len(authorized_users) if authorized_users else 0}")
     
     if not authorized_users:
-        if csv_exists:
-            logger.warning("❌ CSV file exists but failed to load users - ALLOWING registration as fallback")
-        else:
-            logger.warning("❌ No CSV file found - ALLOWING registration")
-        return True, None  # Fallback to allowing registration
+        logger.warning("❌ No authorized users found in database - DENYING registration")
+        return False, None
     
     key = (last_name.lower().strip(), email.lower().strip())
     user_data = authorized_users.get(key)
@@ -436,7 +383,7 @@ def is_user_authorized(last_name, email):
         logger.info(f"✅ User authorized: {last_name} ({email})")
         return True, user_data
     else:
-        logger.info(f"❌ User not authorized: {last_name} ({email}) - {len(authorized_users)} users in CSV")
+        logger.info(f"❌ User not authorized: {last_name} ({email}) - {len(authorized_users)} users in database")
         return False, None
 
 def has_chatbot_access(user_id, chatbot_code):
@@ -4634,7 +4581,7 @@ def convert_lo_ids_to_program_names(lo_root_ids):
 @app.route('/admin/upload_authorized_users_csv', methods=['POST'])
 @requires_auth
 def admin_upload_authorized_users_csv():
-    """Upload and replace the authorized users CSV file with user synchronization"""
+    """Upload and save authorized users CSV data to database"""
     if 'file' not in request.files:
         session['admin_message'] = 'No file part'
         session['admin_message_type'] = 'error'
@@ -4672,10 +4619,48 @@ def admin_upload_authorized_users_csv():
             session['admin_message_type'] = 'error'
             return redirect(url_for('admin'))
         
-        # Perform user synchronization before updating CSV
+        # Convert CSV data to format suitable for database storage
+        users_data = []
+        user_groups = active_df.groupby(['last_name', 'email'])
+        
+        for (last_name, email), group in user_groups:
+            try:
+                # Clean the data
+                last_name = str(last_name).strip()
+                email = str(email).strip().lower()
+                
+                # Get optional fields from first row
+                first_row = group.iloc[0]
+                user_code = first_row.get('user_code', '') if 'user_code' in group.columns else ''
+                class_name = first_row.get('class_name', '') if 'class_name' in group.columns else ''
+                date = first_row.get('date', '') if 'date' in group.columns else ''
+                
+                # Collect all unique lo_root_ids for this user
+                lo_root_ids = []
+                for lo_root_id in group['lo_root_id']:
+                    lo_root_id_clean = str(lo_root_id).strip()
+                    if lo_root_id_clean and lo_root_id_clean not in lo_root_ids:
+                        lo_root_ids.append(lo_root_id_clean)
+                
+                if lo_root_ids and last_name and email:
+                    users_data.append({
+                        'user_code': user_code,
+                        'last_name': last_name,
+                        'email': email,
+                        'status': 'active',
+                        'class_name': class_name,
+                        'date': date,
+                        'lo_root_ids': ';'.join(lo_root_ids)  # Semicolon-separated
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Error processing user group {last_name}, {email}: {e}")
+                continue
+        
+        # Save to database
         db = get_db()
         try:
-            # Analyze new CSV data
+            # Analyze new CSV data for user sync (existing functionality)
             csv_user_mapping = analyze_csv_user_changes(active_df)
             
             # Get existing user mapping from database
@@ -4684,59 +4669,53 @@ def admin_upload_authorized_users_csv():
             # Perform synchronization
             sync_stats = sync_user_lo_root_ids(db, csv_user_mapping, existing_user_mapping)
             
-            # Commit database changes
+            # Save authorized users to database
+            logger.info(f"Attempting to save {len(users_data)} users to database...")
+            AuthorizedUser.bulk_insert(db, users_data)
+            logger.info("Authorized users saved to database successfully")
+            
+            # Commit all changes
             db.commit()
             
-        except Exception as sync_error:
+            active_count = len(users_data)
+            success_parts = [f'✅ CSV uploaded successfully! {active_count} authorized users saved to database.']
+            
+            # Handle sync results
+            if sync_stats["updated_users"]:
+                updated_details = []
+                for user_update in sync_stats["updated_users"][:5]:  # Show first 5
+                    email = user_update['email']
+                    lo_ids = user_update['added_lo_ids']
+                    program_names = convert_lo_ids_to_program_names(lo_ids)
+                    updated_details.append(f'{email} → {", ".join(program_names)}')
+                
+                success_parts.append(f'🔄 Synced {len(sync_stats["updated_users"])} existing users with new programs')
+                session['admin_sync_details'] = '📋 Updated Users:\n' + '\n'.join(updated_details)
+                
+                if len(sync_stats["updated_users"]) > 5:
+                    session['admin_sync_more'] = f'... and {len(sync_stats["updated_users"]) - 5} more users'
+            
+            success_msg = ' '.join(success_parts)
+            session['admin_message'] = success_msg
+            session['admin_message_type'] = 'success'
+            
+            # Handle sync warnings
+            if sync_stats["errors"]:
+                warning_details = []
+                for error in sync_stats["errors"][:3]:  # Show first 3 warnings
+                    warning_details.append(error)
+                session['admin_sync_warnings'] = '⚠️ Sync warnings:\n' + '\n'.join(warning_details)
+                
+                if len(sync_stats["errors"]) > 3:
+                    session['admin_sync_warnings_more'] = f'... and {len(sync_stats["errors"]) - 3} more warnings'
+            
+        except Exception as db_error:
             if db:
                 db.rollback()
-            raise sync_error
+            raise db_error
         finally:
             if db:
                 close_db(db)
-        
-        # Save CSV file using the environment-appropriate path
-        csv_file_path = get_csv_file_path()
-        df.to_csv(csv_file_path, index=False)
-        
-        # Clean up any old backup files to save space
-        cleanup_old_csv_backups()
-        
-        # Clear authorized users cache
-        clear_authorized_users_cache()
-        
-        # Prepare success message with sync results
-        active_count = len(active_df)
-        success_parts = [f'✅ CSV uploaded successfully! {active_count} authorized users loaded.']
-        
-        if sync_stats["updated_users"]:
-            # Convert lo_root_ids to program names for better readability
-            updated_details = []
-            for user_update in sync_stats["updated_users"][:5]:  # Show first 5
-                email = user_update['email']
-                lo_ids = user_update['added_lo_ids']
-                program_names = convert_lo_ids_to_program_names(lo_ids)
-                updated_details.append(f'{email} → {", ".join(program_names)}')
-            
-            success_parts.append(f'🔄 Synced {len(sync_stats["updated_users"])} existing users with new programs')
-            session['admin_sync_details'] = '📋 Updated Users:\n' + '\n'.join(updated_details)
-            
-            if len(sync_stats["updated_users"]) > 5:
-                session['admin_sync_more'] = f'... and {len(sync_stats["updated_users"]) - 5} more users'
-        
-        success_msg = ' '.join(success_parts)
-        session['admin_message'] = success_msg
-        session['admin_message_type'] = 'success'
-        
-        # Handle sync warnings
-        if sync_stats["errors"]:
-            warning_details = []
-            for error in sync_stats["errors"][:3]:  # Show first 3 warnings
-                warning_details.append(error)
-            session['admin_sync_warnings'] = '⚠️ Sync warnings:\n' + '\n'.join(warning_details)
-            
-            if len(sync_stats["errors"]) > 3:
-                session['admin_sync_warnings_more'] = f'... and {len(sync_stats["errors"]) - 3} more warnings'
 
     except Exception as e:
         session['admin_message'] = f'Error processing CSV file: {str(e)}'
@@ -4747,64 +4726,210 @@ def admin_upload_authorized_users_csv():
 @app.route('/admin/download_authorized_users_csv')
 @requires_auth
 def admin_download_authorized_users_csv():
-    """Download the current authorized users CSV file"""
+    """Download authorized users data as CSV file from database"""
     try:
-        csv_file_path = get_csv_file_path()
-        if not os.path.exists(csv_file_path):
-            flash('No authorized users CSV file found.', 'error')
-            return redirect(url_for('admin'))
-        
-        return send_file(
-            csv_file_path,
-            as_attachment=True,
-            download_name='authorized_users.csv',
-            mimetype='text/csv'
-        )
+        db = get_db()
+        try:
+            # Get all authorized users from database
+            all_users = db.query(AuthorizedUser).all()
+            
+            if not all_users:
+                flash('No authorized users found in database.', 'error')
+                return redirect(url_for('admin'))
+            
+            # Create CSV content
+            csv_content = "user_code,last_name,email,status,class_name,date,lo_root_id\n"
+            
+            for user in all_users:
+                # Handle LO Root IDs - split by semicolon and create multiple rows if needed
+                lo_root_ids = []
+                if user.lo_root_ids:
+                    lo_root_ids = [id.strip() for id in user.lo_root_ids.split(';') if id.strip()]
+                
+                if not lo_root_ids:
+                    lo_root_ids = ['']  # At least one row
+                
+                # Create a row for each LO Root ID (original CSV format)
+                for lo_root_id in lo_root_ids:
+                    csv_content += f'"{user.user_code or ""}","{user.last_name}","{user.email}","{user.status}","{user.class_name or ""}","{user.date or ""}","{lo_root_id}"\n'
+            
+            # Create a temporary file-like object
+            from io import StringIO
+            output = StringIO()
+            output.write(csv_content)
+            output.seek(0)
+            
+            # Convert to bytes for download
+            from io import BytesIO
+            byte_output = BytesIO()
+            byte_output.write(output.getvalue().encode('utf-8'))
+            byte_output.seek(0)
+            
+            return send_file(
+                byte_output,
+                as_attachment=True,
+                download_name='authorized_users.csv',
+                mimetype='text/csv'
+            )
+            
+        finally:
+            close_db(db)
+            
     except Exception as e:
+        logger.error(f'Error generating CSV download: {str(e)}')
         flash(f'Error downloading CSV file: {str(e)}', 'error')
         return redirect(url_for('admin'))
 
 @app.route('/admin/authorized_users_status')
 @requires_auth
 def admin_authorized_users_status():
-    """Get status information about the authorized users CSV"""
+    """Get status information about the authorized users database"""
     try:
-        csv_file_path = get_csv_file_path()
         is_production = bool(os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'))
         
-        status_info = {
-            "file_exists": os.path.exists(csv_file_path),
-            "total_users": 0,
-            "active_users": 0,
-            "last_modified": None,
-            "file_path": csv_file_path,
-            "environment": "cloud" if is_production else "local",
-            "registration_restricted": is_production  # Show if registration is restricted
-        }
+        db = get_db()
+        try:
+            # Get database statistics
+            all_users = db.query(AuthorizedUser).all()
+            active_users = AuthorizedUser.get_all_active(db)
+            
+            # Get latest modification time
+            latest_user = db.query(AuthorizedUser).order_by(AuthorizedUser.updated_at.desc()).first()
+            last_modified = None
+            if latest_user and latest_user.updated_at:
+                last_modified = latest_user.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            
+            status_info = {
+                "database_connected": True,
+                "total_users": len(all_users),
+                "active_users": len(active_users),
+                "last_modified": last_modified,
+                "environment": "cloud" if is_production else "local",
+                "storage_type": "database"
+            }
+            
+            if not active_users:
+                status_info["warning"] = "No authorized users found in database - registration is currently disabled"
         
-        if status_info["file_exists"]:
-            # Get file modification time
-            mtime = os.path.getmtime(csv_file_path)
-            status_info["last_modified"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Load and count users
-            authorized_users = load_authorized_users()
-            status_info["active_users"] = len(authorized_users)
-            
-            # Count total users in file
-            try:
-                df = pd.read_csv(csv_file_path)
-                status_info["total_users"] = len(df)
-            except Exception:
-                pass
-        else:
-            # If file doesn't exist in production, show warning
-            if is_production:
-                status_info["warning"] = "CSV file not found - registration is currently disabled"
+        finally:
+            close_db(db)
         
         return jsonify(status_info)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "error": str(e),
+            "database_connected": False,
+            "total_users": 0,
+            "active_users": 0
+        }), 500
+
+@app.route('/admin/check_duplicates')
+@requires_auth
+def admin_check_duplicates():
+    """Check for duplicate authorized users"""
+    db = get_db()
+    try:
+        from sqlalchemy import func
+        
+        # Get basic stats
+        total_count = db.query(AuthorizedUser).count()
+        unique_emails = db.query(func.count(func.distinct(AuthorizedUser.email))).scalar()
+        duplicates = total_count - unique_emails
+        
+        duplicate_details = []
+        if duplicates > 0:
+            # Get details of duplicate emails
+            duplicate_emails = db.query(
+                AuthorizedUser.email,
+                func.count(AuthorizedUser.email).label('count')
+            ).group_by(AuthorizedUser.email)\
+             .having(func.count(AuthorizedUser.email) > 1)\
+             .order_by(func.count(AuthorizedUser.email).desc())\
+             .limit(10).all()
+            
+            for email, count in duplicate_emails:
+                duplicate_details.append({
+                    'email': email,
+                    'count': count
+                })
+        
+        return jsonify({
+            'total_records': total_count,
+            'unique_emails': unique_emails,
+            'duplicates': duplicates,
+            'duplicate_details': duplicate_details
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking duplicates: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        close_db(db)
+
+@app.route('/admin/remove_duplicates', methods=['POST'])
+@requires_auth
+def admin_remove_duplicates():
+    """Remove duplicate authorized users"""
+    db = get_db()
+    try:
+        from sqlalchemy import func, text
+        
+        # Get initial state
+        initial_count = db.query(AuthorizedUser).count()
+        initial_unique = db.query(func.count(func.distinct(AuthorizedUser.email))).scalar()
+        initial_duplicates = initial_count - initial_unique
+        
+        if initial_duplicates == 0:
+            return jsonify({
+                'success': True,
+                'message': 'No duplicates found to remove',
+                'removed': 0,
+                'final_count': initial_count
+            })
+        
+        logger.info(f"Starting duplicate removal: {initial_duplicates} duplicates found")
+        
+        # Remove duplicates using SQL (keep the record with the lowest ID)
+        duplicate_removal_sql = text("""
+            DELETE FROM authorized_users 
+            WHERE id NOT IN (
+                SELECT min_id FROM (
+                    SELECT MIN(id) as min_id
+                    FROM authorized_users 
+                    GROUP BY email
+                ) AS subquery
+            )
+        """)
+        
+        result = db.execute(duplicate_removal_sql)
+        removed_count = result.rowcount
+        db.commit()
+        
+        # Get final state
+        final_count = db.query(AuthorizedUser).count()
+        final_unique = db.query(func.count(func.distinct(AuthorizedUser.email))).scalar()
+        final_duplicates = final_count - final_unique
+        
+        logger.info(f"Duplicate removal completed: removed {removed_count} duplicates, {final_duplicates} remaining")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully removed {removed_count:,} duplicate records!',
+            'removed': removed_count,
+            'initial_count': initial_count,
+            'final_count': final_count,
+            'remaining_duplicates': final_duplicates
+        })
+        
+    except Exception as e:
+        logger.error(f"Error removing duplicates: {str(e)}")
+        db.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    finally:
+        close_db(db)
 
 @app.route('/debug_user/<int:user_id>')
 @requires_auth

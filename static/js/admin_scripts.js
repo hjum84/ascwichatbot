@@ -3457,3 +3457,211 @@ if (!document.querySelector('#admin-spinner-styles')) {
     `;
     document.head.appendChild(style);
 }
+
+// =============================================
+// Duplicate Management Functions
+// =============================================
+
+function initializeDuplicateManagement() {
+    const checkBtn = document.getElementById('checkDuplicatesBtn');
+    const removeBtn = document.getElementById('removeDuplicatesBtn');
+    
+    if (checkBtn) {
+        checkBtn.addEventListener('click', checkForDuplicates);
+    }
+    
+    if (removeBtn) {
+        removeBtn.addEventListener('click', removeDuplicates);
+    }
+}
+
+function checkForDuplicates() {
+    const checkBtn = document.getElementById('checkDuplicatesBtn');
+    const statusDiv = document.getElementById('duplicateStatus');
+    const lastCheckDiv = document.getElementById('lastDuplicateCheck');
+    const removeBtn = document.getElementById('removeDuplicatesBtn');
+    
+    // Show loading state
+    checkBtn.disabled = true;
+    checkBtn.innerHTML = '<i class="bi bi-hourglass-split spinning"></i> Checking...';
+    statusDiv.innerHTML = '<span class="text-info"><i class="bi bi-arrow-clockwise spinning"></i> Scanning database for duplicates...</span>';
+    
+    fetch('/admin/check_duplicates')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            // Update status display
+            const duplicatesFound = data.duplicates > 0;
+            const statusClass = duplicatesFound ? 'text-warning' : 'text-success';
+            const statusIcon = duplicatesFound ? 'bi-exclamation-triangle' : 'bi-check-circle';
+            
+            statusDiv.innerHTML = `
+                <div class="${statusClass}">
+                    <i class="bi ${statusIcon}"></i>
+                    <strong>Total Records:</strong> ${data.total_records.toLocaleString()}<br>
+                    <strong>Unique Emails:</strong> ${data.unique_emails.toLocaleString()}<br>
+                    <strong>Duplicates Found:</strong> ${data.duplicates.toLocaleString()}
+                    ${duplicatesFound ? ' ⚠️' : ' ✅'}
+                </div>
+            `;
+            
+            // Update last check time
+            lastCheckDiv.innerHTML = `<span class="text-muted">${new Date().toLocaleString()}</span>`;
+            
+            // Enable/disable remove button
+            removeBtn.disabled = !duplicatesFound;
+            if (duplicatesFound) {
+                removeBtn.classList.remove('btn-warning');
+                removeBtn.classList.add('btn-danger');
+            }
+            
+            // Show duplicate details if any found
+            if (duplicatesFound && data.duplicate_details && data.duplicate_details.length > 0) {
+                showDuplicateDetails(data.duplicate_details);
+            } else {
+                hideDuplicateDetails();
+            }
+            
+            // Show success message
+            showDuplicateMessage(
+                duplicatesFound ? 'warning' : 'success',
+                duplicatesFound 
+                    ? `Found ${data.duplicates} duplicate records that can be cleaned up.`
+                    : 'No duplicates found! Database is clean. 🎉'
+            );
+            
+        })
+        .catch(error => {
+            console.error('Error checking duplicates:', error);
+            statusDiv.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${error.message}</span>`;
+            showDuplicateMessage('danger', `Error checking duplicates: ${error.message}`);
+        })
+        .finally(() => {
+            // Reset button state
+            checkBtn.disabled = false;
+            checkBtn.innerHTML = '<i class="bi bi-search"></i> Check for Duplicates';
+        });
+}
+
+function removeDuplicates() {
+    const removeBtn = document.getElementById('removeDuplicatesBtn');
+    const statusDiv = document.getElementById('duplicateStatus');
+    
+    // Confirm action
+    if (!confirm('Are you sure you want to remove duplicate records? This action cannot be undone.\n\nDuplicates will be removed safely (keeping the oldest record for each email).')) {
+        return;
+    }
+    
+    // Show loading state
+    removeBtn.disabled = true;
+    removeBtn.innerHTML = '<i class="bi bi-hourglass-split spinning"></i> Removing...';
+    statusDiv.innerHTML = '<span class="text-info"><i class="bi bi-arrow-clockwise spinning"></i> Removing duplicate records...</span>';
+    
+    fetch('/admin/remove_duplicates', {
+        method: 'POST'
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Unknown error occurred');
+            }
+            
+            // Update status display
+            statusDiv.innerHTML = `
+                <div class="text-success">
+                    <i class="bi bi-check-circle"></i>
+                    <strong>Cleanup Complete!</strong><br>
+                    <strong>Records Removed:</strong> ${data.removed.toLocaleString()}<br>
+                    <strong>Final Count:</strong> ${data.final_count.toLocaleString()}<br>
+                    <strong>Remaining Duplicates:</strong> ${data.remaining_duplicates}
+                </div>
+            `;
+            
+            // Hide duplicate details
+            hideDuplicateDetails();
+            
+            // Show success message
+            showDuplicateMessage('success', data.message);
+            
+            // Update last check time
+            const lastCheckDiv = document.getElementById('lastDuplicateCheck');
+            lastCheckDiv.innerHTML = `<span class="text-muted">${new Date().toLocaleString()}</span>`;
+            
+        })
+        .catch(error => {
+            console.error('Error removing duplicates:', error);
+            statusDiv.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${error.message}</span>`;
+            showDuplicateMessage('danger', `Error removing duplicates: ${error.message}`);
+        })
+        .finally(() => {
+            // Reset button state
+            removeBtn.disabled = true;
+            removeBtn.classList.remove('btn-danger');
+            removeBtn.classList.add('btn-warning');
+            removeBtn.innerHTML = '<i class="bi bi-trash"></i> Remove Duplicates';
+        });
+}
+
+function showDuplicateDetails(duplicateDetails) {
+    const detailsDiv = document.getElementById('duplicateDetails');
+    const tableBody = document.getElementById('duplicateTableBody');
+    
+    // Clear existing content
+    tableBody.innerHTML = '';
+    
+    // Add duplicate details to table
+    duplicateDetails.forEach(detail => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${detail.email}</td>
+            <td><span class="badge bg-warning">${detail.count}</span></td>
+        `;
+        tableBody.appendChild(row);
+    });
+    
+    // Show details section
+    detailsDiv.style.display = 'block';
+}
+
+function hideDuplicateDetails() {
+    const detailsDiv = document.getElementById('duplicateDetails');
+    detailsDiv.style.display = 'none';
+}
+
+function showDuplicateMessage(type, message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-3`;
+    alertDiv.innerHTML = `
+        <strong>${type === 'success' ? 'Success!' : type === 'warning' ? 'Notice!' : 'Error!'}</strong> ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    // Insert the alert after the duplicate management section
+    const duplicateCard = document.querySelector('#duplicateManagement .card-body');
+    if (duplicateCard) {
+        // Remove any existing duplicate messages
+        const existingAlerts = duplicateCard.querySelectorAll('.alert');
+        existingAlerts.forEach(alert => {
+            if (alert.textContent.includes('duplicate') || alert.textContent.includes('Success!') || alert.textContent.includes('Error!')) {
+                alert.remove();
+            }
+        });
+        
+        duplicateCard.insertBefore(alertDiv, duplicateCard.firstChild);
+    }
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.remove();
+        }
+    }, 8000);
+}
+
+// Initialize duplicate management when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    initializeDuplicateManagement();
+});

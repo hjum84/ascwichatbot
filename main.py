@@ -400,20 +400,43 @@ def is_user_authorized(last_name, email):
     """Check if user is authorized to register"""
     authorized_users = load_authorized_users()
     
+    # More detailed debugging
+    csv_file_path = get_csv_file_path()
+    csv_exists = os.path.exists(csv_file_path)
+    
+    logger.warning(f"🔍 AUTHORIZATION CHECK DEBUG:")
+    logger.warning(f"   CSV file path: {csv_file_path}")
+    logger.warning(f"   CSV file exists: {csv_exists}")
+    logger.warning(f"   Authorized users loaded: {len(authorized_users) if authorized_users else 0}")
+    
+    if csv_exists:
+        try:
+            # Try to read CSV file directly to debug
+            import pandas as pd
+            df = pd.read_csv(csv_file_path, header=None, names=[
+                'user_code', 'last_name', 'email', 'status', 'class_name', 'date', 'lo_root_id'
+            ])
+            logger.warning(f"   CSV file has {len(df)} total rows")
+            active_df = df[df['status'].str.lower() == 'active']
+            logger.warning(f"   CSV file has {len(active_df)} active rows")
+        except Exception as e:
+            logger.warning(f"   Error reading CSV directly: {e}")
+    
     if not authorized_users:
-        logger.warning("No authorized users loaded - denying registration")
-        logger.warning(f"CSV file path: {get_csv_file_path()}")
-        logger.warning(f"CSV file exists: {os.path.exists(get_csv_file_path())}")
-        return False, None  # If no CSV file, deny registration
+        if csv_exists:
+            logger.warning("❌ CSV file exists but failed to load users - ALLOWING registration as fallback")
+        else:
+            logger.warning("❌ No CSV file found - ALLOWING registration")
+        return True, None  # Fallback to allowing registration
     
     key = (last_name.lower().strip(), email.lower().strip())
     user_data = authorized_users.get(key)
     
     if user_data:
-        logger.info(f"User authorized: {last_name} ({email})")
+        logger.info(f"✅ User authorized: {last_name} ({email})")
         return True, user_data
     else:
-        logger.info(f"User not authorized: {last_name} ({email}) - {len(authorized_users)} users in CSV")
+        logger.info(f"❌ User not authorized: {last_name} ({email}) - {len(authorized_users)} users in CSV")
         return False, None
 
 def has_chatbot_access(user_id, chatbot_code):

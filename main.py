@@ -362,31 +362,39 @@ def clear_authorized_users_cache():
     authorized_users_cache = {}
     authorized_users_last_modified = None
 
-def store_csv_metadata_in_db(db, active_users_count, total_users_count):
-    """Store CSV upload metadata in database for recovery and tracking"""
+def cleanup_old_csv_backups():
+    """Clean up any existing CSV backup files to save space"""
     try:
-        from datetime import datetime
+        csv_dir = os.path.dirname(get_csv_file_path())
+        import glob
         
-        # Create a simple metadata record (you can expand this as needed)
-        metadata_record = {
-            'upload_timestamp': datetime.now(),
-            'active_users_count': active_users_count,
-            'total_users_count': total_users_count,
-            'environment': 'cloud' if (os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME')) else 'local'
-        }
+        # Find all backup files
+        backup_files = glob.glob(os.path.join(csv_dir, 'authorized_users_backup_*.csv'))
         
-        # Store as a simple JSON in a text field or as separate columns
-        # For now, just log it (you can expand to actual DB storage if needed)
-        logger.info(f"CSV Upload Metadata: {metadata_record}")
-        
-        # You could add actual database storage here if needed:
-        # csv_metadata = CSVMetadata(**metadata_record)
-        # db.add(csv_metadata)
-        # db.commit()
-        
+        if backup_files:
+            deleted_count = 0
+            for backup_file in backup_files:
+                try:
+                    os.remove(backup_file)
+                    deleted_count += 1
+                    logger.info(f"Deleted backup file: {backup_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete backup {backup_file}: {e}")
+            
+            if deleted_count > 0:
+                logger.info(f"Cleanup complete: {deleted_count} backup files deleted")
+        else:
+            logger.info("No backup files found to clean up")
+            
     except Exception as e:
-        logger.error(f"Error storing CSV metadata: {e}")
-        raise
+        logger.error(f"Error during backup cleanup: {e}")
+
+def store_csv_metadata_in_db(db, active_users_count, total_users_count):
+    """
+    Deprecated: This function has been removed to save space.
+    No longer storing CSV metadata.
+    """
+    pass  # Function removed - no longer needed
 
 def is_user_authorized(last_name, email):
     """Check if user is authorized to register"""
@@ -4666,19 +4674,8 @@ def admin_upload_authorized_users_csv():
         csv_file_path = get_csv_file_path()
         df.to_csv(csv_file_path, index=False)
         
-        # For Render: Also save a backup copy with timestamp for recovery
-        if os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'):
-            from datetime import datetime
-            backup_filename = f'authorized_users_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-            backup_path = os.path.join(os.path.dirname(csv_file_path), backup_filename)
-            df.to_csv(backup_path, index=False)
-            logger.info(f"CSV backup saved: {backup_path}")
-            
-            # Also store CSV metadata in database for recovery purposes
-            try:
-                store_csv_metadata_in_db(db, active_count, len(df))
-            except Exception as metadata_error:
-                logger.warning(f"Failed to store CSV metadata: {metadata_error}")
+        # Clean up any old backup files to save space
+        cleanup_old_csv_backups()
         
         # Clear authorized users cache
         clear_authorized_users_cache()

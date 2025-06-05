@@ -4241,10 +4241,10 @@ def add_user():
 
     db = get_db()
     try:
-        # Check if user already exists
-        existing_user = User.get_by_credentials(db, last_name, email)
+        # Check if user already exists (check by email only since email is unique)
+        existing_user = User.get_by_email(db, email)
         if existing_user:
-            return jsonify({'success': False, 'error': 'User already exists'})
+            return jsonify({'success': False, 'error': 'User with this email already exists'})
 
         # Create new user
         expiry_date = datetime.utcnow() + timedelta(days=2*365)

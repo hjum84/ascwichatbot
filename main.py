@@ -400,18 +400,11 @@ def is_user_authorized(last_name, email):
     """Check if user is authorized to register"""
     authorized_users = load_authorized_users()
     
-    # Check if we're in a production environment
-    is_production = bool(os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'))
-    
     if not authorized_users:
-        if is_production:
-            # In production, if no CSV file is loaded, deny registration for security
-            logger.warning("No authorized users loaded in production - denying registration")
-            return False, None
-        else:
-            # In local development, allow registration if no CSV file
-            logger.warning("No authorized users loaded in development - allowing registration")
-            return True, None
+        logger.warning("No authorized users loaded - allowing registration")
+        logger.warning(f"CSV file path: {get_csv_file_path()}")
+        logger.warning(f"CSV file exists: {os.path.exists(get_csv_file_path())}")
+        return True, None  # If no CSV file, allow registration
     
     key = (last_name.lower().strip(), email.lower().strip())
     user_data = authorized_users.get(key)
@@ -420,7 +413,7 @@ def is_user_authorized(last_name, email):
         logger.info(f"User authorized: {last_name} ({email})")
         return True, user_data
     else:
-        logger.info(f"User not authorized: {last_name} ({email})")
+        logger.info(f"User not authorized: {last_name} ({email}) - {len(authorized_users)} users in CSV")
         return False, None
 
 def has_chatbot_access(user_id, chatbot_code):
@@ -923,12 +916,7 @@ def register():
         
         if not is_authorized:
             logger.warning(f"Unauthorized registration attempt: {last_name} ({email})")
-            # Check if it's a CSV loading issue vs unauthorized user
-            authorized_users = load_authorized_users()
-            if not authorized_users:
-                flash("Registration is currently unavailable due to system configuration. Please contact an administrator.", "danger")
-            else:
-                flash("Registration is restricted to authorized users only. Please contact an administrator if you believe this is an error.", "danger")
+            flash("Registration is restricted. Please contact an administrator if you believe this is an error.", "danger")
             return redirect(url_for('register'))
         
         db = get_db()

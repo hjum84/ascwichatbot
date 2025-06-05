@@ -37,6 +37,39 @@
                         </div>
                         {% endif %}
                         
+                        <!-- Admin-specific session messages (from CSV upload, etc.) -->
+                        {% if session.admin_message %}
+                        <div class="alert alert-{{ session.admin_message_type }}" role="alert">
+                            {{ session.admin_message }}
+                            {% set _ = session.pop('admin_message', None) %}
+                            {% set _ = session.pop('admin_message_type', None) %}
+                        </div>
+                        {% endif %}
+                        
+                        {% if session.admin_sync_details %}
+                        <div class="alert alert-info" role="alert">
+                            <h6><i class="bi bi-info-circle"></i> User Synchronization Details</h6>
+                            <pre class="mb-0" style="white-space: pre-line; font-size: 0.9em;">{{ session.admin_sync_details }}</pre>
+                            {% if session.admin_sync_more %}
+                            <small class="text-muted">{{ session.admin_sync_more }}</small>
+                            {% endif %}
+                            {% set _ = session.pop('admin_sync_details', None) %}
+                            {% set _ = session.pop('admin_sync_more', None) %}
+                        </div>
+                        {% endif %}
+                        
+                        {% if session.admin_sync_warnings %}
+                        <div class="alert alert-warning" role="alert">
+                            <h6><i class="bi bi-exclamation-triangle"></i> Sync Warnings</h6>
+                            <pre class="mb-0" style="white-space: pre-line; font-size: 0.9em;">{{ session.admin_sync_warnings }}</pre>
+                            {% if session.admin_sync_warnings_more %}
+                            <small class="text-muted">{{ session.admin_sync_warnings_more }}</small>
+                            {% endif %}
+                            {% set _ = session.pop('admin_sync_warnings', None) %}
+                            {% set _ = session.pop('admin_sync_warnings_more', None) %}
+                        </div>
+                        {% endif %}
+                        
                         <!-- Main Navigation Tabs -->
                         <ul class="nav nav-pills mb-4" id="adminTabs" role="tablist"> <!-- Removed nav-fill -->
                             <li class="nav-item" role="presentation">
@@ -734,8 +767,14 @@
                                                         <div class="card-body">
                                                             <div class="alert alert-info">
                                                                 <i class="bi bi-info-circle"></i> 
-                                                                <strong>CSV-based Registration Control:</strong> Only users listed in the authorized CSV file with 'active' status can register. 
-                                                                Upload a new CSV to update registration permissions.
+                                                                <strong>CSV-based Registration Control with Auto-Sync:</strong> 
+                                                                <ul class="mb-0 mt-2">
+                                                                    <li>Only users listed in the authorized CSV file with 'active' status can register</li>
+                                                                    <li>🔄 <strong>Automatic User Sync:</strong> When you upload a new CSV, existing users will automatically get access to new programs they've been enrolled in</li>
+                                                                    <li>📊 You'll receive a detailed report of which users were updated and what access was added</li>
+                                                                    <li>🛡️ Existing access permissions are preserved - only new ones are added</li>
+                                                                    <li>☁️ <strong>Cloud-Safe:</strong> File storage is optimized for deployment environments</li>
+                                                                </ul>
                                                             </div>
                                                             
                                                             <!-- CSV Status Display -->
@@ -775,8 +814,9 @@
                                                                             </button>
                                                                         </div>
                                                                         <div class="form-text">
-                                                                            <i class="bi bi-exclamation-triangle"></i> 
-                                                                            This will replace the current CSV file and affect registration permissions immediately.
+                                                                            <i class="bi bi-info-circle"></i> 
+                                                                            This will replace the current CSV file and automatically sync existing users with new program access permissions.
+                                                                            <br><strong>🔄 Auto-sync:</strong> Existing users will get access to new programs they've enrolled in.
                                                                         </div>
                                                                     </form>
                                                                 </div>
@@ -1433,23 +1473,29 @@
                         }
                         
                         let statusHtml = '';
+                        const envIcon = data.environment === 'cloud' ? '☁️' : '💻';
+                        
                         if (data.file_exists) {
                             statusHtml = `
                                 <div class="text-success mb-1">
-                                    <i class="bi bi-check-circle"></i> CSV file exists
+                                    <i class="bi bi-check-circle"></i> CSV file exists ${envIcon}
                                 </div>
                                 <small class="text-muted">
                                     <strong>Active Users:</strong> ${data.active_users} / ${data.total_users} total<br>
-                                    <strong>Last Modified:</strong> ${data.last_modified || 'Unknown'}
+                                    <strong>Last Modified:</strong> ${data.last_modified || 'Unknown'}<br>
+                                    <strong>Environment:</strong> ${data.environment || 'unknown'} storage
                                 </small>
                             `;
                             downloadBtn.classList.remove('disabled');
                         } else {
                             statusHtml = `
                                 <div class="text-warning">
-                                    <i class="bi bi-exclamation-triangle"></i> No CSV file found
+                                    <i class="bi bi-exclamation-triangle"></i> No CSV file found ${envIcon}
                                 </div>
-                                <small class="text-muted">Upload a CSV file to enable registration control</small>
+                                <small class="text-muted">
+                                    Upload a CSV file to enable registration control<br>
+                                    <em>Environment: ${data.environment || 'unknown'} storage</em>
+                                </small>
                             `;
                             downloadBtn.classList.add('disabled');
                         }
@@ -1483,22 +1529,8 @@
                 // Load CSV status when page loads
                 refreshCsvStatus();
                 
-                // Add event listener for CSV upload form
-                const csvUploadForm = document.getElementById('csvUploadForm');
-                if (csvUploadForm) {
-                    csvUploadForm.addEventListener('submit', function(e) {
-                        const fileInput = document.getElementById('csvFileInput');
-                        if (!fileInput.files.length) {
-                            e.preventDefault();
-                            alert('Please select a CSV file to upload.');
-                            return;
-                        }
-                        
-                        const submitBtn = csvUploadForm.querySelector('button[type="submit"]');
-                        submitBtn.innerHTML = '<i class="bi bi-arrow-clockwise spinning"></i> Uploading...';
-                        submitBtn.disabled = true;
-                    });
-                }
+                // Enhanced CSV upload handling is now handled in admin_scripts.js
+                // This provides better feedback including sync information
                 
                 // Any remaining page-specific JS can stay here
             });

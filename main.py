@@ -265,7 +265,19 @@ def to_eastern_time(dt):
     return eastern_time.strftime('%Y-%m-%d %H:%M:%S ET')
 
 # Configuration for authorized users CSV file
-AUTHORIZED_USERS_CSV = os.path.join(os.path.dirname(__file__), 'authorized_users.csv')
+def get_csv_file_path():
+    """Get the appropriate CSV file path based on environment"""
+    if os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'):
+        # In cloud deployment environments, use tmp directory
+        csv_dir = '/tmp'
+        if not os.path.exists(csv_dir):
+            os.makedirs(csv_dir, exist_ok=True)
+        return os.path.join(csv_dir, 'authorized_users.csv')
+    else:
+        # Local development - use app directory
+        return os.path.join(os.path.dirname(__file__), 'authorized_users.csv')
+
+AUTHORIZED_USERS_CSV = get_csv_file_path()
 authorized_users_cache = {}  # Cache for authorized users
 authorized_users_last_modified = None  # Track file modification time
 
@@ -277,6 +289,7 @@ def load_authorized_users():
         # Check if file exists
         if not os.path.exists(AUTHORIZED_USERS_CSV):
             logger.warning(f"Authorized users CSV file not found: {AUTHORIZED_USERS_CSV}")
+            logger.info("No CSV restriction active - allowing all registrations")
             return {}
         
         # Check file modification time for cache invalidation
@@ -342,6 +355,38 @@ def load_authorized_users():
     except Exception as e:
         logger.error(f"Error loading authorized users CSV: {e}")
         return {}
+
+def clear_authorized_users_cache():
+    """Clear the authorized users cache to force reload"""
+    global authorized_users_cache, authorized_users_last_modified
+    authorized_users_cache = {}
+    authorized_users_last_modified = None
+
+def store_csv_metadata_in_db(db, active_users_count, total_users_count):
+    """Store CSV upload metadata in database for recovery and tracking"""
+    try:
+        from datetime import datetime
+        
+        # Create a simple metadata record (you can expand this as needed)
+        metadata_record = {
+            'upload_timestamp': datetime.now(),
+            'active_users_count': active_users_count,
+            'total_users_count': total_users_count,
+            'environment': 'cloud' if (os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME')) else 'local'
+        }
+        
+        # Store as a simple JSON in a text field or as separate columns
+        # For now, just log it (you can expand to actual DB storage if needed)
+        logger.info(f"CSV Upload Metadata: {metadata_record}")
+        
+        # You could add actual database storage here if needed:
+        # csv_metadata = CSVMetadata(**metadata_record)
+        # db.add(csv_metadata)
+        # db.commit()
+        
+    except Exception as e:
+        logger.error(f"Error storing CSV metadata: {e}")
+        raise
 
 def is_user_authorized(last_name, email):
     """Check if user is authorized to register"""
@@ -4381,21 +4426,196 @@ def debug_quota(program_code):
     finally:
         close_db(db)
 
+# ===== CSV User Synchronization Helper Functions =====
+
+def analyze_csv_user_changes(new_csv_df):
+    """
+    Analyze new CSV data to create user-to-lo_root_id mapping
+    Returns: dict with user email as key and lo_root_ids list as value
+    """
+    user_lo_mapping = {}
+    
+    try:
+        # Filter for active users only
+        active_users = new_csv_df[new_csv_df['status'].str.lower() == 'active']
+        
+        # Group by user (last_name, email combination)
+        user_groups = active_users.groupby(['last_name', 'email'])
+        
+        for (last_name, email), group in user_groups:
+            try:
+                last_name = str(last_name).strip()
+                email = str(email).strip().lower()
+                
+                if last_name and email:
+                    # Collect all unique lo_root_ids for this user
+                    lo_root_ids = []
+                    for lo_root_id in group['lo_root_id']:
+                        lo_root_id_clean = str(lo_root_id).strip()
+                        if lo_root_id_clean and lo_root_id_clean not in lo_root_ids:
+                            lo_root_ids.append(lo_root_id_clean)
+                    
+                    if lo_root_ids:
+                        user_lo_mapping[email] = {
+                            'last_name': last_name,
+                            'email': email,
+                            'lo_root_ids': lo_root_ids
+                        }
+            except Exception as e:
+                logger.warning(f"Error processing CSV user group {last_name}, {email}: {e}")
+                continue
+        
+        logger.info(f"Analyzed {len(user_lo_mapping)} active users from CSV")
+        return user_lo_mapping
+        
+    except Exception as e:
+        logger.error(f"Error analyzing CSV user changes: {e}")
+        return {}
+
+def get_existing_users_lo_mapping(db):
+    """
+    Get existing users' lo_root_id mapping from database
+    Returns: dict with user email as key and current lo_root_ids list as value
+    """
+    existing_mapping = {}
+    
+    try:
+        users = db.query(User).all()
+        for user in users:
+            user_lo_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
+            existing_mapping[user.email.lower()] = {
+                'user_id': user.id,
+                'last_name': user.last_name,
+                'email': user.email,
+                'lo_root_ids': user_lo_ids
+            }
+        
+        logger.info(f"Found {len(existing_mapping)} existing users in database")
+        return existing_mapping
+        
+    except Exception as e:
+        logger.error(f"Error getting existing users mapping: {e}")
+        return {}
+
+def sync_user_lo_root_ids(db, csv_user_mapping, existing_user_mapping):
+    """
+    Compare CSV data with existing user data and perform necessary updates
+    Returns: dict with sync statistics
+    """
+    sync_stats = {
+        'users_checked': 0,
+        'users_updated': 0,
+        'new_lo_ids_added': 0,
+        'updated_users': [],
+        'errors': []
+    }
+    
+    try:
+        for email, csv_user_data in csv_user_mapping.items():
+            try:
+                sync_stats['users_checked'] += 1
+                
+                # Find existing user
+                if email in existing_user_mapping:
+                    existing_user = existing_user_mapping[email]
+                    user_id = existing_user['user_id']
+                    
+                    # Compare current lo_root_ids with new ones
+                    current_lo_ids = set(existing_user['lo_root_ids'])
+                    new_lo_ids = set(csv_user_data['lo_root_ids'])
+                    
+                    # Find lo_root_ids that need to be added
+                    lo_ids_to_add = new_lo_ids - current_lo_ids
+                    
+                    if lo_ids_to_add:
+                        # Add new lo_root_ids
+                        for new_lo_id in lo_ids_to_add:
+                            user_lo_association = UserLORootID(
+                                user_id=user_id, 
+                                lo_root_id=new_lo_id
+                            )
+                            db.add(user_lo_association)
+                            sync_stats['new_lo_ids_added'] += 1
+                        
+                        sync_stats['users_updated'] += 1
+                        sync_stats['updated_users'].append({
+                            'email': email,
+                            'last_name': existing_user['last_name'],
+                            'added_lo_ids': list(lo_ids_to_add)
+                        })
+                        
+                        logger.info(f"Updated user {email}: added lo_root_ids {list(lo_ids_to_add)}")
+                        
+            except Exception as e:
+                error_msg = f"Error syncing user {email}: {str(e)}"
+                sync_stats['errors'].append(error_msg)
+                logger.error(error_msg)
+        
+        logger.info(f"Sync completed: {sync_stats['users_updated']} users updated with {sync_stats['new_lo_ids_added']} new access permissions")
+        return sync_stats
+        
+    except Exception as e:
+        logger.error(f"Error during user synchronization: {e}")
+        sync_stats['errors'].append(f"General sync error: {str(e)}")
+        return sync_stats
+
+# Add helper function to convert lo_root_ids to program names
+def convert_lo_ids_to_program_names(lo_root_ids):
+    """
+    Convert lo_root_ids to readable program names
+    Returns: list of program names or original lo_root_ids if no mapping found
+    """
+    db = get_db()
+    try:
+        program_names = []
+        for lo_id in lo_root_ids:
+            try:
+                # Find chatbot with this lo_root_id
+                chatbot_association = db.query(ChatbotLORootAssociation).filter(
+                    ChatbotLORootAssociation.lo_root_id == lo_id
+                ).first()
+                
+                if chatbot_association:
+                    chatbot = db.query(ChatbotContent).filter(
+                        ChatbotContent.id == chatbot_association.chatbot_id
+                    ).first()
+                    
+                    if chatbot:
+                        program_names.append(chatbot.display_name or chatbot.name)
+                    else:
+                        program_names.append(f"Program-{lo_id[:8]}")
+                else:
+                    program_names.append(f"Program-{lo_id[:8]}")
+                    
+            except Exception as e:
+                print(f"Error converting lo_id {lo_id}: {e}")
+                program_names.append(f"Program-{lo_id[:8]}")
+                
+        return program_names
+    except Exception as e:
+        print(f"Error in convert_lo_ids_to_program_names: {e}")
+        return [f"Program-{lo_id[:8]}" for lo_id in lo_root_ids]
+    finally:
+        close_db(db)
+
 @app.route('/admin/upload_authorized_users_csv', methods=['POST'])
 @requires_auth
 def admin_upload_authorized_users_csv():
-    """Upload and replace the authorized users CSV file"""
+    """Upload and replace the authorized users CSV file with user synchronization"""
     if 'file' not in request.files:
-        flash('No file part', 'error')
+        session['admin_message'] = 'No file part'
+        session['admin_message_type'] = 'error'
         return redirect(url_for('admin'))
     
     file = request.files['file']
     if file.filename == '':
-        flash('No selected file', 'error')
+        session['admin_message'] = 'No selected file'
+        session['admin_message_type'] = 'error'
         return redirect(url_for('admin'))
 
     if not file or not file.filename.endswith('.csv'):
-        flash('Invalid file type. Please upload a CSV file.', 'error')
+        session['admin_message'] = 'Invalid file type. Please upload a CSV file.'
+        session['admin_message_type'] = 'error'
         return redirect(url_for('admin'))
 
     try:
@@ -4407,33 +4627,99 @@ def admin_upload_authorized_users_csv():
         required_columns = ['last_name', 'email', 'status', 'lo_root_id']
         missing_cols = [col for col in required_columns if col not in df.columns]
         if missing_cols:
-            flash(f'Error: Missing required columns: {", ".join(missing_cols)}', 'error')
+            error_msg = f'Error: Missing required columns: {", ".join(missing_cols)}'
+            session['admin_message'] = error_msg
+            session['admin_message_type'] = 'error'
             return redirect(url_for('admin'))
-
-        # Count active users
-        active_users = df[df['status'].str.lower() == 'active']
-        active_count = len(active_users)
         
-        if active_count == 0:
-            flash('Error: No active users found in the CSV file.', 'error')
+        # Filter for active users
+        active_df = df[df['status'].str.lower() == 'active']
+        if active_df.empty:
+            session['admin_message'] = 'Error: No active users found in the CSV file.'
+            session['admin_message_type'] = 'error'
             return redirect(url_for('admin'))
+        
+        # Perform user synchronization before updating CSV
+        db = get_db()
+        try:
+            # Analyze new CSV data
+            csv_user_mapping = analyze_csv_user_changes(active_df)
+            
+            # Get existing user mapping from database
+            existing_user_mapping = get_existing_users_lo_mapping(db)
+            
+            # Perform synchronization
+            sync_stats = sync_user_lo_root_ids(db, csv_user_mapping, existing_user_mapping)
+            
+            # Commit database changes
+            db.commit()
+            
+        except Exception as sync_error:
+            if db:
+                db.rollback()
+            raise sync_error
+        finally:
+            if db:
+                close_db(db)
+        
+        # Save CSV file using the environment-appropriate path
+        csv_file_path = get_csv_file_path()
+        df.to_csv(csv_file_path, index=False)
+        
+        # For Render: Also save a backup copy with timestamp for recovery
+        if os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME'):
+            from datetime import datetime
+            backup_filename = f'authorized_users_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+            backup_path = os.path.join(os.path.dirname(csv_file_path), backup_filename)
+            df.to_csv(backup_path, index=False)
+            logger.info(f"CSV backup saved: {backup_path}")
+            
+            # Also store CSV metadata in database for recovery purposes
+            try:
+                store_csv_metadata_in_db(db, active_count, len(df))
+            except Exception as metadata_error:
+                logger.warning(f"Failed to store CSV metadata: {metadata_error}")
+        
+        # Clear authorized users cache
+        clear_authorized_users_cache()
+        
+        # Prepare success message with sync results
+        active_count = len(active_df)
+        success_parts = [f'✅ CSV uploaded successfully! {active_count} authorized users loaded.']
+        
+        if sync_stats["updated_users"]:
+            # Convert lo_root_ids to program names for better readability
+            updated_details = []
+            for user_update in sync_stats["updated_users"][:5]:  # Show first 5
+                email = user_update['email']
+                lo_ids = user_update['added_lo_ids']
+                program_names = convert_lo_ids_to_program_names(lo_ids)
+                updated_details.append(f'{email} → {", ".join(program_names)}')
+            
+            success_parts.append(f'🔄 Synced {len(sync_stats["updated_users"])} existing users with new programs')
+            session['admin_sync_details'] = '📋 Updated Users:\n' + '\n'.join(updated_details)
+            
+            if len(sync_stats["updated_users"]) > 5:
+                session['admin_sync_more'] = f'... and {len(sync_stats["updated_users"]) - 5} more users'
+        
+        success_msg = ' '.join(success_parts)
+        session['admin_message'] = success_msg
+        session['admin_message_type'] = 'success'
+        
+        # Handle sync warnings
+        if sync_stats["errors"]:
+            warning_details = []
+            for error in sync_stats["errors"][:3]:  # Show first 3 warnings
+                warning_details.append(error)
+            session['admin_sync_warnings'] = '⚠️ Sync warnings:\n' + '\n'.join(warning_details)
+            
+            if len(sync_stats["errors"]) > 3:
+                session['admin_sync_warnings_more'] = f'... and {len(sync_stats["errors"]) - 3} more warnings'
 
-        # Save the CSV file
-        with open(AUTHORIZED_USERS_CSV, 'w', encoding='utf-8-sig') as f:
-            f.write(csv_content)
-        
-        # Clear cache to force reload
-        global authorized_users_cache, authorized_users_last_modified
-        authorized_users_cache = {}
-        authorized_users_last_modified = None
-        
-        flash(f'Authorized users CSV uploaded successfully! {active_count} active users loaded.', 'success')
-        logger.info(f"Authorized users CSV updated with {active_count} active users")
-        
     except Exception as e:
-        flash(f'Error processing CSV file: {str(e)}', 'error')
-        logger.error(f"Error uploading authorized users CSV: {e}")
-    
+        session['admin_message'] = f'Error processing CSV file: {str(e)}'
+        session['admin_message_type'] = 'error'
+        
     return redirect(url_for('admin'))
 
 @app.route('/admin/download_authorized_users_csv')
@@ -4441,12 +4727,13 @@ def admin_upload_authorized_users_csv():
 def admin_download_authorized_users_csv():
     """Download the current authorized users CSV file"""
     try:
-        if not os.path.exists(AUTHORIZED_USERS_CSV):
+        csv_file_path = get_csv_file_path()
+        if not os.path.exists(csv_file_path):
             flash('No authorized users CSV file found.', 'error')
             return redirect(url_for('admin'))
         
         return send_file(
-            AUTHORIZED_USERS_CSV,
+            csv_file_path,
             as_attachment=True,
             download_name='authorized_users.csv',
             mimetype='text/csv'
@@ -4460,16 +4747,19 @@ def admin_download_authorized_users_csv():
 def admin_authorized_users_status():
     """Get status information about the authorized users CSV"""
     try:
+        csv_file_path = get_csv_file_path()
         status_info = {
-            "file_exists": os.path.exists(AUTHORIZED_USERS_CSV),
+            "file_exists": os.path.exists(csv_file_path),
             "total_users": 0,
             "active_users": 0,
-            "last_modified": None
+            "last_modified": None,
+            "file_path": csv_file_path,
+            "environment": "cloud" if (os.getenv('RENDER') or os.getenv('RAILWAY_STATIC_URL') or os.getenv('HEROKU_APP_NAME')) else "local"
         }
         
         if status_info["file_exists"]:
             # Get file modification time
-            mtime = os.path.getmtime(AUTHORIZED_USERS_CSV)
+            mtime = os.path.getmtime(csv_file_path)
             status_info["last_modified"] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
             
             # Load and count users
@@ -4478,7 +4768,7 @@ def admin_authorized_users_status():
             
             # Count total users in file
             try:
-                df = pd.read_csv(AUTHORIZED_USERS_CSV)
+                df = pd.read_csv(csv_file_path)
                 status_info["total_users"] = len(df)
             except Exception:
                 pass

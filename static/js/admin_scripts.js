@@ -3327,3 +3327,133 @@ function enhanceChatbotCardInteractions() {
         });
     });
 }
+
+// ===== CSV Upload Enhancement Functions =====
+
+function initializeCSVUploadEnhancements() {
+    const csvUploadForm = document.getElementById('csvUploadForm');
+    if (csvUploadForm) {
+        csvUploadForm.addEventListener('submit', function(e) {
+            const fileInput = document.getElementById('csvFileInput');
+            if (!fileInput.files.length) {
+                e.preventDefault();
+                alert('Please select a CSV file to upload.');
+                return;
+            }
+            
+            const submitBtn = csvUploadForm.querySelector('button[type="submit"]');
+            const originalHTML = submitBtn.innerHTML;
+            
+            // Update button to show processing state
+            submitBtn.innerHTML = '<i class="bi bi-arrow-clockwise spinning"></i> Uploading & Syncing...';
+            submitBtn.disabled = true;
+            
+            // Show processing message
+            showCSVProcessingMessage('📤 Uploading CSV and synchronizing user access permissions...');
+            
+            // Store original button state for potential restoration
+            csvUploadForm.dataset.originalButtonHTML = originalHTML;
+        });
+    }
+}
+
+function showCSVProcessingMessage(message) {
+    // Remove any existing processing messages
+    const existingMessage = document.querySelector('.csv-processing-alert');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    // Create new processing message
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-info mt-3 csv-processing-alert';
+    alertDiv.innerHTML = `
+        <div class="d-flex align-items-center">
+            <div class="spinner-border spinner-border-sm text-info me-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div>
+                <strong>Processing...</strong><br>
+                <small>${message}</small>
+            </div>
+        </div>
+    `;
+    
+    const form = document.getElementById('csvUploadForm');
+    if (form) {
+        form.appendChild(alertDiv);
+        
+        // Auto-remove after 10 seconds (in case the page doesn't reload)
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 10000);
+    }
+}
+
+function enhanceCSVStatusDisplay() {
+    // Add animation to CSV status refresh
+    const refreshButton = document.querySelector('button[onclick="refreshCsvStatus()"]');
+    if (refreshButton) {
+        refreshButton.addEventListener('click', function() {
+            this.querySelector('i').classList.add('spinning');
+            
+            setTimeout(() => {
+                this.querySelector('i').classList.remove('spinning');
+            }, 2000);
+        });
+    }
+}
+
+function showCSVUploadResult(success, message, details = null) {
+    // Enhanced result display function for CSV uploads
+    const alertType = success ? 'success' : 'danger';
+    const iconClass = success ? 'bi-check-circle-fill' : 'bi-exclamation-circle-fill';
+    
+    let alertHTML = `
+        <div class="alert alert-${alertType} mt-3">
+            <div class="d-flex align-items-start">
+                <i class="${iconClass} me-2 mt-1"></i>
+                <div class="flex-grow-1">
+                    <strong>${message}</strong>
+                    ${details ? `<div class="mt-2 small">${details}</div>` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Find appropriate container and add the result
+    const container = document.querySelector('#csvManagement .card-body');
+    if (container) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = alertHTML;
+        container.appendChild(tempDiv.firstElementChild);
+    }
+}
+
+// Initialize CSV enhancements when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    initializeCSVUploadEnhancements();
+    enhanceCSVStatusDisplay();
+});
+
+// CSS Animation for spinning effect (if not already added)
+if (!document.querySelector('#admin-spinner-styles')) {
+    const style = document.createElement('style');
+    style.id = 'admin-spinner-styles';
+    style.textContent = `
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinning {
+            animation: spin 1s linear infinite;
+        }
+        .csv-processing-alert {
+            border-left: 4px solid #0dcaf0;
+            background-color: #e7f3ff;
+        }
+    `;
+    document.head.appendChild(style);
+}

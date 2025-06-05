@@ -89,63 +89,136 @@
         .nav-menu {
             display: flex;
             align-items: center;
-            gap: 20px;
+            gap: 16px;
         }
         
-        .user-greeting {
+        .profile-dropdown {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        
+        .profile-button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            border-radius: 50%;
+            transition: opacity 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .profile-button:hover {
+            opacity: 0.7;
+        }
+        
+        .profile-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+        }
+        
+        .profile-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: saturate(180%) blur(20px);
+            -webkit-backdrop-filter: saturate(180%) blur(20px);
+            border: 0.5px solid rgba(60, 60, 67, 0.12);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+            min-width: 200px;
+            padding: 8px 0;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px);
+            transition: all 0.2s ease;
+            z-index: 1000;
+        }
+        
+        .profile-menu.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+        
+        .profile-info {
+            padding: 12px 16px;
+        }
+        
+        .profile-email {
             font-size: 13px;
             color: #1d1d1f;
-            font-weight: 400;
+            font-weight: 500;
             letter-spacing: -0.01em;
-            opacity: 0.8;
-            white-space: nowrap;
+            margin-bottom: 2px;
         }
         
-        .nav-links {
+        .profile-status {
+            font-size: 11px;
+            color: #1d1d1f;
+            opacity: 0.6;
+            letter-spacing: -0.01em;
+            font-weight: 400;
+        }
+        
+        .profile-divider {
+            height: 0.5px;
+            background: rgba(60, 60, 67, 0.12);
+            margin: 8px 0;
+        }
+        
+        .profile-menu-item {
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-        
-        .nav-link {
-            color: #1d1d1f;
+            padding: 8px 16px;
+            color: #ff3b30;
             text-decoration: none;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 400;
             letter-spacing: -0.01em;
-            padding: 4px 8px;
-            border-radius: 6px;
-            transition: all 0.15s ease;
-            position: relative;
-            opacity: 0.8;
-            line-height: 1.2;
+            transition: background-color 0.15s ease;
         }
         
-        .nav-link:hover {
-            opacity: 1;
+        .profile-menu-item:hover {
             background-color: rgba(0, 0, 0, 0.04);
         }
         
-        .nav-link.admin {
+        .profile-menu-item.admin-item {
             color: #007aff;
-            font-weight: 400;
-            opacity: 0.9;
         }
         
-        .nav-link.admin:hover {
-            opacity: 1;
+        .profile-menu-item.admin-item:hover {
             background-color: rgba(0, 122, 255, 0.06);
         }
         
-        .nav-link.logout {
+        .profile-menu-item.logout-item {
             color: #ff3b30;
+        }
+        
+        .profile-menu-item.logout-item:hover {
+            background-color: rgba(255, 59, 48, 0.06);
+        }
+        
+        .profile-menu-icon {
+            width: 14px;
+            height: 14px;
             opacity: 0.8;
         }
         
-        .nav-link.logout:hover {
-            opacity: 1;
-            background-color: rgba(255, 59, 48, 0.06);
-        }
+
         
         .main-content {
             max-width: 1200px;
@@ -779,32 +852,36 @@
             }
             
             .nav-menu {
-                gap: 16px;
+                gap: 12px;
             }
             
-            .user-greeting {
+            .profile-avatar {
+                width: 24px;
+                height: 24px;
+                font-size: 11px;
+            }
+            
+            .profile-menu {
+                min-width: 180px;
+                right: -8px;
+            }
+            
+            .profile-email {
                 font-size: 12px;
-                max-width: 70px;
-                overflow: hidden;
-                text-overflow: ellipsis;
             }
             
-            .nav-links {
-                gap: 6px;
+            .profile-status {
+                font-size: 10px;
             }
             
-            .nav-link {
-                font-size: 13px;
-                padding: 3px 6px;
-                border-radius: 5px;
+            .profile-menu-item {
+                font-size: 12px;
+                padding: 6px 12px;
             }
             
-            .nav-link.admin {
-                font-size: 13px;
-            }
-            
-            .nav-link.logout {
-                font-size: 13px;
+            .profile-menu-icon {
+                width: 12px;
+                height: 12px;
             }
             
             .main-content {
@@ -1067,10 +1144,33 @@
             </div>
                 {% if current_user and current_user.is_authenticated %}
                 <nav class="nav-menu">
-                    <div class="user-greeting">{{ current_user.email.split('@')[0] }}</div>
-                    <div class="nav-links">
-                        <a href="{{ url_for('logout') }}" class="nav-link logout">Sign Out</a>
-                        <a href="{{ url_for('admin') }}" class="nav-link admin">Admin</a>
+                    <div class="profile-dropdown">
+                        <button class="profile-button" id="profileButton">
+                            <div class="profile-avatar">
+                                {{ current_user.email[0].upper() }}
+                            </div>
+                        </button>
+                        <div class="profile-menu" id="profileMenu">
+                            <div class="profile-info">
+                                <div class="profile-email">{{ current_user.email }}</div>
+                                <div class="profile-status">Member since {{ current_user.date_added.year if current_user.date_added else '2024' }}</div>
+                            </div>
+                            <div class="profile-divider"></div>
+                            <a href="{{ url_for('admin') }}" class="profile-menu-item admin-item">
+                                <svg class="profile-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                </svg>
+                                Admin Panel
+                            </a>
+                            <a href="{{ url_for('logout') }}" class="profile-menu-item logout-item">
+                                <svg class="profile-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                                    <polyline points="16,17 21,12 16,7"/>
+                                    <line x1="21" y1="12" x2="9" y2="12"/>
+                                </svg>
+                                Sign Out
+                            </a>
+                        </div>
                     </div>
                 </nav>
             {% endif %}
@@ -1655,6 +1755,34 @@
             });
         });
         
+        // Profile dropdown functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const profileButton = document.getElementById('profileButton');
+            const profileMenu = document.getElementById('profileMenu');
+
+            if (profileButton && profileMenu) {
+                // Toggle dropdown on button click
+                profileButton.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    profileMenu.classList.toggle('show');
+                });
+
+                // Close dropdown when clicking outside
+                document.addEventListener('click', function(e) {
+                    if (!profileButton.contains(e.target) && !profileMenu.contains(e.target)) {
+                        profileMenu.classList.remove('show');
+                    }
+                });
+
+                // Close dropdown on escape key
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                        profileMenu.classList.remove('show');
+                    }
+                });
+            }
+        });
+
         // Initialize view on page load
         document.addEventListener('DOMContentLoaded', function() {
             const wheelToggle = document.querySelector('.view-toggle[data-view="wheel"]');

@@ -7,15 +7,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def get_database_url():
-    """Get database URL from environment or models.py"""
-    # Try environment first
+    """Get database URL from environment variables only"""
+    # SECURITY: Only use environment variables for database connection
     url = os.environ.get('DATABASE_URL')
     if url:
         return url
     
-    # If not in environment, check if it's printed in logs
-    # Based on the logs we saw: postgresql://my_chatbot_db_user:BKuZfVpVmFmx8qiDQJC6mUKsZqyHgzuR@dpg-culbngogph6c73da0rag-a.ohio-postgres.render.com/my_chatbot_db
-    return "postgresql://my_chatbot_db_user:BKuZfVpVmFmx8qiDQJC6mUKsZqyHgzuR@dpg-culbngogph6c73da0rag-a.ohio-postgres.render.com/my_chatbot_db"
+    # Never hardcode database credentials for security reasons
+    logger.error("❌ DATABASE_URL not found in environment variables")
+    logger.error("💡 Please set DATABASE_URL environment variable")
+    return None
 
 def vacuum_database():
     """Perform VACUUM to reclaim disk space"""

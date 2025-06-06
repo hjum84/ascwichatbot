@@ -1,2 +1,45 @@
+# Environment variables and sensitive configuration
 .env
+.env.local
+.env.production
+*.env
+database_credentials.txt
+config.ini
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database and security files
+*.db
+*.sqlite
+*.sqlite3
+database_url.txt
+connection_string.txt
+
+# Logs that might contain sensitive info
+*.log
+logs/
+
+# Temporary files that might contain credentials
+temp_*
+test_db_*
+vacuum_database_temp.py
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

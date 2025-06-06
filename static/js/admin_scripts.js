@@ -3664,4 +3664,204 @@ function showDuplicateMessage(type, message) {
 // Initialize duplicate management when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
     initializeDuplicateManagement();
+    initializeSecurityAudit();
 });
+
+// Security Audit Functions
+function initializeSecurityAudit() {
+    const runBtn = document.getElementById('runSecurityAudit');
+    
+    if (runBtn) {
+        runBtn.addEventListener('click', runSecurityAudit);
+    }
+}
+
+function runSecurityAudit() {
+    const runBtn = document.getElementById('runSecurityAudit');
+    const statusDiv = document.getElementById('securityStatus');
+    const loadingDiv = document.getElementById('securityAuditLoading');
+    const lastTimeDiv = document.getElementById('lastAuditTime');
+    
+    // Show loading state
+    runBtn.disabled = true;
+    runBtn.innerHTML = '<i class="bi bi-hourglass-split spinning"></i> Running...';
+    statusDiv.style.display = 'none';
+    loadingDiv.style.display = 'block';
+    
+    fetch('/admin/security_audit')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.error || 'Security audit failed');
+            }
+            
+            const audit = data.audit;
+            
+            // Update last audit time
+            const auditTime = new Date(audit.timestamp).toLocaleString();
+            lastTimeDiv.innerHTML = `Last audit: ${auditTime}`;
+            
+            // Update overall security status
+            updateSecurityStatus(audit);
+            
+            // Update statistics
+            updateSecurityStatistics(audit.statistics);
+            
+            // Show alerts if any
+            updateSecurityAlerts(audit.alerts);
+            
+            // Show success notification
+            showSecurityMessage('success', 
+                audit.security_status === 'good' 
+                    ? 'Security audit completed successfully. No issues detected! ✅'
+                    : `Security audit completed. ${audit.alerts.length} alert(s) found.`
+            );
+            
+        })
+        .catch(error => {
+            console.error('Security audit error:', error);
+            showSecurityMessage('danger', `Security audit failed: ${error.message}`);
+        })
+        .finally(() => {
+            // Reset button state
+            runBtn.disabled = false;
+            runBtn.innerHTML = '<i class="bi bi-shield-check"></i> Run Security Audit';
+            loadingDiv.style.display = 'none';
+            statusDiv.style.display = 'block';
+        });
+}
+
+function updateSecurityStatus(audit) {
+    const statusCard = document.getElementById('securityStatusCard');
+    const statusTitle = document.getElementById('statusTitle');
+    const statusMessage = document.getElementById('statusMessage');
+    
+    // Determine status styling
+    let statusClass, statusIcon, statusText;
+    
+    switch (audit.threat_level) {
+        case 'low':
+            statusClass = 'alert-success';
+            statusIcon = 'bi-shield-check';
+            statusText = 'Security Status: Good';
+            break;
+        case 'medium':
+            statusClass = 'alert-warning';
+            statusIcon = 'bi-shield-exclamation';
+            statusText = 'Security Status: Attention Needed';
+            break;
+        case 'high':
+            statusClass = 'alert-danger';
+            statusIcon = 'bi-shield-x';
+            statusText = 'Security Status: High Risk';
+            break;
+        default:
+            statusClass = 'alert-info';
+            statusIcon = 'bi-shield-check';
+            statusText = 'Security Status: Unknown';
+    }
+    
+    // Update status display
+    statusCard.className = `alert ${statusClass}`;
+    statusTitle.innerHTML = `<i class="bi ${statusIcon}"></i> ${statusText}`;
+    statusMessage.innerHTML = `
+        <div class="mb-2">
+            <strong>Threat Level:</strong> 
+            <span class="badge ${audit.threat_level === 'low' ? 'bg-success' : audit.threat_level === 'medium' ? 'bg-warning' : 'bg-danger'}">
+                ${audit.threat_level.toUpperCase()}
+            </span>
+        </div>
+        <div>
+            <strong>Last Check:</strong> ${new Date(audit.timestamp).toLocaleString()}
+        </div>
+    `;
+}
+
+function updateSecurityStatistics(stats) {
+    // Connection Statistics
+    document.getElementById('totalConnections').textContent = stats.total_connections;
+    document.getElementById('externalConnections').textContent = stats.external_connections;
+    document.getElementById('activeQueries').textContent = stats.active_queries;
+    document.getElementById('longConnections').textContent = stats.long_connections;
+    
+    // Database Activity
+    document.getElementById('recentInserts').textContent = stats.recent_inserts.toLocaleString();
+    document.getElementById('recentDeletes').textContent = stats.recent_deletes.toLocaleString();
+    document.getElementById('rollbackRatio').textContent = stats.rollback_ratio;
+    document.getElementById('deadlocks').textContent = stats.deadlocks;
+    
+    // Color code external connections
+    const externalDiv = document.getElementById('externalConnections');
+    if (stats.external_connections > 0) {
+        externalDiv.className = 'h3 mb-0 text-warning';
+    } else {
+        externalDiv.className = 'h3 mb-0 text-success';
+    }
+    
+    // Color code deadlocks
+    const deadlockDiv = document.getElementById('deadlocks');
+    if (stats.deadlocks > 0) {
+        deadlockDiv.className = 'h3 mb-0 text-danger';
+    } else {
+        deadlockDiv.className = 'h3 mb-0 text-success';
+    }
+}
+
+function updateSecurityAlerts(alerts) {
+    const alertsSection = document.getElementById('alertsSection');
+    const alertsList = document.getElementById('alertsList');
+    
+    if (alerts && alerts.length > 0) {
+        // Clear existing alerts
+        alertsList.innerHTML = '';
+        
+        // Add each alert
+        alerts.forEach(alert => {
+            const listItem = document.createElement('li');
+            listItem.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${alert}`;
+            alertsList.appendChild(listItem);
+        });
+        
+        // Show alerts section
+        alertsSection.style.display = 'block';
+    } else {
+        // Hide alerts section if no alerts
+        alertsSection.style.display = 'none';
+    }
+}
+
+function showSecurityMessage(type, message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-3`;
+    alertDiv.innerHTML = `
+        <strong>${type === 'success' ? 'Success!' : type === 'warning' ? 'Notice!' : 'Error!'}</strong> ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    // Insert the alert at the top of security audit card body
+    const securityCard = document.querySelector('#security-content .card-body');
+    if (securityCard) {
+        // Remove any existing security messages
+        const existingAlerts = securityCard.querySelectorAll('.alert:not(#securityStatusCard):not(#alertsSection .alert)');
+        existingAlerts.forEach(alert => {
+            if (alert.textContent.includes('Security audit') || alert.textContent.includes('Success!') || alert.textContent.includes('Error!')) {
+                alert.remove();
+            }
+        });
+        
+        // Insert after the info alert
+        const infoAlert = securityCard.querySelector('.alert-info');
+        if (infoAlert && infoAlert.nextElementSibling) {
+            securityCard.insertBefore(alertDiv, infoAlert.nextElementSibling);
+        } else {
+            securityCard.appendChild(alertDiv);
+        }
+    }
+    
+    // Auto-hide after 8 seconds
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.remove();
+        }
+    }, 8000);
+}

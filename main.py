@@ -4931,6 +4931,136 @@ def admin_remove_duplicates():
     finally:
         close_db(db)
 
+@app.route('/admin/security_audit')
+@requires_auth
+def admin_security_audit():
+    """Lightweight database security audit for admin dashboard"""
+    db = get_db()
+    try:
+        from sqlalchemy import text, func
+        
+        # 1. Get basic connection statistics (lightweight query)
+        connection_stats = db.execute(text("""
+            SELECT 
+                COUNT(*) as total_connections,
+                COUNT(CASE WHEN client_addr IS NOT NULL AND 
+                           NOT (client_addr::inet << '127.0.0.0/8'::inet OR 
+                                client_addr::inet << '10.0.0.0/8'::inet OR 
+                                client_addr::inet << '172.16.0.0/12'::inet OR 
+                                client_addr::inet << '192.168.0.0/16'::inet) 
+                      THEN 1 END) as external_connections,
+                COUNT(CASE WHEN state = 'active' THEN 1 END) as active_queries,
+                COUNT(CASE WHEN EXTRACT(EPOCH FROM (now() - backend_start)) > 3600 THEN 1 END) as long_connections
+            FROM pg_stat_activity 
+            WHERE pid != pg_backend_pid()
+        """)).fetchone()
+        
+        # 2. Get database activity summary (lightweight)
+        db_activity = db.execute(text("""
+            SELECT 
+                numbackends,
+                xact_commit,
+                xact_rollback,
+                deadlocks,
+                conflicts
+            FROM pg_stat_database 
+            WHERE datname = current_database()
+        """)).fetchone()
+        
+        # 3. Check for suspicious patterns (very lightweight)
+        suspicious_patterns = db.execute(text("""
+            SELECT 
+                COUNT(CASE WHEN client_addr IS NOT NULL THEN 1 END) as ip_count,
+                COUNT(DISTINCT client_addr) as unique_ips,
+                MAX(EXTRACT(EPOCH FROM (now() - backend_start))) as max_connection_age
+            FROM pg_stat_activity 
+            WHERE pid != pg_backend_pid()
+        """)).fetchone()
+        
+        # 4. Get recent table activity (authorized_users only for security focus)
+        table_activity = db.execute(text("""
+            SELECT 
+                n_tup_ins as inserts,
+                n_tup_del as deletes,
+                n_dead_tup as dead_tuples
+            FROM pg_stat_user_tables 
+            WHERE relname = 'authorized_users'
+        """)).fetchone()
+        
+        # Analyze results and determine security status
+        security_alerts = []
+        threat_level = "low"
+        
+        # Check for external connections
+        if connection_stats[1] > 0:  # external_connections
+            security_alerts.append("External connections detected")
+            threat_level = "medium"
+        
+        # Check for too many connections
+        if connection_stats[0] > 20:  # total_connections
+            security_alerts.append("High connection count")
+            threat_level = "medium"
+        
+        # Check for long-running connections
+        if connection_stats[3] > 0:  # long_connections
+            security_alerts.append("Long-running connections detected")
+            if threat_level == "low":
+                threat_level = "medium"
+        
+        # Check rollback ratio
+        rollback_ratio = 0
+        if db_activity[1] > 0:  # commits > 0
+            rollback_ratio = db_activity[2] / db_activity[1]  # rollbacks / commits
+            if rollback_ratio > 0.15:  # More than 15% rollbacks
+                security_alerts.append("High transaction rollback ratio")
+                threat_level = "medium"
+        
+        # Check for deadlocks
+        if db_activity[3] > 0:  # deadlocks
+            security_alerts.append("Database deadlocks detected")
+            threat_level = "high"
+        
+        # Check for conflicts
+        if db_activity[4] > 0:  # conflicts
+            security_alerts.append("Database conflicts detected")
+            threat_level = "medium"
+        
+        # Prepare safe response (no sensitive info)
+        audit_result = {
+            'timestamp': datetime.now().isoformat(),
+            'security_status': 'good' if threat_level == 'low' else 'attention_needed',
+            'threat_level': threat_level,
+            'alerts': security_alerts,
+            'statistics': {
+                'total_connections': connection_stats[0],
+                'external_connections': connection_stats[1],
+                'active_queries': connection_stats[2],
+                'long_connections': connection_stats[3],
+                'current_backends': db_activity[0],
+                'rollback_ratio': round(rollback_ratio * 100, 1) if rollback_ratio else 0,
+                'deadlocks': db_activity[3],
+                'recent_inserts': table_activity[0] if table_activity else 0,
+                'recent_deletes': table_activity[1] if table_activity else 0
+            }
+        }
+        
+        # Log only non-sensitive summary
+        logger.info(f"Security audit completed: {threat_level} threat level, {len(security_alerts)} alerts")
+        
+        return jsonify({
+            'success': True,
+            'audit': audit_result
+        })
+        
+    except Exception as e:
+        logger.error(f"Security audit error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Security audit failed'
+        }), 500
+    finally:
+        close_db(db)
+
 @app.route('/debug_user/<int:user_id>')
 @requires_auth
 def debug_user(user_id):

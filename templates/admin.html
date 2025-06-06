@@ -97,6 +97,11 @@
                                     <i class="bi bi-table"></i> Data Management
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-content" type="button" role="tab" aria-controls="security-content" aria-selected="false">
+                                    <i class="bi bi-shield-check"></i> Security Audit
+                                </button>
+                            </li>
                         </ul>
                         
                         <!-- Tab Content -->
@@ -1167,6 +1172,141 @@
                                                     <h6>Conversations (Raw Log)</h6>
                                                     <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=conversations&format=csv'">Conversations (CSV)</button>
                                                     <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=conversations&format=excel'">Conversations (Excel)</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- SECURITY AUDIT TAB -->
+                        <div class="tab-pane fade" id="security-content" role="tabpanel" aria-labelledby="security-tab">
+                            <div class="card mb-4">
+                                <div class="card-header bg-light">
+                                    <h2 class="section-title"><i class="bi bi-shield-check"></i> Security Audit</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="alert alert-info">
+                                        <strong>Note:</strong> This tool performs a lightweight security audit of your database connections and activity patterns. It does not log sensitive information and is designed to minimize server load.
+                                    </div>
+                                    
+                                    <div class="row mb-3">
+                                        <div class="col-md-8">
+                                            <button id="runSecurityAudit" class="btn btn-outline-primary">
+                                                <i class="bi bi-shield-check"></i> Run Security Audit
+                                            </button>
+                                        </div>
+                                        <div class="col-md-4 text-end">
+                                            <small id="lastAuditTime" class="text-muted"></small>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Loading indicator -->
+                                    <div id="securityAuditLoading" style="display: none;" class="text-center mb-4">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        <p class="mt-2">Running security audit...</p>
+                                    </div>
+                                    
+                                    <!-- Security Status Display -->
+                                    <div id="securityStatus" style="display: none;">
+                                        <!-- Overall Status -->
+                                        <div class="row mb-4">
+                                            <div class="col-12">
+                                                <div id="securityStatusCard" class="alert" role="alert">
+                                                    <h5><i class="bi bi-shield-check"></i> <span id="statusTitle">Security Status</span></h5>
+                                                    <div id="statusMessage"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Alerts Section -->
+                                        <div class="row mb-4" id="alertsSection" style="display: none;">
+                                            <div class="col-12">
+                                                <div class="card border-warning">
+                                                    <div class="card-header bg-warning text-dark">
+                                                        <h6 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Security Alerts</h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <ul id="alertsList" class="mb-0"></ul>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Statistics Grid -->
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <div class="card">
+                                                    <div class="card-header">
+                                                        <h6 class="mb-0"><i class="bi bi-plug"></i> Connection Statistics</h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div class="row text-center">
+                                                            <div class="col-6">
+                                                                <div class="mb-2">
+                                                                    <div class="h3 mb-0" id="totalConnections">-</div>
+                                                                    <small class="text-muted">Total Connections</small>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="mb-2">
+                                                                    <div class="h3 mb-0" id="externalConnections">-</div>
+                                                                    <small class="text-muted">External Connections</small>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="mb-2">
+                                                                    <div class="h3 mb-0" id="activeQueries">-</div>
+                                                                    <small class="text-muted">Active Queries</small>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="mb-0">
+                                                                    <div class="h3 mb-0" id="longConnections">-</div>
+                                                                    <small class="text-muted">Long Connections</small>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="col-md-6 mb-3">
+                                                <div class="card">
+                                                    <div class="card-header">
+                                                        <h6 class="mb-0"><i class="bi bi-activity"></i> Database Activity</h6>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div class="row text-center">
+                                                            <div class="col-6">
+                                                                <div class="mb-2">
+                                                                    <div class="h3 mb-0" id="recentInserts">-</div>
+                                                                    <small class="text-muted">Recent Inserts</small>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="mb-2">
+                                                                    <div class="h3 mb-0" id="recentDeletes">-</div>
+                                                                    <small class="text-muted">Recent Deletes</small>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="mb-2">
+                                                                    <div class="h3 mb-0" id="rollbackRatio">-</div>
+                                                                    <small class="text-muted">Rollback Ratio (%)</small>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="mb-0">
+                                                                    <div class="h3 mb-0" id="deadlocks">-</div>
+                                                                    <small class="text-muted">Deadlocks</small>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

@@ -70,39 +70,35 @@
                         </div>
                         {% endif %}
                         
-                        <!-- Main Navigation Tabs -->
-                        <ul class="nav nav-pills mb-4" id="adminTabs" role="tablist"> <!-- Removed nav-fill -->
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-content" type="button" role="tab" aria-controls="manage-content" aria-selected="true">
-                                    <i class="bi bi-list-check"></i> Manage Existing Chatbots
+                        <!-- Apple-Style Modern Navigation Tabs -->
+                        <div class="modern-nav-container">
+                            <nav class="modern-nav-tabs" id="adminTabs" role="tablist">
+                                <button class="modern-nav-tab active" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-content" type="button" role="tab" aria-controls="manage-content" aria-selected="true">
+                                    <i class="bi bi-list-check"></i>
+                                    <span class="tab-text">Manage</span>
                                 </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="create-tab" data-bs-toggle="tab" data-bs-target="#create-content" type="button" role="tab" aria-controls="create-content" aria-selected="false">
-                                    <i class="bi bi-plus-circle"></i> Create New Chatbot
+                                <button class="modern-nav-tab" id="create-tab" data-bs-toggle="tab" data-bs-target="#create-content" type="button" role="tab" aria-controls="create-content" aria-selected="false">
+                                    <i class="bi bi-plus-circle"></i>
+                                    <span class="tab-text">Create</span>
                                 </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="trash-tab" data-bs-toggle="tab" data-bs-target="#trash-content" type="button" role="tab" aria-controls="trash-content" aria-selected="false">
-                                    <i class="bi bi-trash"></i> Deleted Chatbots
+                                <button class="modern-nav-tab" id="trash-tab" data-bs-toggle="tab" data-bs-target="#trash-content" type="button" role="tab" aria-controls="trash-content" aria-selected="false">
+                                    <i class="bi bi-trash"></i>
+                                    <span class="tab-text">Deleted</span>
                                 </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats-content" type="button" role="tab" aria-controls="stats-content" aria-selected="false">
-                                    <i class="bi bi-database"></i> Database Statistics
+                                <button class="modern-nav-tab" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats-content" type="button" role="tab" aria-controls="stats-content" aria-selected="false">
+                                    <i class="bi bi-database"></i>
+                                    <span class="tab-text">Statistics</span>
                                 </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="data-mgmt-tab" data-bs-toggle="tab" data-bs-target="#data-mgmt-content" type="button" role="tab" aria-controls="data-mgmt-content" aria-selected="false">
-                                    <i class="bi bi-table"></i> Data Management
+                                <button class="modern-nav-tab" id="data-mgmt-tab" data-bs-toggle="tab" data-bs-target="#data-mgmt-content" type="button" role="tab" aria-controls="data-mgmt-content" aria-selected="false">
+                                    <i class="bi bi-table"></i>
+                                    <span class="tab-text">Data</span>
                                 </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-content" type="button" role="tab" aria-controls="security-content" aria-selected="false">
-                                    <i class="bi bi-shield-check"></i> Security Audit
+                                <button class="modern-nav-tab" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-content" type="button" role="tab" aria-controls="security-content" aria-selected="false">
+                                    <i class="bi bi-shield-check"></i>
+                                    <span class="tab-text">Security</span>
                                 </button>
-                            </li>
-                        </ul>
+                            </nav>
+                        </div>
                         
                         <!-- Tab Content -->
                         <div class="tab-content" id="adminTabsContent">

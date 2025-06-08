@@ -16,3 +16,17 @@
 2025-06-03 23:41:59,012 - INFO -    - Eligible for deletion: 0
 2025-06-03 23:41:59,515 - INFO -    - Total conversations: 35
 2025-06-03 23:41:59,515 - INFO -    - Eligible for deletion: 0
+2025-06-07 17:25:15,592 - INFO -    - Chatbots with auto-delete: 3
+2025-06-07 17:25:15,594 - INFO -    - Total conversations: 38
+2025-06-07 17:25:15,595 - INFO -    - Eligible for deletion: 15
+2025-06-07 17:25:15,834 - INFO -    - Chatbot: Building Coaching Competency
+2025-06-07 17:25:15,834 - INFO -    - Conversations to be deleted: 2
+2025-06-07 17:25:15,834 - INFO -    - Deletion date: June 10, 2025
+2025-06-07 17:25:15,835 - INFO -    - User will see notification in chat interface
+2025-06-07 17:25:16,003 - INFO -    - Chatbot: Motivational Interviewing
+2025-06-07 17:25:16,003 - INFO -    - Conversations to be deleted: 1
+2025-06-07 17:25:16,004 - INFO -    - Deletion date: June 10, 2025
+2025-06-07 17:25:16,005 - INFO -    - User will see notification in chat interface
+2025-06-07 17:25:17,234 - INFO -    - Total conversations: 23
+2025-06-07 17:25:17,235 - INFO -    - Eligible for deletion: 0
+2025-06-07 17:29:00,478 - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts

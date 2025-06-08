@@ -27,6 +27,9 @@ from threading import Lock
 from sklearn.metrics.pairwise import cosine_similarity
 import time
 from database_monitor import get_database_size, check_database_limits, setup_database_monitoring
+from auto_delete_scheduler import process_auto_deletions
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO, BytesIO
@@ -5355,6 +5358,33 @@ def get_chat_deletion_info(chat_timestamp, program_code):
     finally:
         close_db(db)
 
+def setup_auto_delete_scheduler():
+    """Setup scheduled auto-delete processing"""
+    try:
+        scheduler = BackgroundScheduler()
+        
+        # Run auto-delete processing daily at 2 AM
+        scheduler.add_job(
+            func=process_auto_deletions,
+            trigger="cron",
+            hour=2,
+            minute=0,
+            id='auto_delete_job',
+            replace_existing=True
+        )
+        
+        scheduler.start()
+        logger.info("🗑️ Auto-delete scheduler started successfully - will run daily at 2:00 AM")
+        
+        # Shutdown the scheduler when the app is closing
+        atexit.register(lambda: scheduler.shutdown())
+        
+        return scheduler
+        
+    except Exception as e:
+        logger.error(f"Failed to setup auto-delete scheduler: {e}")
+        return None
+
 if __name__ == '__main__':
     # Only migrate content if database is empty
     db = get_db()
@@ -5372,6 +5402,9 @@ if __name__ == '__main__':
     
     # Setup database monitoring
     setup_database_monitoring()
+    
+    # Setup auto-delete scheduler
+    setup_auto_delete_scheduler()
     
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

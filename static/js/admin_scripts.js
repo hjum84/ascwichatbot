@@ -2648,7 +2648,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     editUserModalElement.style.position = 'fixed';
                     editUserModalElement.style.top = '50%';
                     editUserModalElement.style.left = '50%';
-                    editUserModalElement.style.transform = 'translate(-50%, -50%)';
+                    // REMOVED: Direct transform manipulation causes modal conflicts
+                    // editUserModalElement.style.transform = 'translate(-50%, -50%)';
                     
                     editModal.show();
                     
@@ -2942,7 +2943,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         let backdrop = document.querySelector('.modal-backdrop');
                         if (!backdrop) {
                             backdrop = document.createElement('div');
-                            backdrop.className = 'modal-backdrop fade show';
+                            backdrop.className = 'modal-backdrop show';
                             document.body.appendChild(backdrop);
                         }
                         
@@ -3316,7 +3317,9 @@ function enhanceChatbotCardInteractions() {
         }
     });
 
-    // Enhanced hover effects for cards
+    // Enhanced hover effects for cards - DISABLED to prevent modal conflicts
+    // NOTE: Hover effects moved to CSS to prevent JavaScript transform conflicts with modals
+    /*
     document.querySelectorAll('.chatbot-card').forEach(card => {
         card.addEventListener('mouseenter', function() {
             this.style.transform = 'translateY(-4px)';
@@ -3326,6 +3329,7 @@ function enhanceChatbotCardInteractions() {
             this.style.transform = 'translateY(-2px)';
         });
     });
+    */
 }
 
 // ===== CSV Upload Enhancement Functions =====

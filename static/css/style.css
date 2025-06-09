@@ -1,3 +1,36 @@
+/* ===== MODAL FLICKERING 완전 방지: 모든 transition/animation 강제 비활성화 ===== */
+* {
+    -webkit-transition: none !important;
+    -moz-transition: none !important;
+    -o-transition: none !important;
+    transition: none !important;
+    -webkit-animation: none !important;
+    -moz-animation: none !important;
+    -o-animation: none !important;
+    animation: none !important;
+    -webkit-transform: none !important;
+    -moz-transform: none !important;
+    -o-transform: none !important;
+    transform: none !important;
+}
+
+/* Bootstrap modal 완전 비활성화 */
+.modal,
+.modal *,
+.modal-dialog,
+.modal-content,
+.modal-header,
+.modal-body,
+.modal-footer,
+.modal-backdrop {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+    -webkit-transition: none !important;
+    -webkit-animation: none !important;
+    -webkit-transform: none !important;
+}
+
 /* Admin-specific styles that override the main styles.css */
         :root {
             --acs-green: #4CB848;
@@ -108,18 +141,7 @@
             box-shadow: 0 12px 32px rgba(0,0,0,0.09), 0 1px 4px rgba(0,0,0,0.04);
         }
         
-        /* Card styling enhancements */
-        .card {
-            border-radius: 12px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-            border: none;
-            overflow: hidden;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        
-        .card:hover {
-            box-shadow: 0 6px 20px rgba(0,0,0,0.08);
-        }
+        /* Card styling enhancements - removed to prevent modal flickering */
         
         .card-header {
             border-bottom: 1px solid rgba(0,0,0,0.04);
@@ -728,13 +750,7 @@
             font-size: 1.1rem;
         }
         
-        /* Card styling enhancements */
-        .card {
-            border-radius: 10px;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-            border: none;
-            overflow: hidden;
-        }
+        /* Card styling - removed second duplicate definition to prevent modal conflicts */
         
         .card-header {
             border-bottom: 1px solid rgba(0,0,0,0.05);
@@ -1401,9 +1417,61 @@
             transition: all 0.3s ease;
         }
 
-        .card:hover {
+        .card:hover:not(.modal-content):not(.modal-dialog):not(.modal):not([class*="modal"]) {
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08) !important;
             transform: translateY(-2px);
+        }
+        
+        /* Explicitly disable ALL transitions and transforms on modal elements to prevent conflicts */
+        .modal,
+        .modal-dialog,
+        .modal-content,
+        .modal .card,
+        .modal-content .card,
+        .modal *[class*="card"],
+        .modal-fade,
+        .modal-backdrop {
+            transition: none !important;
+            transform: none !important;
+            animation: none !important;
+        }
+        
+        /* Force static positioning for modal content to prevent conflicts */
+        .modal-content,
+        .modal-dialog {
+            position: static !important;
+            transform: none !important;
+            transition: none !important;
+            animation: none !important;
+        }
+        
+        /* Disable hover effects specifically on modal elements */
+        .modal .card:hover,
+        .modal-content .card:hover,
+        .modal .chatbot-card:hover {
+            transform: none !important;
+            transition: none !important;
+            box-shadow: inherit !important;
+        }
+        
+        /* Bootstrap 5 modal fade animation override */
+        .modal.fade {
+            transition: none !important;
+        }
+        
+        .modal.fade .modal-dialog {
+            transition: none !important;
+            transform: none !important;
+        }
+        
+        /* Ensure modal shows without any animation or transition effects */
+        .modal.show {
+            display: block !important;
+            opacity: 1 !important;
+        }
+        
+        .modal.show .modal-dialog {
+            transform: none !important;
         }
 
         /* Responsive design */

@@ -1,0 +1,94 @@
+/* ===== MODAL FLICKERING 완전 해결 전용 CSS ===== */
+/* 모든 transition과 animation을 강제로 비활성화 */
+
+/* 글로벌 modal 비활성화 */
+.modal,
+.modal *,
+.modal-dialog,
+.modal-content,
+.modal-header,
+.modal-body,
+.modal-footer,
+.modal-backdrop,
+.modal.fade,
+.modal.show {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+    -webkit-transition: none !important;
+    -webkit-animation: none !important;
+    -webkit-transform: none !important;
+    -moz-transition: none !important;
+    -moz-animation: none !important;
+    -moz-transform: none !important;
+    -o-transition: none !important;
+    -o-animation: none !important;
+    -o-transform: none !important;
+    -ms-transition: none !important;
+    -ms-animation: none !important;
+    -ms-transform: none !important;
+}
+
+/* Bootstrap modal override */
+.modal.fade .modal-dialog {
+    transition: none !important;
+    transform: none !important;
+    -webkit-transition: none !important;
+    -webkit-transform: none !important;
+}
+
+/* Card 관련 완전 비활성화 */
+.modal .card,
+.modal-content .card,
+.modal .card:hover,
+.modal-content .card:hover,
+.modal .chatbot-card,
+.modal .chatbot-card:hover {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+    box-shadow: none !important;
+    -webkit-transition: none !important;
+    -webkit-animation: none !important;
+    -webkit-transform: none !important;
+}
+
+/* JavaScript 방지 */
+.modal [class*="card"],
+.modal [class*="btn"],
+.modal [class*="form"] {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+}
+
+/* 추가 안전장치 */
+.modal-open .modal {
+    animation: none !important;
+    transition: none !important;
+}
+
+.modal-open .modal-backdrop {
+    animation: none !important;
+    transition: none !important;
+}
+
+/* Disable any keyframes that might affect modals */
+@-webkit-keyframes modalFadeIn { 0%, 100% { opacity: 1; transform: none; } }
+@keyframes modalFadeIn { 0%, 100% { opacity: 1; transform: none; } }
+
+.modal.fade {
+    -webkit-animation: none !important;
+    animation: none !important;
+}
+
+/* Force modal to show immediately without any effects */
+.modal.show {
+    display: block !important;
+    opacity: 1 !important;
+}
+
+.modal.show .modal-dialog {
+    opacity: 1 !important;
+    transform: none !important;
+} 

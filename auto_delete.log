@@ -30,3 +30,8 @@
 2025-06-07 17:25:17,234 - INFO -    - Total conversations: 23
 2025-06-07 17:25:17,235 - INFO -    - Eligible for deletion: 0
 2025-06-07 17:29:00,478 - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-06-10 10:51:19,752 - INFO -    - Chatbots with auto-delete: 2
+2025-06-10 10:51:19,754 - INFO -    - Total conversations: 40
+2025-06-10 10:51:19,755 - INFO -    - Eligible for deletion: 2
+2025-06-10 10:51:20,465 - INFO -    - Total conversations: 38
+2025-06-10 10:51:20,467 - INFO -    - Eligible for deletion: 0

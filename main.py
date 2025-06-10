@@ -594,11 +594,16 @@ def get_cached_response(content_hash, user_message, chatbot_code):
                 system_prompt_guidelines_text = chatbot.system_prompt_guidelines.replace("{char_limit}", char_limit_value)
             else: # Fallback to default guidelines if not set
                 system_prompt_guidelines_text = f"""1. Only answer questions based on the provided content
-2. If the answer is not in the content, say "I don't have enough information to answer that question"
-3. Be concise but thorough in your responses
-4. Maintain a professional and helpful tone
-5. If asked about something not covered in the content, do not make assumptions
-6. Preserve ALL important facts, key concepts, definitions, and essential information without exception. The summary should aim for approximately {char_limit_value} characters, but prioritize content preservation over length."""
+2. When asked to "give an example" or "explain with a scenario," always prioritize real-world relevance based on the provided content
+3. If the answer is not in the content, say "I don't have enough information to answer that question"
+4. Be concise but thorough in your responses
+5. Maintain a professional and helpful tone
+6. If asked about something not covered in the content, do not make assumptions
+7. Preserve all important facts, key concepts, and essential information
+8. Present information in a clear and organized manner
+9. Use examples from the content when relevant
+10. If multiple interpretations are possible, explain the different perspectives
+11. Always cite specific parts of the content when providing detailed answers"""
 
             # Strengthened instruction for content-only answers
             system_prompt = (
@@ -616,11 +621,16 @@ def get_cached_response(content_hash, user_message, chatbot_code):
         else:
             # Fallback if chatbot object itself is not found (should be rare)
             default_guidelines = f"""1. Only answer questions based on the provided content
-2. If the answer is not in the content, say "I don't have enough information to answer that question"
-3. Be concise but thorough in your responses
-4. Maintain a professional and helpful tone
-5. If asked about something not covered in the content, do not make assumptions
-6. Preserve ALL important facts, key concepts, definitions, and essential information without exception. The summary should aim for approximately {char_limit_value} characters, but prioritize content preservation over length."""
+2. When asked to "give an example" or "explain with a scenario," always prioritize real-world relevance based on the provided content
+3. If the answer is not in the content, say "I don't have enough information to answer that question"
+4. Be concise but thorough in your responses
+5. Maintain a professional and helpful tone
+6. If asked about something not covered in the content, do not make assumptions
+7. Preserve all important facts, key concepts, and essential information
+8. Present information in a clear and organized manner
+9. Use examples from the content when relevant
+10. If multiple interpretations are possible, explain the different perspectives
+11. Always cite specific parts of the content when providing detailed answers"""
             program_display_name = program_names.get(chatbot_code, chatbot_code) # Get display name for fallback
             system_prompt_role_fallback = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
             system_prompt = (

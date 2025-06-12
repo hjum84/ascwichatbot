@@ -13,6 +13,116 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20250102-1">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modal-fix.css') }}?v=20250102-1">
+    
+    <style>
+        /* Database Statistics Modern Styles */
+        .icon-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .storage-segment {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .storage-segment:hover {
+            opacity: 0.8;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .table-breakdown-item {
+            transition: background-color 0.2s ease;
+        }
+
+        .table-breakdown-item:hover {
+            background-color: rgba(0,123,255,0.05);
+        }
+
+        .table-breakdown-item:last-child {
+            border-bottom: none !important;
+        }
+
+        .stat-box {
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .stat-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: #dee2e6;
+        }
+
+        .progress {
+            overflow: visible;
+        }
+
+        .storage-bar {
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .card {
+            transition: box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1) !important;
+        }
+
+        /* Storage Legend Styles */
+        .storage-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+        
+        .legend-text {
+            white-space: nowrap;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .icon-circle {
+                width: 35px;
+                height: 35px;
+                font-size: 16px;
+            }
+            
+            .storage-bar {
+                height: 12px !important;
+            }
+            
+            .table-breakdown-item {
+                padding: 1rem !important;
+            }
+            
+            .storage-legend {
+                gap: 0.75rem;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="container-admin">
@@ -105,94 +215,313 @@
                         <div class="tab-content" id="adminTabsContent">
                             <!-- DATABASE STATISTICS TAB -->
                             <div class="tab-pane fade" id="stats-content" role="tabpanel" aria-labelledby="stats-tab">
-                                <div class="card mb-4">
-                                    <div class="card-header bg-light">
-                                        <h2 class="section-title"><i class="bi bi-database"></i> Database Statistics</h2>
+                                <!-- Storage Health Alert -->
+                                {% if alerts or storage_health.status in ['warning', 'critical'] %}
+                                <div class="alert alert-{{ storage_health.color }} mb-4">
+                                    <div class="d-flex align-items-center">
+                                        <i class="bi bi-{{ storage_health.icon }} me-3 fs-4"></i>
+                                        <div>
+                                            <h5 class="mb-1">{{ storage_health.message }}</h5>
+                                            {% if alerts %}
+                                                <ul class="mb-0 mt-2">
+                                                    {% for alert in alerts %}
+                                                    <li>{{ alert.message }}</li>
+                                                    {% endfor %}
+                                                </ul>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                <!-- Main Storage Overview Card -->
+                                <div class="card mb-4 border-0 shadow-sm">
+                                    <div class="card-body p-4">
+                                        <div class="d-flex align-items-center mb-4">
+                                            <div class="storage-icon me-3">
+                                                <i class="bi bi-hdd-stack fs-1 text-primary"></i>
+                                            </div>
+                                            <div>
+                                                <h2 class="mb-1">{{ db_stats.total_size }}</h2>
+                                                <p class="text-muted mb-0">of {{ db_stats.max_size_pretty }} used</p>
+                                                <small class="text-{{ storage_health.color }}">
+                                                    <i class="bi bi-{{ storage_health.icon }}"></i> {{ storage_health.status|title }}
+                                                </small>
+                                            </div>
+                                            <div class="ms-auto text-end">
+                                                <h3 class="text-{{ storage_health.color }} mb-0">{{ db_stats.percent_used }}%</h3>
+                                                <small class="text-muted">Full</small>
+                                                {% if db_stats.detection_successful %}
+                                                    <div class="mt-1">
+                                                        <small class="text-success">
+                                                            <i class="bi bi-check-circle"></i> Auto-detected
+                                                        </small>
+                                                    </div>
+                                                {% else %}
+                                                    <div class="mt-1">
+                                                        <small class="text-warning">
+                                                            <i class="bi bi-exclamation-circle"></i> Using fallback
+                                                        </small>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+
+                                        <!-- iPhone-style Storage Bar -->
+                                        <div class="storage-bar mb-4" style="height: 16px; background: #f8f9fa; border-radius: 8px; overflow: hidden; position: relative;" id="storageBar"
+                                             data-storage-info='{{ db_stats.sorted_tables | tojson | safe }}'
+                                             data-total-percent="{{ db_stats.percent_used }}">
+                                            <!-- Storage segments will be populated by JavaScript -->
+                                        </div>
+                                        
+                                        <!-- Storage Bar Legend -->
+                                        <div class="storage-legend mt-3 mb-4" id="storageLegend">
+                                            <!-- Legend items will be populated by JavaScript -->
+                                        </div>
+
+
+                                        <!-- Available Space -->
+                                        <div class="row g-3 mb-4">
+                                            <div class="col-6">
+                                                <div class="stat-box p-3 bg-light rounded">
+                                                    <h6 class="text-success mb-1">
+                                                        <i class="bi bi-check-circle"></i> Available
+                                                    </h6>
+                                                    <h4 class="mb-0">{{ db_stats.remaining_pretty }}</h4>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="stat-box p-3 bg-light rounded">
+                                                    <h6 class="text-muted mb-1">
+                                                        <i class="bi bi-clock"></i> Last Updated
+                                                    </h6>
+                                                    <h6 class="mb-0">{{ db_stats.timestamp | to_eastern }}</h6>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Quick Stats Cards -->
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-3 col-6">
+                                        <div class="card border-0 shadow-sm h-100">
+                                            <div class="card-body text-center p-3">
+                                                <div class="mb-2">
+                                                    <i class="bi bi-chat-dots fs-2 text-primary"></i>
+                                                </div>
+                                                <h4 class="mb-1">{{ "{:,}".format(db_stats.total_messages) }}</h4>
+                                                <small class="text-muted">Total Messages</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 col-6">
+                                        <div class="card border-0 shadow-sm h-100">
+                                            <div class="card-body text-center p-3">
+                                                <div class="mb-2">
+                                                    <i class="bi bi-robot fs-2 text-success"></i>
+                                                </div>
+                                                <h4 class="mb-1">{{ db_stats.total_chatbots }}</h4>
+                                                <small class="text-muted">Active Chatbots</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 col-6">
+                                        <div class="card border-0 shadow-sm h-100">
+                                            <div class="card-body text-center p-3">
+                                                <div class="mb-2">
+                                                    <i class="bi bi-people fs-2 text-info"></i>
+                                                </div>
+                                                <h4 class="mb-1">{{ db_stats.unique_users }}</h4>
+                                                <small class="text-muted">Active Users</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 col-6">
+                                        <div class="card border-0 shadow-sm h-100">
+                                            <div class="card-body text-center p-3">
+                                                <div class="mb-2">
+                                                    <i class="bi bi-table fs-2 text-warning"></i>
+                                                </div>
+                                                <h4 class="mb-1">{{ db_stats.total_tables_count }}</h4>
+                                                <small class="text-muted">Database Tables</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Database Component Breakdown -->
+                                {% if db_stats.db_breakdown %}
+                                <div class="card border-0 shadow-sm mb-4">
+                                    <div class="card-header bg-white border-bottom">
+                                        <h5 class="mb-0">
+                                            <i class="bi bi-pie-chart me-2"></i>Complete Database Breakdown
+                                        </h5>
+                                        <small class="text-muted">Shows what's using your {{ db_stats.total_size }} of database space</small>
                                     </div>
                                     <div class="card-body">
-                                        {% if alerts %}
-                                        <div class="alert alert-warning">
-                                            <h5><i class="bi bi-exclamation-triangle"></i> Database Alerts</h5>
-                                            <ul class="mb-0">
-                                                {% for alert in alerts %}
-                                                <li>{{ alert.message }}</li>
-                                                {% endfor %}
+                                        <div class="row">
+                                            {% for component_type, component in db_stats.db_breakdown.items() %}
+                                            <div class="col-md-6 mb-3">
+                                                <div class="d-flex align-items-center p-3 bg-light rounded">
+                                                    <div class="icon-circle me-3 bg-primary bg-opacity-10">
+                                                        {% if 'User Tables' in component_type %}
+                                                            <i class="bi bi-table text-primary"></i>
+                                                        {% elif 'Indexes' in component_type %}
+                                                            <i class="bi bi-list-columns text-success"></i>
+                                                        {% elif 'WAL' in component_type %}
+                                                            <i class="bi bi-journal-text text-info"></i>
+                                                        {% elif 'System' in component_type %}
+                                                            <i class="bi bi-gear text-warning"></i>
+                                                        {% else %}
+                                                            <i class="bi bi-question-circle text-secondary"></i>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="flex-grow-1">
+                                                        <h6 class="mb-1">{{ component_type }}</h6>
+                                                        <div class="d-flex justify-content-between">
+                                                            <strong>{{ component.size_pretty }}</strong>
+                                                            <small class="text-muted">{{ component.percentage }}%</small>
+                                                        </div>
+                                                        <div class="progress mt-2" style="height: 4px;">
+                                                            <div class="progress-bar component-bar" 
+                                                                 data-component-type="{{ component_type }}"
+                                                                 data-component-percentage="{{ component.percentage }}">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                        
+                                        <div class="mt-3 p-3 bg-info bg-opacity-10 rounded">
+                                            <h6 class="text-info mb-2">
+                                                <i class="bi bi-info-circle"></i> What Each Component Means:
+                                            </h6>
+                                            <ul class="mb-0 small">
+                                                <li><strong>User Tables:</strong> Your actual data (chat history, chatbot content, user accounts)</li>
+                                                <li><strong>Indexes:</strong> Database indexes for faster searches (automatically created)</li>
+                                                <li><strong>WAL Files:</strong> Transaction logs ensuring data safety</li>
+                                                <li><strong>System Catalogs:</strong> PostgreSQL system metadata and configuration</li>
+                                                <li><strong>Unaccounted/Other:</strong> Temporary files, cache, and other system overhead</li>
                                             </ul>
                                         </div>
-                                        {% endif %}
                                         
-                                        {% if db_stats.percent_used > 80 %}
-                                        <div class="alert alert-danger">
-                                            <h5><i class="bi bi-exclamation-circle-fill"></i> Storage Capacity Warning</h5>
-                                            <p>Your database is currently at <strong>{{ db_stats.percent_used }}%</strong> of its maximum capacity ({{ db_stats.max_size_pretty }}).</p>
-                                            <p><strong>Recommended actions:</strong></p>
-                                            <ul>
-                                                <li>Consider upgrading your Render database plan to increase storage capacity</li>
-                                                <li>Archive or delete old chat histories</li>
-                                                <li>Optimize chatbot content size</li>
-                                            </ul>
+                                        {% if db_stats.total_tables_size_bytes > 0 %}
+                                        <div class="mt-3 p-3 bg-success bg-opacity-10 rounded">
+                                            <h6 class="text-success mb-1">
+                                                <i class="bi bi-check-circle"></i> Summary:
+                                            </h6>
+                                            <p class="mb-0 small">
+                                                Your user tables account for <strong>{{ db_stats.total_tables_size_pretty }}</strong> 
+                                                of the total <strong>{{ db_stats.total_size }}</strong> database usage.
+                                                The remaining space is used by system components that are necessary for database operation.
+                                            </p>
                                         </div>
                                         {% endif %}
-                                        
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                <!-- Detailed Table Breakdown -->
+                                <div class="card border-0 shadow-sm">
+                                    <div class="card-header bg-white border-bottom">
+                                        <h5 class="mb-0">
+                                            <i class="bi bi-list-ul me-2"></i>Storage Breakdown by Table
+                                        </h5>
+                                        <small class="text-muted">Detailed view of how storage is distributed across your data tables</small>
+                                    </div>
+                                    <div class="card-body p-0">
+                                        {% for table in db_stats.sorted_tables %}
+                                        <div class="table-breakdown-item d-flex align-items-center p-3 border-bottom">
+                                            <div class="table-icon me-3">
+                                                {% if table.name == 'chat_history' %}
+                                                    <div class="icon-circle bg-primary bg-opacity-10">
+                                                        <i class="bi bi-chat-dots text-primary"></i>
+                                                    </div>
+                                                {% elif table.name == 'chatbot_contents' %}
+                                                    <div class="icon-circle bg-success bg-opacity-10">
+                                                        <i class="bi bi-robot text-success"></i>
+                                                    </div>
+                                                {% elif table.name == 'users' %}
+                                                    <div class="icon-circle bg-info bg-opacity-10">
+                                                        <i class="bi bi-person text-info"></i>
+                                                    </div>
+                                                {% elif table.name == 'authorized_users' %}
+                                                    <div class="icon-circle bg-warning bg-opacity-10">
+                                                        <i class="bi bi-person-check text-warning"></i>
+                                                    </div>
+                                                {% else %}
+                                                    <div class="icon-circle bg-secondary bg-opacity-10">
+                                                        <i class="bi bi-table text-secondary"></i>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="flex-grow-1">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <h6 class="mb-0">{{ table.name|replace('_', ' ')|title }}</h6>
+                                                    <div class="text-end">
+                                                        <strong>{{ table.size_pretty }}</strong>
+                                                        <small class="text-muted d-block">{{ table.percentage }}%</small>
+                                                    </div>
+                                                </div>
+                                                <div class="progress" style="height: 6px;">
+                                                    <div class="progress-bar progress-bar-{{ loop.index0 }}" 
+                                                         data-table-percentage="{{ table.percentage }}" 
+                                                         data-total-used="{{ db_stats.percent_used }}"
+                                                         style="background-color: #007AFF;"></div>
+                                                </div>
+                                                <div class="d-flex justify-content-between mt-2">
+                                                    <small class="text-muted">
+                                                        {% if table.row_count > 0 %}
+                                                            📊 {{ "{:,}".format(table.row_count) }} records
+                                                        {% else %}
+                                                            📊 System table
+                                                        {% endif %}
+                                                    </small>
+                                                    <small class="text-muted">
+                                                        💾 Data: {{ table.table_size_pretty }} + 🔍 Index: {{ table.index_size_pretty }}
+                                                    </small>
+                                                </div>
+                                                <div class="mt-1">
+                                                    <small class="text-info">
+                                                        <i class="bi bi-info-circle"></i> 
+                                                        Progress bar shows this table's portion of <strong>total database usage</strong> ({{ table.percentage }}% of {{ db_stats.percent_used }}% used)
+                                                    </small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+
+                                <!-- Storage Management Tips -->
+                                <div class="card border-0 shadow-sm mt-4">
+                                    <div class="card-header bg-light border-0">
+                                        <h6 class="mb-0">
+                                            <i class="bi bi-lightbulb me-2"></i>Storage Management
+                                        </h6>
+                                    </div>
+                                    <div class="card-body">
                                         <div class="row">
                                             <div class="col-md-6">
-                                                <h5>Storage Usage</h5>
-                                                <p><strong>Total Database Size:</strong> {{ db_stats.total_size }} <span class="text-muted">(of {{ db_stats.max_size_pretty }} allowed)</span></p>
-                                                <p><strong>Chat History Size:</strong> {{ db_stats.chat_history_size }}</p>
-                                                <p><strong>Chatbot Contents Size:</strong> {{ db_stats.chatbot_contents_size }}</p>
-                                                
-                                                <h6><i class="bi bi-bar-chart-fill"></i> Overall Database Usage (% of Maximum Capacity)</h6>
-                                                <p class="small text-muted">Shows how much of your total database capacity is currently being used</p>
-                                                <div class="progress mb-3">
-                                                    <div class="progress-bar {{ 'bg-danger' if db_stats.percent_used > 80 else 'bg-success' }}" role="progressbar"
-                                                         data-width="{{ db_stats.percent_used }}"
-                                                         aria-valuemin="0"
-                                                         aria-valuemax="100">
-                                                        {{ db_stats.percent_used }}% of {{ db_stats.max_size_pretty }} Used
-                                                    </div>
-                                                </div>
-                                                <h6><i class="bi bi-pie-chart-fill"></i> Storage Breakdown by Data Type (% of Maximum Capacity)</h6>
-                                                <p class="small text-muted">Shows how storage is distributed between chat history and other data</p>
-                                                <div class="progress mb-3">
-                                                    <div class="progress-bar bg-primary" role="progressbar"
-                                                         data-width="{{ (db_stats.chat_history_size_bytes / db_stats.max_size_bytes * 100) | round(1) }}"
-                                                         aria-valuemin="0" aria-valuemax="100">
-                                                        Chat History ({{ (db_stats.chat_history_size_bytes / db_stats.max_size_bytes * 100) | round(1) }}%)
-                                                    </div>
-                                                    <div class="progress-bar bg-info" role="progressbar"
-                                                         data-width="{{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}"
-                                                         aria-valuemin="0" aria-valuemax="100">
-                                                        Other Data ({{ ((db_stats.total_size_bytes - db_stats.chat_history_size_bytes) / db_stats.max_size_bytes * 100) | round(1) }}%)
-                                                    </div>
-                                                </div>
-                                                <p class="small text-muted">
-                                                    <i class="bi bi-info-circle"></i> Maximum database size is set to {{ db_stats.max_size_pretty }}. 
-                                                    <span class="{{ 'text-danger' if db_stats.percent_used > 80 else '' }}">
-                                                        Currently using {{ db_stats.percent_used }}% of available storage.
-                                                    </span>
-                                                </p>
+                                                <h6 class="text-success mb-2">✅ To free up space:</h6>
+                                                <ul class="small mb-0">
+                                                    <li>Enable auto-delete for chat histories</li>
+                                                    <li>Remove unused chatbot contents</li>
+                                                    <li>Clean up inactive user accounts</li>
+                                                    <li>Optimize large chatbot knowledge bases</li>
+                                                </ul>
                                             </div>
-                                            
                                             <div class="col-md-6">
-                                                <h5>Usage Statistics</h5>
-                                                <p><strong>Total Messages:</strong> {{ db_stats.total_messages }}</p>
-                                                <p><strong>Total Chatbots:</strong> {{ db_stats.total_chatbots }}</p>
-                                                <p><strong>Unique Users:</strong> {{ db_stats.unique_users }}</p>
-                                                <p><strong>Last Updated:</strong> {{ db_stats.timestamp | to_eastern }}</p>
-                                            </div>
-                                        </div>
-                                        <div class="mt-4">
-                                            <h5><i class="bi bi-info-circle"></i> About Database Limits</h5>
-                                            <p>Your database is hosted on Render with a maximum capacity of {{ db_stats.max_size_pretty }}. Storage usage is monitored automatically, and alerts will be displayed when approaching capacity limits.</p>
-                                            
-                                            <h6>To increase database capacity:</h6>
-                                            <ol>
-                                                <li>Log in to your Render dashboard</li>
-                                                <li>Navigate to the database settings</li>
-                                                <li>Upgrade your database plan or increase storage capacity</li>
-                                            </ol>
-                                            <div class="alert alert-info">
-                                                <i class="bi bi-lightbulb"></i> <strong>Tip:</strong> Regular monitoring of database usage helps prevent unexpected service interruptions due to storage limits.
+                                                <h6 class="text-info mb-2">🚀 To increase capacity:</h6>
+                                                <ul class="small mb-0">
+                                                    <li>Upgrade your Render database plan</li>
+                                                    <li>Contact Render support for custom limits</li>
+                                                    <li>Consider database archiving strategies</li>
+                                                    <li>Implement data retention policies</li>
+                                                </ul>
                                             </div>
                                         </div>
                                     </div>
@@ -1409,21 +1738,21 @@
                 </div>
             </div>
         </div>
-        <!-- Modal for Editing Content -->
+    <!-- Modal for Editing Content -->
         <div class="modal" id="editContentModal" tabindex="-1" aria-labelledby="editContentModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-xl modal-dialog-scrollable">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="editContentModalLabel">Edit Chatbot Content</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <input type="hidden" id="editChatbotNameInput">
-                        
-                        <div class="mb-3">
-                            <label for="editCharLimit" class="form-label">Character Limit</label>
-                            <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="200000" value="50000">
-                            <div class="form-text">Maximum number of characters allowed in the chatbot\'s content (50,000 - 200,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editContentModalLabel">Edit Chatbot Content</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editChatbotNameInput">
+                    
+                    <div class="mb-3">
+                        <label for="editCharLimit" class="form-label">Character Limit</label>
+                        <input type="number" class="form-control" id="editCharLimit" name="char_limit" min="50000" max="200000" value="50000">
+                        <div class="form-text">Maximum number of characters allowed in the chatbot\'s content (50,000 - 200,000). This limit applies to the total combined text extracted from all uploaded files. Higher limits will increase API costs as the entire content is sent with each conversation.</div>
                     </div>
                     
                     <div class="mb-3">
@@ -1776,11 +2105,126 @@
                 // Load CSV status when page loads
                 refreshCsvStatus();
                 
+                // Initialize Database Statistics dynamic elements
+                initializeDatabaseStats();
+                
+                // Initialize tooltips for storage segments
+                const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+                const tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                    return new bootstrap.Tooltip(tooltipTriggerEl);
+                });
+                
                 // Enhanced CSV upload handling is now handled in admin_scripts.js
                 // This provides better feedback including sync information
                 
                 // Any remaining page-specific JS can stay here
             });
+            
+            function initializeDatabaseStats() {
+                // Initialize component breakdown colors and widths
+                const componentBars = document.querySelectorAll('.component-bar');
+                componentBars.forEach(bar => {
+                    const componentType = bar.getAttribute('data-component-type');
+                    const percentage = bar.getAttribute('data-component-percentage');
+                    let color = '#8E8E93'; // default
+                    
+                    if (componentType.includes('User Tables')) {
+                        color = '#007AFF';
+                    } else if (componentType.includes('Indexes')) {
+                        color = '#34C759';
+                    } else if (componentType.includes('WAL')) {
+                        color = '#007AFF';
+                    } else if (componentType.includes('System')) {
+                        color = '#FF9500';
+                    }
+                    
+                    bar.style.backgroundColor = color;
+                    bar.style.width = percentage + '%';
+                });
+                
+                // Initialize storage bar with proper scaling
+                const storageBar = document.getElementById('storageBar');
+                const storageLegend = document.getElementById('storageLegend');
+                
+                if (storageBar && storageLegend) {
+                    const storageInfo = storageBar.getAttribute('data-storage-info');
+                    const totalPercent = parseFloat(storageBar.getAttribute('data-total-percent')) || 0;
+                    
+                    if (storageInfo) {
+                        const colors = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#5856D6'];
+                        const colorNames = ['Chat History', 'Chatbot Contents', 'Users', 'Authorized Users', 'User Mappings', 'Other Tables'];
+                        let usedWidth = 0;
+                        let legendItems = [];
+                        
+                        try {
+                            const storageData = JSON.parse(storageInfo);
+                            
+                            // Create storage segments with CORRECT scaling
+                            storageData.forEach((table, index) => {
+                                if (table.percentage > 0.01) { // Show even smaller segments
+                                    // CORRECT: Each segment width = actual percentage of total capacity
+                                    // If Authorized Users is 43.11% of 1.58% used, that's 0.68% of total capacity
+                                    const actualPercentageOfTotal = table.percentage;
+                                    
+                                    const segment = document.createElement('div');
+                                    segment.className = 'storage-segment';
+                                    segment.style.position = 'absolute';
+                                    segment.style.left = usedWidth + '%';
+                                    segment.style.width = actualPercentageOfTotal + '%';
+                                    segment.style.height = '100%';
+                                    segment.style.background = colors[index % 6];
+                                    segment.style.zIndex = 10 - index;
+                                    segment.setAttribute('data-bs-toggle', 'tooltip');
+                                    segment.setAttribute('title', table.name + ': ' + table.size_pretty + ' (' + table.percentage + '% of total capacity)');
+                                    storageBar.appendChild(segment);
+                                    usedWidth += actualPercentageOfTotal;
+                                    
+                                    // Add to legend
+                                    legendItems.push({
+                                        color: colors[index % 6],
+                                        name: table.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                                        size: table.size_pretty,
+                                        percentage: table.percentage
+                                    });
+                                }
+                            });
+                            
+                            // Create legend
+                            legendItems.forEach(item => {
+                                const legendItem = document.createElement('div');
+                                legendItem.className = 'legend-item';
+                                legendItem.innerHTML = `
+                                    <div class="legend-color" style="background-color: ${item.color}"></div>
+                                    <span class="legend-text">${item.name}: <strong>${item.size}</strong> (${item.percentage}%)</span>
+                                `;
+                                storageLegend.appendChild(legendItem);
+                            });
+                            
+                        } catch (e) {
+                            console.error('Error parsing storage data:', e);
+                        }
+                    }
+                }
+                
+                // Initialize progress bars - these show relative usage within used space
+                const progressBars = document.querySelectorAll('[data-table-percentage]');
+                progressBars.forEach((bar, index) => {
+                    const tablePercentage = parseFloat(bar.getAttribute('data-table-percentage'));
+                    const totalUsed = parseFloat(bar.getAttribute('data-total-used'));
+                    
+                    // Color each progress bar with corresponding storage bar color
+                    const colors = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#5856D6'];
+                    bar.style.backgroundColor = colors[index % 6];
+                    
+                    if (totalUsed > 0) {
+                        // Show percentage relative to total used space (not total capacity)
+                        const width = (tablePercentage / totalUsed * 100);
+                        bar.style.width = width + '%';
+                    } else {
+                        bar.style.width = '0%';
+                    }
+                });
+            }
         </script>
 </body>
 </html> 

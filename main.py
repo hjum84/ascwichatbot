@@ -26,7 +26,7 @@ import numpy as np
 from threading import Lock
 from sklearn.metrics.pairwise import cosine_similarity
 import time
-from database_monitor import get_database_size, check_database_limits, setup_database_monitoring
+from database_monitor import get_database_size, check_database_limits, get_storage_health_status, setup_database_monitoring
 from auto_delete_scheduler import process_auto_deletions
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
@@ -2019,6 +2019,7 @@ def admin():
         deleted_chatbots = get_deleted_chatbots()
         db_stats = get_database_size()
         alerts = check_database_limits()
+        storage_health = get_storage_health_status(db_stats['percent_used'])
         
         # For Data Management Tab - User List
         users_list = get_all_users() 
@@ -2079,6 +2080,7 @@ def admin():
                               message_type=message_type,
                               db_stats=db_stats,
                               alerts=alerts,
+                              storage_health=storage_health,
                               users=users_list,
                               conversations=paired_conversations_log,
                               conversation_stats=conversation_stats_overall,

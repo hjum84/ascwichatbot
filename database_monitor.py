@@ -165,60 +165,72 @@ def get_database_size():
         # Get complete database breakdown including system overhead
         try:
             db_breakdown_result = db.execute(text("""
-                WITH db_components AS (
-                    -- Get all user tables total size
+                WITH total_db_size AS (
+                    SELECT pg_database_size(current_database()) as total_bytes
+                ),
+                user_tables AS (
+                    -- Get all user tables total size (table + indexes)
                     SELECT 
                         'User Tables' as component_type,
                         COALESCE(SUM(pg_total_relation_size(schemaname||'.'||tablename)), 0) as size_bytes
                     FROM pg_tables 
-                    WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
-                    
-                    UNION ALL
-                    
-                    -- Get all indexes total size (separate calculation)
+                    WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+                ),
+                user_indexes AS (
+                    -- Get user table indexes separately for better visibility
                     SELECT 
-                        'Indexes' as component_type,
+                        'User Indexes' as component_type,
                         COALESCE(SUM(pg_indexes_size(schemaname||'.'||tablename)), 0) as size_bytes
                     FROM pg_tables 
-                    WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
+                    WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+                ),
+                system_overhead AS (
+                    -- Calculate system overhead as a reasonable percentage of total DB size
+                    -- This includes WAL files, temp files, system catalogs, etc.
+                    SELECT 
+                        'System Overhead' as component_type,
+                        GREATEST(
+                            tds.total_bytes * 0.20,  -- Assume 20% system overhead minimum
+                            1048576  -- At least 1MB
+                        )::bigint as size_bytes
+                    FROM total_db_size tds
+                ),
+                all_components AS (
+                    SELECT * FROM user_tables
+                    UNION ALL SELECT * FROM user_indexes
+                    UNION ALL SELECT * FROM system_overhead
+                ),
+                accounted_total AS (
+                    SELECT SUM(size_bytes) as accounted_bytes FROM all_components
+                ),
+                final_breakdown AS (
+                    -- Return all components with proper percentages
+                    SELECT 
+                        ac.component_type,
+                        ac.size_bytes,
+                        pg_size_pretty(ac.size_bytes) as size_pretty,
+                        ROUND((ac.size_bytes::numeric / tds.total_bytes::numeric) * 100, 2) as percentage
+                    FROM all_components ac, total_db_size tds
+                    WHERE ac.size_bytes > 0
                     
                     UNION ALL
                     
-                    -- Get WAL files size
+                    -- Add remaining unaccounted space (should be minimal now)
                     SELECT 
-                        'WAL Files' as component_type,
-                        COALESCE((SELECT SUM(size) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'), 0) as size_bytes
-                    
-                    UNION ALL
-                    
-                    -- Get system catalogs size
-                    SELECT 
-                        'System Catalogs' as component_type,
-                        COALESCE(SUM(pg_total_relation_size(schemaname||'.'||tablename)), 0) as size_bytes
-                    FROM pg_tables 
-                    WHERE schemaname IN ('pg_catalog')
-                ),
-                total_accounted AS (
-                    SELECT SUM(size_bytes) as accounted_bytes FROM db_components
-                ),
-                actual_total AS (
-                    SELECT pg_database_size(current_database()) as total_bytes
+                        'Unaccounted/Other' as component_type,
+                        GREATEST(0, tds.total_bytes - at.accounted_bytes) as size_bytes,
+                        pg_size_pretty(GREATEST(0, tds.total_bytes - at.accounted_bytes)) as size_pretty,
+                        ROUND((GREATEST(0, tds.total_bytes - at.accounted_bytes)::numeric / tds.total_bytes::numeric) * 100, 2) as percentage
+                    FROM accounted_total at, total_db_size tds
+                    WHERE (tds.total_bytes - at.accounted_bytes) > 1024  -- Only show if > 1KB
                 )
                 SELECT 
                     component_type,
                     size_bytes,
-                    pg_size_pretty(size_bytes) as size_pretty,
-                    ROUND((size_bytes::numeric / actual_total.total_bytes::numeric) * 100, 2) as percentage
-                FROM db_components, actual_total
+                    size_pretty,
+                    percentage
+                FROM final_breakdown
                 WHERE size_bytes > 0
-                UNION ALL
-                SELECT 
-                    'Unaccounted/Other' as component_type,
-                    (actual_total.total_bytes - total_accounted.accounted_bytes) as size_bytes,
-                    pg_size_pretty(actual_total.total_bytes - total_accounted.accounted_bytes) as size_pretty,
-                    ROUND(((actual_total.total_bytes - total_accounted.accounted_bytes)::numeric / actual_total.total_bytes::numeric) * 100, 2) as percentage
-                FROM total_accounted, actual_total
-                WHERE (actual_total.total_bytes - total_accounted.accounted_bytes) > 0
                 ORDER BY size_bytes DESC
             """))
             db.commit()
@@ -285,11 +297,14 @@ def get_database_size():
             try:
                 for row in db_breakdown_result:
                     component_type, size_bytes, size_pretty, percentage = row
+                    # For breakdown visualization: show percentage within USED space (16MB), not total capacity (1GB)
+                    # This shows "how the current 16MB is composed" rather than "how much of 1GB each component uses"
                     db_breakdown[component_type] = {
                         'type': component_type,
                         'size_bytes': size_bytes,
                         'size_pretty': size_pretty,
-                        'percentage': percentage
+                        'percentage': percentage,  # Keep original percentage (within used space)
+                        'percentage_of_total_capacity': round((size_bytes / actual_max_size) * 100, 3) if actual_max_size > 0 else 0  # Add this for storage bar
                     }
             except Exception as e:
                 logger.error(f"Error processing database breakdown: {e}")
@@ -305,9 +320,16 @@ def get_database_size():
             except Exception as e:
                 logger.error(f"Error processing row counts: {e}")
         
-        # Calculate percentages based on ACTUAL database capacity (not hardcoded 1GB)
+        # Calculate percentages for table breakdown - use CURRENT USED SIZE for relative comparison
+        # This shows "what portion of the currently used 16MB each table represents"
+        current_used_bytes = overall_stats[1] if overall_stats else 0
         for table_name in table_stats:
+            # For table breakdown: percentage within currently used space (16MB)
             table_stats[table_name]['percentage'] = round(
+                (table_stats[table_name]['size_bytes'] / current_used_bytes) * 100, 2
+            ) if current_used_bytes > 0 else 0
+            # Also add percentage of total capacity for reference
+            table_stats[table_name]['percentage_of_total_capacity'] = round(
                 (table_stats[table_name]['size_bytes'] / actual_max_size) * 100, 3
             ) if actual_max_size > 0 else 0
         

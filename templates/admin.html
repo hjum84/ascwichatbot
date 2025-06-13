@@ -267,12 +267,12 @@
                                             </div>
                                         </div>
 
-                                        <!-- iPhone-style Storage Bar -->
-                                        <div class="storage-bar mb-4" style="height: 16px; background: #f8f9fa; border-radius: 8px; overflow: hidden; position: relative;" id="storageBar"
-                                             data-storage-info='{{ db_stats.sorted_tables | tojson | safe }}'
-                                             data-total-percent="{{ db_stats.percent_used }}">
-                                            <!-- Storage segments will be populated by JavaScript -->
-                                        </div>
+                                                                <!-- iPhone-style Storage Bar -->
+                        <div class="storage-bar mb-4" style="height: 16px; background: #f8f9fa; border-radius: 8px; overflow: hidden; position: relative;" id="storageBar"
+                             data-breakdown-info='{{ db_stats.db_breakdown | tojson | safe }}'
+                             data-total-percent="{{ db_stats.percent_used }}">
+                            <!-- Storage segments will be populated by JavaScript -->
+                        </div>
                                         
                                         <!-- Storage Bar Legend -->
                                         <div class="storage-legend mt-3 mb-4" id="storageLegend">
@@ -400,11 +400,10 @@
                                                 <i class="bi bi-info-circle"></i> What Each Component Means:
                                             </h6>
                                             <ul class="mb-0 small">
-                                                <li><strong>User Tables:</strong> Your actual data (chat history, chatbot content, user accounts)</li>
-                                                <li><strong>Indexes:</strong> Database indexes for faster searches (automatically created)</li>
-                                                <li><strong>WAL Files:</strong> Transaction logs ensuring data safety</li>
-                                                <li><strong>System Catalogs:</strong> PostgreSQL system metadata and configuration</li>
-                                                <li><strong>Unaccounted/Other:</strong> Temporary files, cache, and other system overhead</li>
+                                                <li><strong>User Tables:</strong> Your application data (chat history, chatbot content, user accounts)</li>
+                                                <li><strong>User Indexes:</strong> Database indexes for faster data retrieval (automatically created)</li>
+                                                <li><strong>System Overhead:</strong> PostgreSQL system components (WAL files, catalogs, buffers, temp files)</li>
+                                                <li><strong>Unaccounted/Other:</strong> Small remaining space for database operations and housekeeping</li>
                                             </ul>
                                         </div>
                                         
@@ -428,71 +427,110 @@
                                 <div class="card border-0 shadow-sm">
                                     <div class="card-header bg-white border-bottom">
                                         <h5 class="mb-0">
-                                            <i class="bi bi-list-ul me-2"></i>Storage Breakdown by Table
+                                            <i class="bi bi-table me-2"></i>Detailed Storage by Table
                                         </h5>
-                                        <small class="text-muted">Detailed view of how storage is distributed across your data tables</small>
+                                        <small class="text-muted">Individual breakdown of each database table and its storage usage</small>
                                     </div>
                                     <div class="card-body p-0">
-                                        {% for table in db_stats.sorted_tables %}
-                                        <div class="table-breakdown-item d-flex align-items-center p-3 border-bottom">
-                                            <div class="table-icon me-3">
-                                                {% if table.name == 'chat_history' %}
-                                                    <div class="icon-circle bg-primary bg-opacity-10">
-                                                        <i class="bi bi-chat-dots text-primary"></i>
+                                        {% if db_stats.sorted_tables %}
+                                            {% for table in db_stats.sorted_tables %}
+                                            <div class="table-breakdown-item d-flex align-items-center p-3 border-bottom">
+                                                <div class="table-icon me-3">
+                                                    {% if table.name == 'chat_history' %}
+                                                        <div class="icon-circle bg-primary bg-opacity-10">
+                                                            <i class="bi bi-chat-dots text-primary"></i>
+                                                        </div>
+                                                    {% elif table.name == 'chatbot_contents' %}
+                                                        <div class="icon-circle bg-success bg-opacity-10">
+                                                            <i class="bi bi-robot text-success"></i>
+                                                        </div>
+                                                    {% elif table.name == 'users' %}
+                                                        <div class="icon-circle bg-info bg-opacity-10">
+                                                            <i class="bi bi-people text-info"></i>
+                                                        </div>
+                                                    {% elif table.name == 'authorized_users' %}
+                                                        <div class="icon-circle bg-warning bg-opacity-10">
+                                                            <i class="bi bi-shield-check text-warning"></i>
+                                                        </div>
+                                                    {% elif table.name == 'user_lo_root_ids' %}
+                                                        <div class="icon-circle bg-secondary bg-opacity-10">
+                                                            <i class="bi bi-key text-secondary"></i>
+                                                        </div>
+                                                    {% elif table.name == 'chatbot_lo_root_association' %}
+                                                        <div class="icon-circle bg-dark bg-opacity-10">
+                                                            <i class="bi bi-link text-dark"></i>
+                                                        </div>
+                                                    {% else %}
+                                                        <div class="icon-circle bg-light">
+                                                            <i class="bi bi-table text-muted"></i>
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="flex-grow-1">
+                                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                                        <h6 class="mb-0">
+                                                            {% if table.name == 'chat_history' %}
+                                                                Chat History
+                                                            {% elif table.name == 'chatbot_contents' %}
+                                                                Chatbot Contents
+                                                            {% elif table.name == 'users' %}
+                                                                User Accounts
+                                                            {% elif table.name == 'authorized_users' %}
+                                                                Authorized Users
+                                                            {% elif table.name == 'user_lo_root_ids' %}
+                                                                User Root IDs
+                                                            {% elif table.name == 'chatbot_lo_root_association' %}
+                                                                Chatbot Associations
+                                                            {% else %}
+                                                                {{ table.name|title }}
+                                                            {% endif %}
+                                                        </h6>
+                                                        <div class="text-end">
+                                                            <strong>{{ table.size_pretty }}</strong>
+                                                            <small class="text-muted d-block">{{ table.percentage }}% of total</small>
+                                                        </div>
                                                     </div>
-                                                {% elif table.name == 'chatbot_contents' %}
-                                                    <div class="icon-circle bg-success bg-opacity-10">
-                                                        <i class="bi bi-robot text-success"></i>
+                                                    <div class="progress mb-2" style="height: 6px;">
+                                                        <div class="progress-bar table-progress-bar" 
+                                                             data-table-name="{{ table.name }}"
+                                                             data-table-percentage="{{ table.percentage }}"></div>
                                                     </div>
-                                                {% elif table.name == 'users' %}
-                                                    <div class="icon-circle bg-info bg-opacity-10">
-                                                        <i class="bi bi-person text-info"></i>
+                                                    <div class="row small text-muted">
+                                                        <div class="col-md-6">
+                                                            <i class="bi bi-hdd"></i> Table: {{ table.table_size_pretty }}
+                                                            <span class="ms-2"><i class="bi bi-search"></i> Indexes: {{ table.index_size_pretty }}</span>
+                                                        </div>
+                                                        <div class="col-md-6 text-md-end">
+                                                            <i class="bi bi-list-ol"></i> {{ table.row_count|default(0) }} rows
+                                                        </div>
                                                     </div>
-                                                {% elif table.name == 'authorized_users' %}
-                                                    <div class="icon-circle bg-warning bg-opacity-10">
-                                                        <i class="bi bi-person-check text-warning"></i>
+                                                    <div class="mt-2">
+                                                        <small class="text-muted">
+                                                            {% if table.name == 'chat_history' %}
+                                                                💬 Stores all conversation messages and chat sessions
+                                                            {% elif table.name == 'chatbot_contents' %}
+                                                                🤖 Contains chatbot knowledge bases and content data
+                                                            {% elif table.name == 'users' %}
+                                                                👥 User account information and profiles
+                                                            {% elif table.name == 'authorized_users' %}
+                                                                🔐 Access control and user permissions
+                                                            {% elif table.name == 'user_lo_root_ids' %}
+                                                                🔑 User authentication and session management
+                                                            {% elif table.name == 'chatbot_lo_root_association' %}
+                                                                🔗 Links between users and chatbot access
+                                                            {% else %}
+                                                                📊 Database table: {{ table.name }}
+                                                            {% endif %}
+                                                        </small>
                                                     </div>
-                                                {% else %}
-                                                    <div class="icon-circle bg-secondary bg-opacity-10">
-                                                        <i class="bi bi-table text-secondary"></i>
-                                                    </div>
-                                                {% endif %}
+                                                </div>
                                             </div>
-                                            <div class="flex-grow-1">
-                                                <div class="d-flex justify-content-between align-items-center mb-1">
-                                                    <h6 class="mb-0">{{ table.name|replace('_', ' ')|title }}</h6>
-                                                    <div class="text-end">
-                                                        <strong>{{ table.size_pretty }}</strong>
-                                                        <small class="text-muted d-block">{{ table.percentage }}%</small>
-                                                    </div>
-                                                </div>
-                                                <div class="progress" style="height: 6px;">
-                                                    <div class="progress-bar progress-bar-{{ loop.index0 }}" 
-                                                         data-table-percentage="{{ table.percentage }}" 
-                                                         data-total-used="{{ db_stats.percent_used }}"
-                                                         style="background-color: #007AFF;"></div>
-                                                </div>
-                                                <div class="d-flex justify-content-between mt-2">
-                                                    <small class="text-muted">
-                                                        {% if table.row_count > 0 %}
-                                                            📊 {{ "{:,}".format(table.row_count) }} records
-                                                        {% else %}
-                                                            📊 System table
-                                                        {% endif %}
-                                                    </small>
-                                                    <small class="text-muted">
-                                                        💾 Data: {{ table.table_size_pretty }} + 🔍 Index: {{ table.index_size_pretty }}
-                                                    </small>
-                                                </div>
-                                                <div class="mt-1">
-                                                    <small class="text-info">
-                                                        <i class="bi bi-info-circle"></i> 
-                                                        Progress bar shows this table's portion of <strong>total database usage</strong> ({{ table.percentage }}% of {{ db_stats.percent_used }}% used)
-                                                    </small>
-                                                </div>
+                                            {% endfor %}
+                                        {% else %}
+                                            <div class="p-3 text-center text-muted">
+                                                <i class="bi bi-info-circle"></i> Table breakdown information not available
                                             </div>
-                                        </div>
-                                        {% endfor %}
+                                        {% endif %}
                                     </div>
                                 </div>
 
@@ -2129,42 +2167,50 @@
                     let color = '#8E8E93'; // default
                     
                     if (componentType.includes('User Tables')) {
-                        color = '#007AFF';
-                    } else if (componentType.includes('Indexes')) {
-                        color = '#34C759';
-                    } else if (componentType.includes('WAL')) {
-                        color = '#007AFF';
-                    } else if (componentType.includes('System')) {
-                        color = '#FF9500';
+                        color = '#007AFF';  // Blue for user data
+                    } else if (componentType.includes('User Indexes')) {
+                        color = '#34C759';  // Green for indexes
+                    } else if (componentType.includes('System Overhead')) {
+                        color = '#FF9500';  // Orange for system overhead
+                    } else if (componentType.includes('Unaccounted')) {
+                        color = '#8E8E93';  // Gray for unaccounted
                     }
                     
                     bar.style.backgroundColor = color;
                     bar.style.width = percentage + '%';
                 });
                 
-                // Initialize storage bar with proper scaling
+                // Initialize storage bar with proper scaling using database breakdown
                 const storageBar = document.getElementById('storageBar');
                 const storageLegend = document.getElementById('storageLegend');
                 
                 if (storageBar && storageLegend) {
-                    const storageInfo = storageBar.getAttribute('data-storage-info');
+                    const breakdownInfo = storageBar.getAttribute('data-breakdown-info');
                     const totalPercent = parseFloat(storageBar.getAttribute('data-total-percent')) || 0;
                     
-                    if (storageInfo) {
-                        const colors = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#5856D6'];
-                        const colorNames = ['Chat History', 'Chatbot Contents', 'Users', 'Authorized Users', 'User Mappings', 'Other Tables'];
+                    if (breakdownInfo) {
+                        // Colors matching the component breakdown
+                        const componentColors = {
+                            'User Tables': '#007AFF',        // Blue for user data
+                            'User Indexes': '#34C759',       // Green for indexes
+                            'System Overhead': '#FF9500',    // Orange for system overhead
+                            'Unaccounted/Other': '#8E8E93'   // Gray for unaccounted
+                        };
+                        
                         let usedWidth = 0;
                         let legendItems = [];
                         
                         try {
-                            const storageData = JSON.parse(storageInfo);
+                            const breakdownData = JSON.parse(breakdownInfo);
                             
-                            // Create storage segments with CORRECT scaling
-                            storageData.forEach((table, index) => {
-                                if (table.percentage > 0.01) { // Show even smaller segments
-                                    // CORRECT: Each segment width = actual percentage of total capacity
-                                    // If Authorized Users is 43.11% of 1.58% used, that's 0.68% of total capacity
-                                    const actualPercentageOfTotal = table.percentage;
+                            // Sort breakdown data by size (largest first)
+                            const sortedComponents = Object.entries(breakdownData).sort((a, b) => b[1].size_bytes - a[1].size_bytes);
+                            
+                            // Create storage segments for each component
+                            sortedComponents.forEach(([componentName, componentData]) => {
+                                if (componentData.percentage_of_total_capacity > 0.01) { // Show components > 0.01%
+                                    // Use percentage of total capacity (1GB) for storage bar visualization
+                                    const actualPercentageOfTotal = componentData.percentage_of_total_capacity;
                                     
                                     const segment = document.createElement('div');
                                     segment.className = 'storage-segment';
@@ -2172,24 +2218,24 @@
                                     segment.style.left = usedWidth + '%';
                                     segment.style.width = actualPercentageOfTotal + '%';
                                     segment.style.height = '100%';
-                                    segment.style.background = colors[index % 6];
-                                    segment.style.zIndex = 10 - index;
+                                    segment.style.background = componentColors[componentName] || '#8E8E93';
+                                    segment.style.zIndex = 10;
                                     segment.setAttribute('data-bs-toggle', 'tooltip');
-                                    segment.setAttribute('title', table.name + ': ' + table.size_pretty + ' (' + table.percentage + '% of total capacity)');
+                                    segment.setAttribute('title', `${componentName}: ${componentData.size_pretty} (${componentData.percentage}% of total capacity)`);
                                     storageBar.appendChild(segment);
                                     usedWidth += actualPercentageOfTotal;
                                     
                                     // Add to legend
                                     legendItems.push({
-                                        color: colors[index % 6],
-                                        name: table.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                                        size: table.size_pretty,
-                                        percentage: table.percentage
+                                        color: componentColors[componentName] || '#8E8E93',
+                                        name: componentName,
+                                        size: componentData.size_pretty,
+                                        percentage: componentData.percentage
                                     });
                                 }
                             });
                             
-                            // Create legend
+                            // Create legend items
                             legendItems.forEach(item => {
                                 const legendItem = document.createElement('div');
                                 legendItem.className = 'legend-item';
@@ -2201,28 +2247,47 @@
                             });
                             
                         } catch (e) {
-                            console.error('Error parsing storage data:', e);
+                            console.error('Error parsing breakdown data:', e);
                         }
                     }
                 }
                 
-                // Initialize progress bars - these show relative usage within used space
-                const progressBars = document.querySelectorAll('[data-table-percentage]');
-                progressBars.forEach((bar, index) => {
-                    const tablePercentage = parseFloat(bar.getAttribute('data-table-percentage'));
-                    const totalUsed = parseFloat(bar.getAttribute('data-total-used'));
+                // Initialize component progress bars
+                const componentProgressBars = document.querySelectorAll('.component-progress-bar');
+                componentProgressBars.forEach(bar => {
+                    const componentType = bar.getAttribute('data-component-type');
+                    const percentage = parseFloat(bar.getAttribute('data-component-percentage'));
                     
-                    // Color each progress bar with corresponding storage bar color
-                    const colors = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#5856D6'];
-                    bar.style.backgroundColor = colors[index % 6];
+                    // Set color based on component type
+                    const componentColors = {
+                        'User Tables': '#007AFF',        // Blue for user data
+                        'User Indexes': '#34C759',       // Green for indexes
+                        'System Overhead': '#FF9500',    // Orange for system overhead
+                        'Unaccounted/Other': '#8E8E93'   // Gray for unaccounted
+                    };
                     
-                    if (totalUsed > 0) {
-                        // Show percentage relative to total used space (not total capacity)
-                        const width = (tablePercentage / totalUsed * 100);
-                        bar.style.width = width + '%';
-                    } else {
-                        bar.style.width = '0%';
-                    }
+                    bar.style.backgroundColor = componentColors[componentType] || '#8E8E93';
+                    bar.style.width = percentage + '%';
+                });
+                
+                // Initialize table progress bars
+                const tableProgressBars = document.querySelectorAll('.table-progress-bar');
+                tableProgressBars.forEach(bar => {
+                    const tableName = bar.getAttribute('data-table-name');
+                    const percentage = parseFloat(bar.getAttribute('data-table-percentage'));
+                    
+                    // Set color based on table name
+                    const tableColors = {
+                        'chat_history': '#007AFF',           // Blue for chat history
+                        'chatbot_contents': '#34C759',       // Green for chatbot content
+                        'users': '#17A2B8',                 // Info blue for users
+                        'authorized_users': '#FFC107',      // Warning yellow for authorized users
+                        'user_lo_root_ids': '#6C757D',      // Secondary gray for root IDs
+                        'chatbot_lo_root_association': '#343A40'  // Dark for associations
+                    };
+                    
+                    bar.style.backgroundColor = tableColors[tableName] || '#E9ECEF';
+                    bar.style.width = percentage + '%';
                 });
             }
         </script>

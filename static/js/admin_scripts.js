@@ -940,16 +940,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Preview Files button handler in edit modal
     document.getElementById('editPreviewBtn').addEventListener('click', function() {
-        const fileInput = document.getElementById('editFiles');
-        if (!fileInput.files.length) {
+        if (!editUploadedFiles.length) {
             alert('Please select at least one file to preview');
             return;
         }
         
         const formData = new FormData();
         // Add files to form data
-        for (let i = 0; i < fileInput.files.length; i++) {
-            formData.append('files', fileInput.files[i]);
+        for (let i = 0; i < editUploadedFiles.length; i++) {
+            formData.append('files', editUploadedFiles[i]);
         }
         
         // Add character limit

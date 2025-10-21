@@ -1385,6 +1385,10 @@ def program_select():
         available_program_codes = []
         
         for chatbot in chatbots:
+            # Exclude internal workstream chatbots from public list
+            chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+            if INTERNAL_TAG in chatbot_lo_root_ids:
+                continue
             # Check if user has access to this chatbot
             if has_chatbot_access(user_id, chatbot.code):
                 # Determine if NEW badge should be shown
@@ -1438,6 +1442,12 @@ def set_program(program):
         chatbot = ChatbotContent.get_by_code(db, program.upper())
         if not chatbot or not chatbot.is_active:
             logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('program_select'))
+        # Prevent accessing internal workstream chatbots via public route
+        chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+        if INTERNAL_TAG in chatbot_lo_root_ids:
+            flash("This program is available only in the Internal Workstream portal.", "warning")
             close_db(db)
             return redirect(url_for('program_select'))
         
@@ -3030,7 +3040,14 @@ def admin_upload():
         display_name = request.form.get('display_name')
         description = request.form.get('description', '')
         category = request.form.get('category', 'standard')
+        # Workstream flags from form
+        is_workstream_flag_raw = request.form.get('is_workstream')
+        is_workstream_flag = str(is_workstream_flag_raw).lower() in ['1', 'true', 'on', 'yes']
+        workstream_category = (request.form.get('workstream_category') or '').strip()
         intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.')
+        # If marked as workstream and intro message is still the default program phrasing, switch it to workstream phrasing
+        if is_workstream_flag and intro_message.strip() == 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.':
+            intro_message = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.'
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
@@ -3225,6 +3242,15 @@ def admin_upload():
                     db.add(association)
         else:
             logger.info("No LO Root IDs specified - chatbot will be accessible to all users")
+
+        # If Workstream chatbot, enforce INTERNAL/WORKSTREAM tags and optional category tag
+        if is_workstream_flag:
+            enforced_tags = [INTERNAL_TAG, 'WORKSTREAM']
+            if workstream_category:
+                enforced_tags.append(workstream_category)
+            logger.info(f"Workstream chatbot detected - enforcing tags: {enforced_tags}")
+            for tag in enforced_tags:
+                db.add(ChatbotLORootAssociation(chatbot_id=new_chatbot.id, lo_root_id=tag))
         
         db.commit()
         

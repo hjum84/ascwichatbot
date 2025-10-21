@@ -3,7 +3,7 @@ import os
 import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, scoped_session, relationship
+from sqlalchemy.orm import sessionmaker, scoped_session, relationship, joinedload
 from sqlalchemy.sql import func
 from dotenv import load_dotenv
 from flask_login import UserMixin
@@ -308,8 +308,8 @@ class ChatbotContent(Base):
     
     @classmethod
     def get_all_active(cls, db):
-        """Get all active chatbot contents"""
-        return db.query(cls).filter(cls.is_active == True).all()
+        """Get all active chatbot contents with eager-loaded LO Root IDs"""
+        return db.query(cls).options(joinedload(cls.lo_root_ids)).filter(cls.is_active == True).all()
     
     @classmethod
     def create_or_update(cls, db, code, name, content, description=None, quota=3, 

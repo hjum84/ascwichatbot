@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Select a Workstream</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #0f4c81 0%, #1b9aaa 100%); /* navy → teal */
+            --accent: #0f4c81;
+            --accent-2: #1b9aaa;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        html, body { font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f9fc; color:#0f172a; margin:0; }
+        .header { background: white; border-bottom: 1px solid #e2e8f0; position: sticky; top:0; z-index:10; }
+        .header-inner { max-width: 1200px; margin: 0 auto; height: 56px; display:flex; align-items:center; justify-content:space-between; padding:0 20px; }
+        .main { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+        .title { text-align:center; margin-bottom: 24px; }
+        .title h1 { margin:0 0 8px 0; font-size: 28px; font-weight:700; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .title p { margin:0; color:#64748b; }
+        .tabs { display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin: 16px auto 20px; max-width: 100%; }
+        .tab { padding:10px 14px; border-radius:999px; border:1px solid #cbd5e1; background:white; color:#334155; cursor:pointer; font-weight:600; font-size: 13px; box-shadow: var(--shadow-sm); white-space:nowrap; }
+        .tab.active { background: var(--primary-gradient); color:white; border:none; }
+        .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:16px; }
+        .card { background:white; border:1px solid #e2e8f0; border-radius:14px; box-shadow: var(--shadow-md); display:flex; flex-direction:column; }
+        .card-head { padding:14px 16px; background: linear-gradient(to right, #f8fafc, white); border-bottom: 1px solid #f1f5f9; display:flex; align-items:center; justify-content:space-between; }
+        .card-title { font-size: 16px; font-weight:700; color:#0f172a; margin:0; }
+        .card-body { padding: 16px; color:#475569; font-size: 14px; flex:1; }
+        .card-foot { padding: 14px 16px; background:#f8fafc; border-top:1px solid #f1f5f9; text-align:right; }
+        .btn { display:inline-flex; align-items:center; gap:8px; border:none; border-radius:10px; padding:10px 14px; cursor:pointer; background: var(--primary-gradient); color:white; box-shadow: var(--shadow-sm); font-weight:600; }
+        .search { max-width: 520px; margin: 0 auto 16px; position:relative; }
+        .search input { width:100%; border:1px solid #cbd5e1; border-radius:10px; padding:12px 40px 12px 40px; font-size:14px; background:white; box-shadow: var(--shadow-sm); }
+        .pill { position:absolute; left:12px; top:50%; transform: translateY(-50%); color:#94a3b8; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <div style="font-weight:800; background:var(--primary-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workstream Portal</div>
+            <nav class="nav-menu">
+                <div class="profile-dropdown" style="position:relative;">
+                    <button class="profile-button" id="wsProfileButton" style="background:none;border:none;cursor:pointer;border-radius:50%;">
+                        <div class="profile-avatar" style="width:28px;height:28px;border-radius:50%;background: var(--primary-gradient); color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">
+                            {{ current_user.email[0].upper() if current_user and current_user.email else 'U' }}
+                        </div>
+                    </button>
+                    <div class="profile-menu" id="wsProfileMenu" style="position:absolute;right:0;top:36px;background:white;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,.12);min-width:220px;padding:8px 0;display:none;">
+                        <div style="padding:12px 16px;">
+                            <div style="font-size:13px;color:#0f172a;font-weight:600;">{{ current_user.email if current_user else '' }}</div>
+                            <div style="font-size:11px;color:#64748b;">Workstream access</div>
+                        </div>
+                        <div style="height:1px;background:#e2e8f0;"></div>
+                        <a href="{{ url_for('admin') }}" style="display:flex;align-items:center;gap:8px;padding:8px 16px;text-decoration:none;color:#0f4c81;font-size:13px;">Admin Panel</a>
+                        <a href="{{ url_for('program_select') }}" style="display:flex;align-items:center;gap:8px;padding:8px 16px;text-decoration:none;color:#0f4c81;font-size:13px;">Go to Program Select</a>
+                        <a href="{{ url_for('logout') }}" style="display:flex;align-items:center;gap:8px;padding:8px 16px;text-decoration:none;color:#ef4444;font-size:13px;">Sign Out</a>
+                    </div>
+                </div>
+            </nav>
+        </div>
+    </header>
+    <main class="main">
+        <div class="title">
+            <h1>Select a Workstream</h1>
+            <p>Choose a workstream to access internal chatbots.</p>
+        </div>
+        <div class="search">
+            <span class="pill">🔍</span>
+            <input id="wsSearch" type="text" placeholder="Search workstreams..." />
+        </div>
+        <div class="tabs" id="wsTabs">
+            <button class="tab active" data-category="all">All Workstreams</button>
+            <button class="tab" data-category="EVALUATION">Evaluation</button>
+            <button class="tab" data-category="PMO">PMO</button>
+            <button class="tab" data-category="LMS">LMS</button>
+            <button class="tab" data-category="LEARNING_OPERATION">Learning Operation</button>
+            <button class="tab" data-category="TAP">TAP</button>
+            <button class="tab" data-category="BUDGET_AND_SCOPE">Budget and Scope</button>
+            <button class="tab" data-category="COMMUNICATION">Communication</button>
+        </div>
+        <div class="grid" id="wsGrid">
+            {% if available_programs|length == 0 %}
+            <div class="card"><div class="card-body">No workstreams available for your account.</div></div>
+            {% else %}
+            {% for program in available_programs %}
+            <a href="{{ url_for('internal_set_program', program=program.code) }}" class="card" 
+               data-name="{{ program.name.lower() }}" 
+               data-description="{{ program.description.lower() }}"
+               data-category="all {{ program.category if program.category else '' }}">
+                <div class="card-head">
+                    <h3 class="card-title">{{ program.name }}</h3>
+                </div>
+                <div class="card-body">{{ program.description }}</div>
+                <div class="card-foot"><span class="btn">Open</span></div>
+            </a>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </main>
+    <script>
+        // Simple profile dropdown behavior
+        const wsBtn = document.getElementById('wsProfileButton');
+        const wsMenu = document.getElementById('wsProfileMenu');
+        if (wsBtn && wsMenu) {
+            wsBtn.addEventListener('click', function(e){
+                e.stopPropagation();
+                wsMenu.style.display = wsMenu.style.display === 'none' || wsMenu.style.display === '' ? 'block' : 'none';
+            });
+            document.addEventListener('click', function(){ wsMenu.style.display = 'none'; });
+        }
+        const tabs = document.querySelectorAll('.tab');
+        const cards = document.querySelectorAll('.card');
+        const search = document.getElementById('wsSearch');
+        tabs.forEach(t => t.addEventListener('click', () => {
+            tabs.forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            filter();
+        }));
+        search.addEventListener('input', filter);
+        function filter(){
+            const cat = document.querySelector('.tab.active').dataset.category;
+            const term = (search.value || '').toLowerCase().trim();
+            cards.forEach(c => {
+                const name = c.getAttribute('data-name') || '';
+                const desc = c.getAttribute('data-description') || '';
+                const categories = (c.getAttribute('data-category')||'').split(' ');
+                const matchesSearch = !term || name.includes(term) || desc.includes(term);
+                const matchesCat = cat === 'all' || categories.includes(cat);
+                c.style.display = (matchesSearch && matchesCat) ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+</html>

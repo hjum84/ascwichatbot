@@ -106,6 +106,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const form = document.getElementById('upload-form');
         const formData = new FormData(form);
         
+        // When Workstream Chatbot is selected, ignore LO Root IDs entirely
+        const isWorkstream = document.getElementById('is_workstream');
+        if (isWorkstream && isWorkstream.checked) {
+            const loField = document.getElementById('lo_root_ids');
+            if (loField) loField.value = '';
+        }
+        
         // Check if we have edited content in the preview section
         const previewSection = document.getElementById('preview-section');
         const isPreviewVisible = previewSection && previewSection.style.display !== 'none';
@@ -236,6 +243,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Preview button handler
     document.getElementById('preview-btn').addEventListener('click', function() {
+        // Ensure intro message reflects workstream phrasing when applicable
+        const wsChk = document.getElementById('is_workstream');
+        const introFieldEl = document.getElementById('intro_message');
+        const defProg = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
+        const defWs = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.';
+        if (wsChk && wsChk.checked && introFieldEl && introFieldEl.value.trim() === defProg) {
+            introFieldEl.value = defWs;
+        }
         if (uploadedFiles.length === 0) {
             alert('Please select at least one file');
             return;
@@ -2281,7 +2296,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const loRootIds = document.getElementById('loRootIds').value.trim();
 
             if (!lastName || !email) {
-                // Show error message directly in the modal if possible, or use existing
                 const addUserModalBody = document.getElementById('addUserModal').querySelector('.modal-body');
                 let errorDiv = addUserModalBody.querySelector('.alert-danger');
                 if (!errorDiv) {
@@ -2448,7 +2462,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const cells = row.getElementsByTagName('td');
             
             // Skip rows that don't have enough cells (e.g. if table is empty or malformed)
-            if (cells.length < 9) {
+            if (cells.length < 10) {
                  row.style.display = ''; // Show potentially malformed rows or empty state rows
                  return;
             }
@@ -2514,6 +2528,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const cellLoIds = cells[8].textContent.toLowerCase().split(',').map(id => id.trim());
                 const filterLoId = filters.lo_root_ids.toLowerCase();
                 if (!cellLoIds.some(id => id.includes(filterLoId))) {
+                    show = false;
+                }
+            }
+
+            // Workforce Institute filter (True/False exact match)
+            if (show && typeof filters.is_workforce_institute !== 'undefined' && filters.is_workforce_institute !== '' && cells[9]) {
+                const isWi = cells[9].textContent.trim().toLowerCase();
+                if (isWi !== filters.is_workforce_institute) {
                     show = false;
                 }
             }
@@ -3867,4 +3889,60 @@ function showSecurityMessage(type, message) {
             alertDiv.remove();
         }
     }, 8000);
+}
+
+// Toggle Workstream Category dropdown based on Workstream Chatbot checkbox
+const isWorkstreamCheckbox = document.getElementById('is_workstream');
+const workstreamCategorySection = document.getElementById('workstream_category_section');
+const programCategorySection = document.getElementById('program_category_section');
+const loRootIdsSection = document.getElementById('lo_root_ids_section');
+const introMessageField = document.getElementById('intro_message');
+
+// Default intro messages
+const programIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
+const workstreamIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.';
+
+if (isWorkstreamCheckbox && workstreamCategorySection && programCategorySection && loRootIdsSection) {
+    // Initialize sections on load
+    if (isWorkstreamCheckbox.checked) {
+        workstreamCategorySection.style.display = 'block';
+        programCategorySection.style.display = 'none';
+        loRootIdsSection.style.display = 'none';
+        if (introMessageField) {
+            const programIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
+            const workstreamIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.';
+            if (introMessageField.value.trim() === programIntroMessage) {
+                introMessageField.value = workstreamIntroMessage;
+            }
+        }
+    }
+    isWorkstreamCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            // Show Workstream Category, hide Program Category and LO Root IDs
+            workstreamCategorySection.style.display = 'block';
+            programCategorySection.style.display = 'none';
+            loRootIdsSection.style.display = 'none';
+            
+            // Update intro message if it's still the default program message
+            if (introMessageField && introMessageField.value.trim() === programIntroMessage) {
+                introMessageField.value = workstreamIntroMessage;
+            }
+        } else {
+            // Hide Workstream Category, show Program Category and LO Root IDs
+            workstreamCategorySection.style.display = 'none';
+            programCategorySection.style.display = 'block';
+            loRootIdsSection.style.display = 'block';
+            
+            // Update intro message back to program if it's still the default workstream message
+            if (introMessageField && introMessageField.value.trim() === workstreamIntroMessage) {
+                introMessageField.value = programIntroMessage;
+            }
+            
+            // Clear workstream category selection when unchecked
+            const workstreamCategorySelect = document.getElementById('workstream_category');
+            if (workstreamCategorySelect) {
+                workstreamCategorySelect.value = '';
+            }
+        }
+    });
 }

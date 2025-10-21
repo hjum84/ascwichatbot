@@ -9,6 +9,8 @@ import logging
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash, send_file
 from functools import wraps
+import os
+from functools import wraps
 import re
 from models import (
     User, UserLORootID, ChatbotContent, ChatbotLORootAssociation, ChatHistory, 
@@ -78,6 +80,109 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Initialize Flask application
 app = Flask(__name__)
+# Basic auth for Workstream portal
+WORKSTREAM_USERNAME = os.getenv("WORKSTREAM_USERNAME", "workforceinstitutes")
+WORKSTREAM_PASSWORD = os.getenv("WORKSTREAM_PASSWORD", "otwdworkstreams")
+
+def check_workstream_auth(username, password):
+    return username == WORKSTREAM_USERNAME and password == WORKSTREAM_PASSWORD
+
+def authenticate_workstream():
+    return Response(
+        'Could not verify your access level for that URL.\n'
+        'You have to login with proper credentials', 401,
+        {'WWW-Authenticate': 'Basic realm="Workstream Login Required"'}
+    )
+
+def requires_workstream_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_workstream_auth(auth.username, auth.password):
+            return authenticate_workstream()
+        return f(*args, **kwargs)
+    return decorated
+
+# INTERNAL TAG constant for filtering
+INTERNAL_TAG = 'INTERNAL_PORTAL'
+
+@app.route('/workstream_select')
+@requires_workstream_auth
+def workstream_select():
+    user = current_user if 'current_user' in globals() else None
+    db = get_db()
+    try:
+        chatbots = ChatbotContent.get_all_active(db)
+        available_programs = []
+        available_program_codes = []
+        for chatbot in chatbots:
+            chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+            if INTERNAL_TAG not in chatbot_lo_root_ids:
+                continue
+            show_new = False
+            if chatbot.created_at and (datetime.now() - chatbot.created_at).days < 14:
+                show_new = True
+            workstream_categories = []
+            for lo_id in chatbot_lo_root_ids:
+                if lo_id in ['EVALUATION', 'PMO', 'LMS', 'LEARNING_OPERATION', 'TAP', 'BUDGET_AND_SCOPE', 'COMMUNICATION']:
+                    workstream_categories.append(lo_id)
+            category_string = ' '.join(workstream_categories) if workstream_categories else ''
+            program_info = {
+                "code": chatbot.code,
+                "name": chatbot.name,
+                "description": chatbot.description or f"Select a workstream to continue.",
+                "show_new_badge": show_new,
+                "category": category_string
+            }
+            available_programs.append(program_info)
+            available_program_codes.append(chatbot.code)
+        available_programs.sort(key=lambda x: x["name"])
+        return render_template('workstream_portal.html',
+                              available_programs=available_programs,
+                              available_program_codes=available_program_codes,
+                              current_user=user)
+    finally:
+        close_db(db)
+
+@app.route('/internal/set_program/<program>')
+@requires_workstream_auth
+def internal_set_program(program):
+    """Set program for workstream portal - bypasses LO Root ID checks"""
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, program.upper())
+        if not chatbot or not chatbot.is_active:
+            logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('workstream_select'))
+        
+        chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+        if INTERNAL_TAG not in chatbot_lo_root_ids:
+            flash("This program is not part of the Internal Workstream portal.", "warning")
+            close_db(db)
+            return redirect(url_for('workstream_select'))
+        
+        # Set workstream mode flag to bypass LO Root ID checks
+        session['current_program'] = program.upper()
+        session['workstream_mode'] = True
+        db.commit()
+        
+        program_upper = program.upper()
+        if program_upper == "BCC":
+            return redirect(url_for('index_bcc'))
+        elif program_upper == "MI":
+            return redirect(url_for('index_mi'))
+        elif program_upper == "SAFETY":
+            return redirect(url_for('index_safety'))
+        else:
+            return redirect(url_for('index_generic', program=program))
+    except Exception as e:
+        db.rollback()
+        logger.error("Error setting internal program: %s", str(e))
+        return redirect(url_for('workstream_select'))
+    finally:
+        close_db(db)
+
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
 
 # Initialize Flask-Login
@@ -1261,6 +1366,13 @@ def setup_password(token):
 @login_required
 def program_select():
     # Verify user is logged in (handled by decorator)
+    # Ensure we are NOT in workstream mode when visiting public program select
+    try:
+        if session.get('workstream_mode'):
+            session.pop('workstream_mode', None)
+    except Exception:
+        # Safe guard: do not block rendering if session is not available
+        pass
     user_id = current_user.id
     user = current_user  # Get current user object
     
@@ -1312,6 +1424,12 @@ def program_select():
 @app.route('/set_program/<program>')
 @login_required
 def set_program(program):
+    # Always reset workstream flag when selecting a public program
+    try:
+        if session.get('workstream_mode'):
+            session.pop('workstream_mode', None)
+    except Exception:
+        pass
     # Verify if content exists for this program in the database
     user_id = current_user.id
     
@@ -1452,11 +1570,22 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
 @login_required
 def index_bcc():
     user_id = current_user.id
-    
-    # Check access for BCC program
-    if not has_chatbot_access(user_id, 'BCC'):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    # Workstream mode bypass: allow if chatbot is internal
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, 'BCC')
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        # Normal portal: enforce LO Root ID access
+        if not has_chatbot_access(user_id, 'BCC'):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'BCC')
     deletion_warning = get_deletion_warning_for_user(user_id, 'BCC')
@@ -1477,11 +1606,20 @@ def index_bcc():
 @login_required
 def index_mi():
     user_id = current_user.id
-    
-    # Check access for MI program
-    if not has_chatbot_access(user_id, 'MI'):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, 'MI')
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        if not has_chatbot_access(user_id, 'MI'):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'MI')
     deletion_warning = get_deletion_warning_for_user(user_id, 'MI')
@@ -1502,11 +1640,20 @@ def index_mi():
 @login_required
 def index_safety():
     user_id = current_user.id
-    
-    # Check access for Safety program
-    if not has_chatbot_access(user_id, 'S&R'):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, 'S&R')
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        if not has_chatbot_access(user_id, 'S&R'):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'S&R')
     deletion_warning = get_deletion_warning_for_user(user_id, 'S&R')
@@ -1526,11 +1673,22 @@ def index_safety():
 @app.route('/index_generic/<program>')
 @login_required
 def index_generic(program):
-    # Check if user has access to this program
+    # Check access, with workstream bypass for INTERNAL_PORTAL chatbots
     user_id = current_user.id
-    if not has_chatbot_access(user_id, program):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, program.upper())
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        if not has_chatbot_access(user_id, program):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     # Check if the program exists in our chatbot content
     if program not in program_content:
@@ -1553,12 +1711,21 @@ def index_generic(program):
         # Get all active chatbots from database instead of using program_content
         active_chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
         for chatbot in active_chatbots:
-            if has_chatbot_access(user_id, chatbot.code):
-                all_available_chatbots.append({
-                    'code': chatbot.code,
-                    'name': chatbot.name,
-                    'category': chatbot.category or 'standard'
-                })
+            if session.get('workstream_mode', False):
+                tags = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+                if INTERNAL_TAG in tags:
+                    all_available_chatbots.append({
+                        'code': chatbot.code,
+                        'name': chatbot.name,
+                        'category': chatbot.category or 'standard'
+                    })
+            else:
+                if has_chatbot_access(user_id, chatbot.code):
+                    all_available_chatbots.append({
+                        'code': chatbot.code,
+                        'name': chatbot.name,
+                        'category': chatbot.category or 'standard'
+                    })
     finally:
             close_db(db)
     
@@ -1859,6 +2026,9 @@ def clear_chat_history():
 @app.route('/switch_program')
 @login_required
 def switch_program():
+    # If currently in workstream mode, send to workstream_select; otherwise program_select
+    if session.get('workstream_mode', False):
+        return redirect(url_for('workstream_select'))
     return redirect(url_for('program_select'))
 
 # Logout route

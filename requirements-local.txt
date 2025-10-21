@@ -1,0 +1,9 @@
+flask==2.2.3
+werkzeug==2.2.3
+python-dotenv==1.0.0
+sqlalchemy==2.0.9
+openai==0.28.1
+flask-login==0.6.3
+pytz==2023.3
+PyPDF2==3.0.1
+python-docx==0.8.11

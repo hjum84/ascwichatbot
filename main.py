@@ -38,6 +38,7 @@ from io import StringIO, BytesIO
 from sqlalchemy import func, and_
 import markdown2  # Add markdown2 for markdown parsing
 import pytz  # Add pytz for timezone conversion
+import requests  # Add requests for HTTP email provider APIs
 
 # Authentication imports
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -208,6 +209,114 @@ mail = Mail(app)
 # Initialize Flask-Bcrypt
 bcrypt = Bcrypt(app)
 
+# Email sending utility that prefers HTTP providers in restricted environments
+def send_email(subject, recipient, html_body):
+    """Send an email using an HTTP provider if configured, otherwise fallback to Flask-Mail.
+
+    Supported providers via environment variables:
+    - EMAIL_PROVIDER=resend: RESEND_API_KEY, RESEND_FROM
+    - EMAIL_PROVIDER=sendgrid: SENDGRID_API_KEY, SENDGRID_FROM
+    - EMAIL_PROVIDER=mailgun: MAILGUN_API_KEY, MAILGUN_DOMAIN, MAILGUN_FROM
+    """
+    provider = os.getenv('EMAIL_PROVIDER', '').strip().lower()
+
+    # Try provider-based sending first if configured
+    if provider:
+        try:
+            if provider == 'resend':
+                api_key = os.getenv('RESEND_API_KEY')
+                from_email = os.getenv('RESEND_FROM') or app.config.get('MAIL_DEFAULT_SENDER')
+                if not api_key or not from_email:
+                    raise ValueError('RESEND_API_KEY or RESEND_FROM not set')
+                resp = requests.post(
+                    'https://api.resend.com/emails',
+                    headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'Content-Type': 'application/json'
+                    },
+                    json={
+                        'from': from_email,
+                        'to': [recipient],
+                        'subject': subject,
+                        'html': html_body,
+                    },
+                    timeout=10,
+                )
+                if 200 <= resp.status_code < 300:
+                    logger.info('✅ Email sent via Resend API')
+                    return True
+                else:
+                    logger.error(f"Resend API error: {resp.status_code} {resp.text}")
+            elif provider == 'sendgrid':
+                api_key = os.getenv('SENDGRID_API_KEY')
+                from_email = os.getenv('SENDGRID_FROM') or app.config.get('MAIL_DEFAULT_SENDER')
+                if not api_key or not from_email:
+                    raise ValueError('SENDGRID_API_KEY or SENDGRID_FROM not set')
+                payload = {
+                    'personalizations': [
+                        {
+                            'to': [{'email': recipient}],
+                            'subject': subject,
+                        }
+                    ],
+                    'from': {'email': from_email},
+                    'content': [
+                        {'type': 'text/html', 'value': html_body}
+                    ],
+                }
+                resp = requests.post(
+                    'https://api.sendgrid.com/v3/mail/send',
+                    headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'Content-Type': 'application/json',
+                    },
+                    json=payload,
+                    timeout=10,
+                )
+                if 200 <= resp.status_code < 300:
+                    logger.info('✅ Email sent via SendGrid API')
+                    return True
+                else:
+                    logger.error(f"SendGrid API error: {resp.status_code} {resp.text}")
+            elif provider == 'mailgun':
+                api_key = os.getenv('MAILGUN_API_KEY')
+                domain = os.getenv('MAILGUN_DOMAIN')
+                from_email = os.getenv('MAILGUN_FROM') or app.config.get('MAIL_DEFAULT_SENDER')
+                if not api_key or not domain or not from_email:
+                    raise ValueError('MAILGUN_API_KEY, MAILGUN_DOMAIN or MAILGUN_FROM not set')
+                url = f'https://api.mailgun.net/v3/{domain}/messages'
+                resp = requests.post(
+                    url,
+                    auth=('api', api_key),
+                    data={
+                        'from': from_email,
+                        'to': [recipient],
+                        'subject': subject,
+                        'html': html_body,
+                    },
+                    timeout=10,
+                )
+                if 200 <= resp.status_code < 300:
+                    logger.info('✅ Email sent via Mailgun API')
+                    return True
+                else:
+                    logger.error(f"Mailgun API error: {resp.status_code} {resp.text}")
+            else:
+                logger.warning(f"Unknown EMAIL_PROVIDER '{provider}', falling back to Flask-Mail")
+        except Exception as e:
+            logger.error(f"Provider-based email send failed: {type(e).__name__}: {e}")
+
+    # Fallback to Flask-Mail (SMTP)
+    try:
+        msg = Message(subject=subject, recipients=[recipient])
+        msg.html = html_body
+        mail.send(msg)
+        logger.info('✅ Email sent via Flask-Mail (SMTP)')
+        return True
+    except Exception as e:
+        logger.error(f"SMTP email send failed: {type(e).__name__}: {e}")
+        return False
+
 # User loader for Flask-Login
 @login_manager.user_loader
 def load_user(user_id):
@@ -280,12 +389,7 @@ def send_password_reset_email(email, name):
         reset_url = url_for('reset_password', token=token, _external=True)
         logger.info(f"✅ Reset URL generated: {reset_url[:50]}...")
         
-        msg = Message(
-            subject='Password Reset Request',
-            recipients=[email]
-        )
-        
-        msg.html = f"""
+        html_body = f"""
         <h2>Password Reset Request</h2>
         <p>Hi {name},</p>
         <p>You requested a password reset for your account. Click the link below to reset your password:</p>
@@ -294,11 +398,14 @@ def send_password_reset_email(email, name):
         <p>If you didn't request this reset, please ignore this email.</p>
         <p>Best regards,<br>ACS Chatbot System</p>
         """
-        
-        logger.info(f"📨 Attempting to send mail via Flask-Mail...")
-        mail.send(msg)
-        logger.info(f"✅ Password reset email sent successfully to {email}")
-        return True
+
+        logger.info("📨 Attempting to send password reset email...")
+        if send_email('Password Reset Request', email, html_body):
+            logger.info(f"✅ Password reset email sent successfully to {email}")
+            return True
+        else:
+            logger.error(f"❌ All email send methods failed for {email}")
+            return False
     except Exception as e:
         logger.error(f"❌ Failed to send password reset email to {email}")
         logger.error(f"❌ Error type: {type(e).__name__}")
@@ -312,18 +419,13 @@ def send_password_setup_email(email, name, is_admin_added=False):
     try:
         token = generate_password_setup_token(email)
         setup_url = url_for('setup_password', token=token, _external=True)
-        
-        msg = Message(
-            subject='Set Up Your Account Password',
-            recipients=[email]
-        )
-        
+
         if is_admin_added:
             intro = f"<p>Hi {name},</p><p>An account has been created for you by an administrator."
         else:
             intro = f"<p>Hi {name},</p><p>Welcome! Your account has been verified."
-        
-        msg.html = f"""
+
+        html_body = f"""
         <h2>Set Up Your Password</h2>
         {intro} Please set up your password to access the ACS Chatbot System:</p>
         <p><a href="{setup_url}">Set Up Password</a></p>
@@ -331,10 +433,13 @@ def send_password_setup_email(email, name, is_admin_added=False):
         <p>Once you set up your password, you can log in using your email and password.</p>
         <p>Best regards,<br>ACS Chatbot System</p>
         """
-        
-        mail.send(msg)
-        logger.info(f"Password setup email sent to {email}")
-        return True
+
+        if send_email('Set Up Your Account Password', email, html_body):
+            logger.info(f"Password setup email sent to {email}")
+            return True
+        else:
+            logger.error(f"All email send methods failed for setup email to {email}")
+            return False
     except Exception as e:
         logger.error(f"Failed to send password setup email to {email}: {e}")
         return False

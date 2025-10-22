@@ -184,6 +184,8 @@ def internal_set_program(program):
         close_db(db)
 
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
+# Ensure SECRET_KEY is available for token generation/verification utilities
+app.config["SECRET_KEY"] = app.secret_key
 
 # Initialize Flask-Login
 login_manager = LoginManager()
@@ -262,8 +264,21 @@ def verify_password_setup_token(token, expiration=86400):
 def send_password_reset_email(email, name):
     """Send password reset email"""
     try:
+        # Log mail configuration for debugging
+        logger.info(f"📧 Attempting to send password reset email to {email}")
+        logger.info(f"MAIL_SERVER: {app.config.get('MAIL_SERVER')}")
+        logger.info(f"MAIL_PORT: {app.config.get('MAIL_PORT')}")
+        logger.info(f"MAIL_USE_TLS: {app.config.get('MAIL_USE_TLS')}")
+        logger.info(f"MAIL_USE_SSL: {app.config.get('MAIL_USE_SSL')}")
+        logger.info(f"MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
+        logger.info(f"MAIL_PASSWORD set: {bool(app.config.get('MAIL_PASSWORD'))}")
+        logger.info(f"SECRET_KEY set: {bool(app.config.get('SECRET_KEY'))}")
+        
         token = generate_reset_token(email)
+        logger.info(f"✅ Token generated successfully")
+        
         reset_url = url_for('reset_password', token=token, _external=True)
+        logger.info(f"✅ Reset URL generated: {reset_url[:50]}...")
         
         msg = Message(
             subject='Password Reset Request',
@@ -280,11 +295,16 @@ def send_password_reset_email(email, name):
         <p>Best regards,<br>ACS Chatbot System</p>
         """
         
+        logger.info(f"📨 Attempting to send mail via Flask-Mail...")
         mail.send(msg)
-        logger.info(f"Password reset email sent to {email}")
+        logger.info(f"✅ Password reset email sent successfully to {email}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send password reset email to {email}: {e}")
+        logger.error(f"❌ Failed to send password reset email to {email}")
+        logger.error(f"❌ Error type: {type(e).__name__}")
+        logger.error(f"❌ Error details: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         return False
 
 def send_password_setup_email(email, name, is_admin_added=False):
@@ -933,6 +953,50 @@ def login_required(f):
             return redirect(url_for('login_page', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
+
+# --- Admin-only SMTP test endpoints ---
+@app.route('/admin/test_email', methods=['POST'])
+@requires_auth
+def admin_test_email():
+    """Send a simple SMTP test email to verify mail credentials."""
+    try:
+        to = request.form.get('to') or app.config.get('MAIL_USERNAME')
+        subject = request.form.get('subject') or 'SMTP test'
+        body = request.form.get('body') or 'SMTP ok'
+        msg = Message(subject=subject, recipients=[to])
+        msg.body = body
+        msg.sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_USERNAME')
+        mail.send(msg)
+        return jsonify({
+            'success': True,
+            'message': f'sent to {to}',
+            'mail': {
+                'server': app.config.get('MAIL_SERVER'),
+                'port': app.config.get('MAIL_PORT'),
+                'tls': app.config.get('MAIL_USE_TLS'),
+                'ssl': app.config.get('MAIL_USE_SSL'),
+                'sender': msg.sender
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/test_password_reset', methods=['POST'])
+@requires_auth
+def admin_test_password_reset():
+    """Send a password reset email to a target address to validate token + delivery."""
+    try:
+        target = request.form.get('email') or app.config.get('MAIL_USERNAME')
+        name = request.form.get('name') or 'User'
+        ok = send_password_reset_email(target, name)
+        return jsonify({
+            'success': ok,
+            'target': target,
+            'secret_key_present': bool(app.config.get('SECRET_KEY')),
+            'note': 'Check inbox/spam; token link expires in 1 hour.'
+        }), (200 if ok else 500)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # --- Smartsheet Integration Setup ---
 SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN")

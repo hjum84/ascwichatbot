@@ -888,7 +888,7 @@ def get_cached_response(content_hash, user_message, chatbot_code):
         close_db(db)
         
         # NEW: Using Gemini Flash 2.0 instead of GPT-4o-mini
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         # Combine system prompt and user message for Gemini
         full_prompt = f"{system_prompt}\n\nUser: {user_message}"
@@ -912,7 +912,7 @@ def get_cached_response(content_hash, user_message, chatbot_code):
             
             try:
                 # Try to complete the response with a shorter follow-up using Gemini
-                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 
                 completion_prompt = f"""{system_prompt}
 
@@ -2099,7 +2099,7 @@ CONTENT:
 {program_content.get(current_program, '')}"""
                 
                 # NEW: Using Gemini Flash 2.0 instead of GPT-4o-mini
-                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 
                 # Combine system prompt and user message for Gemini
                 full_prompt = f"{system_prompt}\n\nUser: {user_message}"
@@ -2121,7 +2121,7 @@ CONTENT:
                     
                     try:
                         # Try to complete the response with a shorter follow-up using Gemini
-                        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                        model = genai.GenerativeModel('gemini-2.5-flash')
                         
                         completion_prompt = f"""{system_prompt}
 
@@ -3206,7 +3206,7 @@ def gpt_summarize_text(text, target_length=None, max_length=50000):
     
     try:
         # NEW: Using Gemini Flash 2.0 instead of GPT-4o-mini
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         full_prompt = f"""You are a text summarization assistant. Your task is to:
 1. Preserve ALL important facts, key concepts, definitions, and essential information

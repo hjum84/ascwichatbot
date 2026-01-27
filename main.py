@@ -1,4 +1,5 @@
-import openai
+import openai  # Parked for now - keeping for potential future use
+import google.generativeai as genai  # NEW: Gemini AI
 import os
 import datetime
 import smartsheet
@@ -77,7 +78,10 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: No credits available
+
+# Configure Gemini API (NEW)
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -687,42 +691,47 @@ def get_content_hash(content):
 
 def get_embedding(text):
     """
-    Generate OpenAI embedding for the text.
-    Results are cached to prevent duplicate API calls for the same text.
+    PARKED: OpenAI embedding function - disabled due to no API credits.
+    Caching functionality temporarily disabled.
     """
-    # Basic preprocessing: lowercase, normalize whitespace
-    normalized_text = re.sub(r'\s+', ' ', text.lower()).strip()
+    # TODO: Implement alternative embedding solution (Cohere, Voyage AI, or Gemini)
+    logger.debug(f"Embedding generation disabled - returning None")
+    return None
     
-    # Check if embedding already exists in cache
-    if normalized_text in embedding_cache:
-        logger.debug(f"Embedding cache hit for: {normalized_text[:30]}...")
-        return embedding_cache[normalized_text]
-    
-    try:
-        # Call OpenAI embedding API
-        response = openai.Embedding.create(
-            model="text-embedding-3-small",
-            input=normalized_text
-        )
-        # Ensure embedding is a standard list to avoid method_descriptor errors
-        embedding = list(response['data'][0]['embedding'])
-        
-        # Store in cache
-        with embedding_lock:
-            embedding_cache[normalized_text] = embedding
-            
-            # Limit cache size (optional)
-            if len(embedding_cache) > 10000:
-                # Remove oldest entry
-                oldest_key = next(iter(embedding_cache))
-                embedding_cache.pop(oldest_key)
-        
-        logger.debug(f"Generated embedding for: {normalized_text[:30]}...")
-        return embedding
-    
-    except Exception as e:
-        logger.error(f"Error generating embedding: {str(e)}")
-        return None
+    # PARKED CODE - OpenAI embeddings (no credits available)
+    # # Basic preprocessing: lowercase, normalize whitespace
+    # normalized_text = re.sub(r'\s+', ' ', text.lower()).strip()
+    # 
+    # # Check if embedding already exists in cache
+    # if normalized_text in embedding_cache:
+    #     logger.debug(f"Embedding cache hit for: {normalized_text[:30]}...")
+    #     return embedding_cache[normalized_text]
+    # 
+    # try:
+    #     # Call OpenAI embedding API
+    #     response = openai.Embedding.create(
+    #         model="text-embedding-3-small",
+    #         input=normalized_text
+    #     )
+    #     # Ensure embedding is a standard list to avoid method_descriptor errors
+    #     embedding = list(response['data'][0]['embedding'])
+    #     
+    #     # Store in cache
+    #     with embedding_lock:
+    #         embedding_cache[normalized_text] = embedding
+    #         
+    #         # Limit cache size (optional)
+    #         if len(embedding_cache) > 10000:
+    #             # Remove oldest entry
+    #             oldest_key = next(iter(embedding_cache))
+    #             embedding_cache.pop(oldest_key)
+    #     
+    #     logger.debug(f"Generated embedding for: {normalized_text[:30]}...")
+    #     return embedding
+    # 
+    # except Exception as e:
+    #     logger.error(f"Error generating embedding: {str(e)}")
+    #     return None
 
 def find_similar_question(user_message, content_hash, chatbot_code):
     """
@@ -877,38 +886,51 @@ def get_cached_response(content_hash, user_message, chatbot_code):
             )
         
         close_db(db)
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=1500,  # Increased from 500 to 1500
-            temperature=0.3   # Added for more creative responses
+        
+        # NEW: Using Gemini Flash 2.0 instead of GPT-4o-mini
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Combine system prompt and user message for Gemini
+        full_prompt = f"{system_prompt}\n\nUser: {user_message}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=1500,
+                temperature=0.3,
+            )
         )
         
         # Get the response content
-        response_content = response['choices'][0]['message']['content'].strip()
+        response_content = response.text.strip()
         
         # Check if response was cut off and try to complete it naturally
-        if response['choices'][0]['finish_reason'] == 'length':
+        # Gemini uses 'finish_reason' differently - check for MAX_TOKENS or incomplete response
+        finish_reason = getattr(response.candidates[0], 'finish_reason', None) if response.candidates else None
+        if finish_reason and str(finish_reason) in ['MAX_TOKENS', '2']:  # 2 is the enum value for MAX_TOKENS
             logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
             
             try:
-                # Try to complete the response with a shorter follow-up
-                completion_response = openai.ChatCompletion.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": f"{system_prompt}\n\nIMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion."},
-                        {"role": "user", "content": user_message},
-                        {"role": "assistant", "content": response_content},
-                        {"role": "user", "content": "Please complete your previous response with a brief conclusion."}
-                    ],
-                    max_tokens=300,  # Shorter completion
-                    temperature=0.3
+                # Try to complete the response with a shorter follow-up using Gemini
+                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                
+                completion_prompt = f"""{system_prompt}
+
+IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
+
+User: {user_message}
+Assistant: {response_content}
+User: Please complete your previous response with a brief conclusion."""
+
+                completion_response = model.generate_content(
+                    completion_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        max_output_tokens=300,
+                        temperature=0.3,
+                    )
                 )
                 
-                completion_text = completion_response['choices'][0]['message']['content'].strip()
+                completion_text = completion_response.text.strip()
                 
                 # Combine original response with completion
                 if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
@@ -2075,36 +2097,49 @@ IMPORTANT GUIDELINES:
 
 CONTENT:
 {program_content.get(current_program, '')}"""
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    max_tokens=1500,  # Increased from 500 to 1500
-                    temperature=0.3   # Added for more creative responses
+                
+                # NEW: Using Gemini Flash 2.0 instead of GPT-4o-mini
+                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                
+                # Combine system prompt and user message for Gemini
+                full_prompt = f"{system_prompt}\n\nUser: {user_message}"
+                
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        max_output_tokens=1500,
+                        temperature=0.3,
+                    )
                 )
-                chatbot_reply = response['choices'][0]['message']['content'].strip()
+                chatbot_reply = response.text.strip()
                 
                 # Check if response was cut off and try to complete it naturally
-                if response['choices'][0]['finish_reason'] == 'length':
+                # Gemini uses 'finish_reason' differently - check for MAX_TOKENS or incomplete response
+                finish_reason = getattr(response.candidates[0], 'finish_reason', None) if response.candidates else None
+                if finish_reason and str(finish_reason) in ['MAX_TOKENS', '2']:  # 2 is the enum value for MAX_TOKENS
                     logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
                     
                     try:
-                        # Try to complete the response with a shorter follow-up
-                        completion_response = openai.ChatCompletion.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": f"{system_prompt}\n\nIMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion."},
-                                {"role": "user", "content": user_message},
-                                {"role": "assistant", "content": chatbot_reply},
-                                {"role": "user", "content": "Please complete your previous response with a brief conclusion."}
-                            ],
-                            max_tokens=300,  # Shorter completion
-                            temperature=0.3
+                        # Try to complete the response with a shorter follow-up using Gemini
+                        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                        
+                        completion_prompt = f"""{system_prompt}
+
+IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
+
+User: {user_message}
+Assistant: {chatbot_reply}
+User: Please complete your previous response with a brief conclusion."""
+
+                        completion_response = model.generate_content(
+                            completion_prompt,
+                            generation_config=genai.types.GenerationConfig(
+                                max_output_tokens=300,
+                                temperature=0.3,
+                            )
                         )
                         
-                        completion_text = completion_response['choices'][0]['message']['content'].strip()
+                        completion_text = completion_response.text.strip()
                         
                         # Combine original response with completion
                         if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
@@ -3170,21 +3205,28 @@ def gpt_summarize_text(text, target_length=None, max_length=50000):
     reduction_factor = max(0.1, min(0.3, 1 - (target_length / current_length)))
     
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": """You are a text summarization assistant. Your task is to:
+        # NEW: Using Gemini Flash 2.0 instead of GPT-4o-mini
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        full_prompt = f"""You are a text summarization assistant. Your task is to:
 1. Preserve ALL important facts, key concepts, definitions, and essential information
 2. Maintain the original document's structure, sections, and flow
 3. Keep ALL section titles, headers, and subheaders exactly as they appear
 4. Remove only clear redundancies and verbose explanations
-5. Do not add any commentary or content not in the original"""},
-                {"role": "user", "content": f"Please summarize the following text to approximately {target_length} characters while preserving as much original content as possible:\n\n{cleaned_text}"}
-            ],
-            max_tokens=4000
+5. Do not add any commentary or content not in the original
+
+Please summarize the following text to approximately {target_length} characters while preserving as much original content as possible:
+
+{cleaned_text}"""
+
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=4000,
+            )
         )
         
-        summary = response['choices'][0]['message']['content'].strip()
+        summary = response.text.strip()
         percent_reduced = round(((current_length - len(summary)) / current_length) * 100, 1)
         
         return summary, percent_reduced

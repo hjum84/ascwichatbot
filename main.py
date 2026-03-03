@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO, BytesIO
 from sqlalchemy import func, and_
+from sqlalchemy.orm import joinedload
 import markdown2  # Add markdown2 for markdown parsing
 import pytz  # Add pytz for timezone conversion
 import requests  # Add requests for HTTP email provider APIs
@@ -4882,7 +4883,8 @@ def get_existing_users_lo_mapping(db):
     existing_mapping = {}
     
     try:
-        users = db.query(User).all()
+        # Avoid N+1 queries by eager loading LO Root ID associations.
+        users = db.query(User).options(joinedload(User.lo_root_ids)).all()
         for user in users:
             user_lo_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
             existing_mapping[user.email.lower()] = {
@@ -5021,9 +5023,9 @@ def admin_upload_authorized_users_csv():
         return redirect(url_for('admin'))
 
     try:
-        # Read and validate CSV
-        csv_content = file.read().decode('utf-8-sig')
-        df = pd.read_csv(StringIO(csv_content))
+        # Read CSV directly from the uploaded stream to avoid unnecessary copies.
+        df = pd.read_csv(file.stream, dtype=str, keep_default_na=False, encoding='utf-8-sig')
+        df.columns = [str(col).strip().lower() for col in df.columns]
         
         # Validate required columns
         required_columns = ['last_name', 'email', 'status', 'lo_root_id']
@@ -5035,7 +5037,7 @@ def admin_upload_authorized_users_csv():
             return redirect(url_for('admin'))
         
         # Filter for active users
-        active_df = df[df['status'].str.lower() == 'active']
+        active_df = df[df['status'].astype(str).str.strip().str.lower() == 'active']
         if active_df.empty:
             session['admin_message'] = 'Error: No active users found in the CSV file.'
             session['admin_message_type'] = 'error'

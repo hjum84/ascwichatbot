@@ -1,5 +1,6 @@
 import openai  # Kept for potential future use
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 import os
 import datetime
 import smartsheet
@@ -82,7 +83,7 @@ load_dotenv()
 # openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: Using Gemini instead
 
 # Configure Gemini API
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -852,12 +853,12 @@ def get_cached_response(content_hash, user_message, chatbot_code):
         
         close_db(db)
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
         full_prompt = f"{system_prompt}\n\nUser: {user_message}"
         
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=full_prompt,
+            config=genai_types.GenerateContentConfig(
                 max_output_tokens=1500,
                 temperature=0.3,
             )
@@ -865,12 +866,11 @@ def get_cached_response(content_hash, user_message, chatbot_code):
         
         response_content = response.text.strip()
         
-        finish_reason = getattr(response.candidates[0], 'finish_reason', None) if response.candidates else None
-        if finish_reason and str(finish_reason) in ['MAX_TOKENS', '2']:
+        finish_reason = response.candidates[0].finish_reason if response.candidates else None
+        if finish_reason and str(finish_reason) in ['MAX_TOKENS', 'FinishReason.MAX_TOKENS']:
             logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
             
             try:
-                model = genai.GenerativeModel('gemini-2.5-flash')
                 completion_prompt = f"""{system_prompt}
 
 IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
@@ -879,9 +879,10 @@ User: {user_message}
 Assistant: {response_content}
 User: Please complete your previous response with a brief conclusion."""
 
-                completion_response = model.generate_content(
-                    completion_prompt,
-                    generation_config=genai.types.GenerationConfig(
+                completion_response = gemini_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=completion_prompt,
+                    config=genai_types.GenerateContentConfig(
                         max_output_tokens=300,
                         temperature=0.3,
                     )
@@ -2051,24 +2052,23 @@ IMPORTANT GUIDELINES:
 
 CONTENT:
 {program_content.get(current_program, '')}"""
-                model = genai.GenerativeModel('gemini-2.5-flash')
                 full_prompt = f"{system_prompt}\n\nUser: {user_message}"
                 
-                response = model.generate_content(
-                    full_prompt,
-                    generation_config=genai.types.GenerationConfig(
+                response = gemini_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=full_prompt,
+                    config=genai_types.GenerateContentConfig(
                         max_output_tokens=1500,
                         temperature=0.3,
                     )
                 )
                 chatbot_reply = response.text.strip()
                 
-                finish_reason = getattr(response.candidates[0], 'finish_reason', None) if response.candidates else None
-                if finish_reason and str(finish_reason) in ['MAX_TOKENS', '2']:
+                finish_reason = response.candidates[0].finish_reason if response.candidates else None
+                if finish_reason and str(finish_reason) in ['MAX_TOKENS', 'FinishReason.MAX_TOKENS']:
                     logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
                     
                     try:
-                        model = genai.GenerativeModel('gemini-2.5-flash')
                         completion_prompt = f"""{system_prompt}
 
 IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
@@ -2077,9 +2077,10 @@ User: {user_message}
 Assistant: {chatbot_reply}
 User: Please complete your previous response with a brief conclusion."""
 
-                        completion_response = model.generate_content(
-                            completion_prompt,
-                            generation_config=genai.types.GenerationConfig(
+                        completion_response = gemini_client.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=completion_prompt,
+                            config=genai_types.GenerateContentConfig(
                                 max_output_tokens=300,
                                 temperature=0.3,
                             )
@@ -3148,8 +3149,6 @@ def gpt_summarize_text(text, target_length=None, max_length=50000):
     reduction_factor = max(0.1, min(0.3, 1 - (target_length / current_length)))
     
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
         full_prompt = f"""You are a text summarization assistant. Your task is to:
 1. Preserve ALL important facts, key concepts, definitions, and essential information
 2. Maintain the original document's structure, sections, and flow
@@ -3161,9 +3160,10 @@ Please summarize the following text to approximately {target_length} characters 
 
 {cleaned_text}"""
 
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=full_prompt,
+            config=genai_types.GenerateContentConfig(
                 max_output_tokens=4000,
             )
         )

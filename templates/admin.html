@@ -828,7 +828,39 @@
                                                 <div class="form-text">Brief description of the program (will appear on selection page)</div>
                                             </div>
                                             
-                                            <div class="mb-3">
+                                            <!-- Workstream Chatbot toggle -->
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="is_workstream" name="is_workstream">
+                                                <label class="form-check-label" for="is_workstream">
+                                                    Workstream Chatbot (Internal Only)
+                                                </label>
+                                                <div class="form-text">
+                                                    When checked, this chatbot will be listed in the Workstream portal only. The LO Root IDs <code>INTERNAL_PORTAL</code> and <code>WORKSTREAM</code> will be added automatically at creation time.
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Workstream Category Dropdown (only shown when Workstream Chatbot is checked) -->
+                                            <div class="mb-3" id="workstream_category_section" style="display: none;">
+                                                <label for="workstream_category" class="form-label">
+                                                    <i class="bi bi-folder"></i> Workstream Category
+                                                </label>
+                                                <select class="form-select" id="workstream_category" name="workstream_category">
+                                                    <option value="">-- Select Workstream Category --</option>
+                                                    <option value="EVALUATION">Evaluation</option>
+                                                    <option value="PMO">PMO</option>
+                                                    <option value="LMS">LMS</option>
+                                                    <option value="LEARNING_OPERATION">Learning Operation</option>
+                                                    <option value="TAP">TAP</option>
+                                                    <option value="BUDGET_AND_SCOPE">Budget and Scope</option>
+                                                    <option value="COMMUNICATION">Communication</option>
+                                                </select>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i> Select which workstream category this chatbot belongs to. The selected category will be added to LO Root IDs automatically.
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Program Category (only shown when NOT Workstream Chatbot) -->
+                                            <div class="mb-3" id="program_category_section">
                                                 <label for="category" class="form-label">Program Category</label>
                                                 <select class="form-select" id="category" name="category">
                                                     <option value="standard" {% if chatbot is defined and (chatbot.category == 'standard' or not chatbot.category) %}selected{% endif %}>Standard Programs</option>
@@ -838,6 +870,17 @@
                                                     <option value="elearning" {% if chatbot is defined and chatbot.category == 'elearning' %}selected{% endif %}>eLearning</option>
                                                 </select>
                                                 <div class="form-text">Category determines how the program is grouped on the selection page</div>
+                                            </div>
+
+                                            <!-- LO Root IDs (only shown when NOT Workstream Chatbot) -->
+                                            <div class="mb-3" id="lo_root_ids_section">
+                                                <label for="lo_root_ids" class="form-label">
+                                                    <i class="bi bi-shield-lock"></i> LO Root IDs (Access Control)
+                                                </label>
+                                                <textarea class="form-control" id="lo_root_ids" name="lo_root_ids" rows="3" placeholder="Enter LO Root IDs separated by semicolons (optional)"></textarea>
+                                                <div class="form-text">
+                                                    Only users with matching LO Root IDs can access this chatbot. Leave empty to allow access for all users.
+                                                </div>
                                             </div>
                                             
                                             <div class="mb-3">
@@ -881,18 +924,9 @@
                                                 </div>
                                             </div>
                                             
-                                            <div class="mb-3">
-                                                <label for="lo_root_ids" class="form-label">
-                                                    <i class="bi bi-shield-lock"></i> LO Root IDs (Access Control)
-                                                </label>
-                                                <textarea class="form-control" id="lo_root_ids" name="lo_root_ids" rows="3" placeholder="Enter LO Root IDs separated by semicolons (optional)"></textarea>
-                                                <div class="form-text">
-                                                    <strong>Access Control:</strong> Only users with matching LO Root IDs can access this chatbot.<br>
-                                                    <strong>Format:</strong> Enter multiple IDs separated by semicolons (;)<br>
-                                                    <strong>Example:</strong> <code>5f09de4c-51f4-4296-a9aa-55ccb46a7f59;9412df89-80fb-4432-81ce-b521572aba71</code><br>
-                                                    <small class="text-muted">Leave empty to allow access for all users</small>
-                                                </div>
-                                            </div>
+                                            
+
+                                                <!-- Workforce Institute Staff Flag in Add User Modal (user management area already exists; ensure field is present) -->
                                             
                                             <div class="mb-3">
                                                 <label for="char_limit" class="form-label">Character Limit</label>
@@ -1369,6 +1403,7 @@
                                                                     {% endfor %}
                                                                 </select>
                                                             </th>
+                                                            
                                                             </tr>
                                                         </thead>
                                                         <tbody id="userTableBody">
@@ -1385,6 +1420,7 @@
                                                                 <td>{{ user.date_added | to_eastern }}</td>
                                                                 <td>{{ user.expiry_date | to_eastern }}</td>
                                                                 <td>{{ user.lo_root_ids|join(', ') }}</td>
+                                                                
                                                             </tr>
                                                             {% endfor %}
                                                         </tbody>
@@ -1413,6 +1449,10 @@
                                                                     <label for="loRootIds" class="form-label">LO Root IDs (semicolon-separated)</label>
                                                                     <input type="text" class="form-control" id="loRootIds" placeholder="e.g. ID1;ID2;ID3">
                                                                     <div class="form-text">Separate multiple IDs with semicolons (;)</div>
+                                                                </div>
+                                                                <div class="mb-3 form-check">
+                                                                    <input type="checkbox" class="form-check-input" id="isWorkforceInstitute">
+                                                                    <label class="form-check-label" for="isWorkforceInstitute">Workforce Institute Staff</label>
                                                                 </div>
                                                             </form>
                                                         </div>

@@ -10,6 +10,8 @@ import logging
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, make_response, Response, session, flash, send_file
 from functools import wraps
+import os
+from functools import wraps
 import re
 from models import (
     User, UserLORootID, ChatbotContent, ChatbotLORootAssociation, ChatHistory, 
@@ -35,8 +37,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO, BytesIO
 from sqlalchemy import func, and_
+from sqlalchemy.orm import joinedload
 import markdown2  # Add markdown2 for markdown parsing
 import pytz  # Add pytz for timezone conversion
+import requests  # Add requests for HTTP email provider APIs
 
 # Authentication imports
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -82,7 +86,112 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Initialize Flask application
 app = Flask(__name__)
+# Basic auth for Workstream portal
+WORKSTREAM_USERNAME = os.getenv("WORKSTREAM_USERNAME", "workforceinstitutes")
+WORKSTREAM_PASSWORD = os.getenv("WORKSTREAM_PASSWORD", "otwdworkstreams")
+
+def check_workstream_auth(username, password):
+    return username == WORKSTREAM_USERNAME and password == WORKSTREAM_PASSWORD
+
+def authenticate_workstream():
+    return Response(
+        'Could not verify your access level for that URL.\n'
+        'You have to login with proper credentials', 401,
+        {'WWW-Authenticate': 'Basic realm="Workstream Login Required"'}
+    )
+
+def requires_workstream_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_workstream_auth(auth.username, auth.password):
+            return authenticate_workstream()
+        return f(*args, **kwargs)
+    return decorated
+
+# INTERNAL TAG constant for filtering
+INTERNAL_TAG = 'INTERNAL_PORTAL'
+
+@app.route('/workstream_select')
+@requires_workstream_auth
+def workstream_select():
+    user = current_user if 'current_user' in globals() else None
+    db = get_db()
+    try:
+        chatbots = ChatbotContent.get_all_active(db)
+        available_programs = []
+        available_program_codes = []
+        for chatbot in chatbots:
+            chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+            if INTERNAL_TAG not in chatbot_lo_root_ids:
+                continue
+            show_new = False
+            if chatbot.created_at and (datetime.now() - chatbot.created_at).days < 14:
+                show_new = True
+            workstream_categories = []
+            for lo_id in chatbot_lo_root_ids:
+                if lo_id in ['EVALUATION', 'PMO', 'LMS', 'LEARNING_OPERATION', 'TAP', 'BUDGET_AND_SCOPE', 'COMMUNICATION']:
+                    workstream_categories.append(lo_id)
+            category_string = ' '.join(workstream_categories) if workstream_categories else ''
+            program_info = {
+                "code": chatbot.code,
+                "name": chatbot.name,
+                "description": chatbot.description or f"Select a workstream to continue.",
+                "show_new_badge": show_new,
+                "category": category_string
+            }
+            available_programs.append(program_info)
+            available_program_codes.append(chatbot.code)
+        available_programs.sort(key=lambda x: x["name"])
+        return render_template('workstream_portal.html',
+                              available_programs=available_programs,
+                              available_program_codes=available_program_codes,
+                              current_user=user)
+    finally:
+        close_db(db)
+
+@app.route('/internal/set_program/<program>')
+@requires_workstream_auth
+def internal_set_program(program):
+    """Set program for workstream portal - bypasses LO Root ID checks"""
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, program.upper())
+        if not chatbot or not chatbot.is_active:
+            logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('workstream_select'))
+        
+        chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+        if INTERNAL_TAG not in chatbot_lo_root_ids:
+            flash("This program is not part of the Internal Workstream portal.", "warning")
+            close_db(db)
+            return redirect(url_for('workstream_select'))
+        
+        # Set workstream mode flag to bypass LO Root ID checks
+        session['current_program'] = program.upper()
+        session['workstream_mode'] = True
+        db.commit()
+        
+        program_upper = program.upper()
+        if program_upper == "BCC":
+            return redirect(url_for('index_bcc'))
+        elif program_upper == "MI":
+            return redirect(url_for('index_mi'))
+        elif program_upper == "SAFETY":
+            return redirect(url_for('index_safety'))
+        else:
+            return redirect(url_for('index_generic', program=program))
+    except Exception as e:
+        db.rollback()
+        logger.error("Error setting internal program: %s", str(e))
+        return redirect(url_for('workstream_select'))
+    finally:
+        close_db(db)
+
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev_secret_key")  # Add a secret key for session management
+# Ensure SECRET_KEY is available for token generation/verification utilities
+app.config["SECRET_KEY"] = app.secret_key
 
 # Initialize Flask-Login
 login_manager = LoginManager()
@@ -104,6 +213,114 @@ mail = Mail(app)
 
 # Initialize Flask-Bcrypt
 bcrypt = Bcrypt(app)
+
+# Email sending utility that prefers HTTP providers in restricted environments
+def send_email(subject, recipient, html_body):
+    """Send an email using an HTTP provider if configured, otherwise fallback to Flask-Mail.
+
+    Supported providers via environment variables:
+    - EMAIL_PROVIDER=resend: RESEND_API_KEY, RESEND_FROM
+    - EMAIL_PROVIDER=sendgrid: SENDGRID_API_KEY, SENDGRID_FROM
+    - EMAIL_PROVIDER=mailgun: MAILGUN_API_KEY, MAILGUN_DOMAIN, MAILGUN_FROM
+    """
+    provider = os.getenv('EMAIL_PROVIDER', '').strip().lower()
+
+    # Try provider-based sending first if configured
+    if provider:
+        try:
+            if provider == 'resend':
+                api_key = os.getenv('RESEND_API_KEY')
+                from_email = os.getenv('RESEND_FROM') or app.config.get('MAIL_DEFAULT_SENDER')
+                if not api_key or not from_email:
+                    raise ValueError('RESEND_API_KEY or RESEND_FROM not set')
+                resp = requests.post(
+                    'https://api.resend.com/emails',
+                    headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'Content-Type': 'application/json'
+                    },
+                    json={
+                        'from': from_email,
+                        'to': [recipient],
+                        'subject': subject,
+                        'html': html_body,
+                    },
+                    timeout=10,
+                )
+                if 200 <= resp.status_code < 300:
+                    logger.info('✅ Email sent via Resend API')
+                    return True
+                else:
+                    logger.error(f"Resend API error: {resp.status_code} {resp.text}")
+            elif provider == 'sendgrid':
+                api_key = os.getenv('SENDGRID_API_KEY')
+                from_email = os.getenv('SENDGRID_FROM') or app.config.get('MAIL_DEFAULT_SENDER')
+                if not api_key or not from_email:
+                    raise ValueError('SENDGRID_API_KEY or SENDGRID_FROM not set')
+                payload = {
+                    'personalizations': [
+                        {
+                            'to': [{'email': recipient}],
+                            'subject': subject,
+                        }
+                    ],
+                    'from': {'email': from_email},
+                    'content': [
+                        {'type': 'text/html', 'value': html_body}
+                    ],
+                }
+                resp = requests.post(
+                    'https://api.sendgrid.com/v3/mail/send',
+                    headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'Content-Type': 'application/json',
+                    },
+                    json=payload,
+                    timeout=10,
+                )
+                if 200 <= resp.status_code < 300:
+                    logger.info('✅ Email sent via SendGrid API')
+                    return True
+                else:
+                    logger.error(f"SendGrid API error: {resp.status_code} {resp.text}")
+            elif provider == 'mailgun':
+                api_key = os.getenv('MAILGUN_API_KEY')
+                domain = os.getenv('MAILGUN_DOMAIN')
+                from_email = os.getenv('MAILGUN_FROM') or app.config.get('MAIL_DEFAULT_SENDER')
+                if not api_key or not domain or not from_email:
+                    raise ValueError('MAILGUN_API_KEY, MAILGUN_DOMAIN or MAILGUN_FROM not set')
+                url = f'https://api.mailgun.net/v3/{domain}/messages'
+                resp = requests.post(
+                    url,
+                    auth=('api', api_key),
+                    data={
+                        'from': from_email,
+                        'to': [recipient],
+                        'subject': subject,
+                        'html': html_body,
+                    },
+                    timeout=10,
+                )
+                if 200 <= resp.status_code < 300:
+                    logger.info('✅ Email sent via Mailgun API')
+                    return True
+                else:
+                    logger.error(f"Mailgun API error: {resp.status_code} {resp.text}")
+            else:
+                logger.warning(f"Unknown EMAIL_PROVIDER '{provider}', falling back to Flask-Mail")
+        except Exception as e:
+            logger.error(f"Provider-based email send failed: {type(e).__name__}: {e}")
+
+    # Fallback to Flask-Mail (SMTP)
+    try:
+        msg = Message(subject=subject, recipients=[recipient])
+        msg.html = html_body
+        mail.send(msg)
+        logger.info('✅ Email sent via Flask-Mail (SMTP)')
+        return True
+    except Exception as e:
+        logger.error(f"SMTP email send failed: {type(e).__name__}: {e}")
+        return False
 
 # User loader for Flask-Login
 @login_manager.user_loader
@@ -161,15 +378,23 @@ def verify_password_setup_token(token, expiration=86400):
 def send_password_reset_email(email, name):
     """Send password reset email"""
     try:
+        # Log mail configuration for debugging
+        logger.info(f"📧 Attempting to send password reset email to {email}")
+        logger.info(f"MAIL_SERVER: {app.config.get('MAIL_SERVER')}")
+        logger.info(f"MAIL_PORT: {app.config.get('MAIL_PORT')}")
+        logger.info(f"MAIL_USE_TLS: {app.config.get('MAIL_USE_TLS')}")
+        logger.info(f"MAIL_USE_SSL: {app.config.get('MAIL_USE_SSL')}")
+        logger.info(f"MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
+        logger.info(f"MAIL_PASSWORD set: {bool(app.config.get('MAIL_PASSWORD'))}")
+        logger.info(f"SECRET_KEY set: {bool(app.config.get('SECRET_KEY'))}")
+        
         token = generate_reset_token(email)
+        logger.info(f"✅ Token generated successfully")
+        
         reset_url = url_for('reset_password', token=token, _external=True)
+        logger.info(f"✅ Reset URL generated: {reset_url[:50]}...")
         
-        msg = Message(
-            subject='Password Reset Request',
-            recipients=[email]
-        )
-        
-        msg.html = f"""
+        html_body = f"""
         <h2>Password Reset Request</h2>
         <p>Hi {name},</p>
         <p>You requested a password reset for your account. Click the link below to reset your password:</p>
@@ -178,12 +403,20 @@ def send_password_reset_email(email, name):
         <p>If you didn't request this reset, please ignore this email.</p>
         <p>Best regards,<br>ACS Chatbot System</p>
         """
-        
-        mail.send(msg)
-        logger.info(f"Password reset email sent to {email}")
-        return True
+
+        logger.info("📨 Attempting to send password reset email...")
+        if send_email('Password Reset Request', email, html_body):
+            logger.info(f"✅ Password reset email sent successfully to {email}")
+            return True
+        else:
+            logger.error(f"❌ All email send methods failed for {email}")
+            return False
     except Exception as e:
-        logger.error(f"Failed to send password reset email to {email}: {e}")
+        logger.error(f"❌ Failed to send password reset email to {email}")
+        logger.error(f"❌ Error type: {type(e).__name__}")
+        logger.error(f"❌ Error details: {str(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         return False
 
 def send_password_setup_email(email, name, is_admin_added=False):
@@ -191,18 +424,13 @@ def send_password_setup_email(email, name, is_admin_added=False):
     try:
         token = generate_password_setup_token(email)
         setup_url = url_for('setup_password', token=token, _external=True)
-        
-        msg = Message(
-            subject='Set Up Your Account Password',
-            recipients=[email]
-        )
-        
+
         if is_admin_added:
             intro = f"<p>Hi {name},</p><p>An account has been created for you by an administrator."
         else:
             intro = f"<p>Hi {name},</p><p>Welcome! Your account has been verified."
-        
-        msg.html = f"""
+
+        html_body = f"""
         <h2>Set Up Your Password</h2>
         {intro} Please set up your password to access the ACS Chatbot System:</p>
         <p><a href="{setup_url}">Set Up Password</a></p>
@@ -210,10 +438,13 @@ def send_password_setup_email(email, name, is_admin_added=False):
         <p>Once you set up your password, you can log in using your email and password.</p>
         <p>Best regards,<br>ACS Chatbot System</p>
         """
-        
-        mail.send(msg)
-        logger.info(f"Password setup email sent to {email}")
-        return True
+
+        if send_email('Set Up Your Account Password', email, html_body):
+            logger.info(f"Password setup email sent to {email}")
+            return True
+        else:
+            logger.error(f"All email send methods failed for setup email to {email}")
+            return False
     except Exception as e:
         logger.error(f"Failed to send password setup email to {email}: {e}")
         return False
@@ -804,6 +1035,50 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# --- Admin-only SMTP test endpoints ---
+@app.route('/admin/test_email', methods=['POST'])
+@requires_auth
+def admin_test_email():
+    """Send a simple SMTP test email to verify mail credentials."""
+    try:
+        to = request.form.get('to') or app.config.get('MAIL_USERNAME')
+        subject = request.form.get('subject') or 'SMTP test'
+        body = request.form.get('body') or 'SMTP ok'
+        msg = Message(subject=subject, recipients=[to])
+        msg.body = body
+        msg.sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_USERNAME')
+        mail.send(msg)
+        return jsonify({
+            'success': True,
+            'message': f'sent to {to}',
+            'mail': {
+                'server': app.config.get('MAIL_SERVER'),
+                'port': app.config.get('MAIL_PORT'),
+                'tls': app.config.get('MAIL_USE_TLS'),
+                'ssl': app.config.get('MAIL_USE_SSL'),
+                'sender': msg.sender
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/admin/test_password_reset', methods=['POST'])
+@requires_auth
+def admin_test_password_reset():
+    """Send a password reset email to a target address to validate token + delivery."""
+    try:
+        target = request.form.get('email') or app.config.get('MAIL_USERNAME')
+        name = request.form.get('name') or 'User'
+        ok = send_password_reset_email(target, name)
+        return jsonify({
+            'success': ok,
+            'target': target,
+            'secret_key_present': bool(app.config.get('SECRET_KEY')),
+            'note': 'Check inbox/spam; token link expires in 1 hour.'
+        }), (200 if ok else 500)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # --- Smartsheet Integration Setup ---
 SMARTSHEET_ACCESS_TOKEN = os.getenv("SMARTSHEET_ACCESS_TOKEN")
 SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID")
@@ -1236,6 +1511,13 @@ def setup_password(token):
 @login_required
 def program_select():
     # Verify user is logged in (handled by decorator)
+    # Ensure we are NOT in workstream mode when visiting public program select
+    try:
+        if session.get('workstream_mode'):
+            session.pop('workstream_mode', None)
+    except Exception:
+        # Safe guard: do not block rendering if session is not available
+        pass
     user_id = current_user.id
     user = current_user  # Get current user object
     
@@ -1248,6 +1530,10 @@ def program_select():
         available_program_codes = []
         
         for chatbot in chatbots:
+            # Exclude internal workstream chatbots from public list
+            chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+            if INTERNAL_TAG in chatbot_lo_root_ids:
+                continue
             # Check if user has access to this chatbot
             if has_chatbot_access(user_id, chatbot.code):
                 # Determine if NEW badge should be shown
@@ -1287,6 +1573,12 @@ def program_select():
 @app.route('/set_program/<program>')
 @login_required
 def set_program(program):
+    # Always reset workstream flag when selecting a public program
+    try:
+        if session.get('workstream_mode'):
+            session.pop('workstream_mode', None)
+    except Exception:
+        pass
     # Verify if content exists for this program in the database
     user_id = current_user.id
     
@@ -1295,6 +1587,12 @@ def set_program(program):
         chatbot = ChatbotContent.get_by_code(db, program.upper())
         if not chatbot or not chatbot.is_active:
             logger.warning(f"Attempt to access non-existent program: {program}")
+            close_db(db)
+            return redirect(url_for('program_select'))
+        # Prevent accessing internal workstream chatbots via public route
+        chatbot_lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+        if INTERNAL_TAG in chatbot_lo_root_ids:
+            flash("This program is available only in the Internal Workstream portal.", "warning")
             close_db(db)
             return redirect(url_for('program_select'))
         
@@ -1427,11 +1725,22 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
 @login_required
 def index_bcc():
     user_id = current_user.id
-    
-    # Check access for BCC program
-    if not has_chatbot_access(user_id, 'BCC'):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    # Workstream mode bypass: allow if chatbot is internal
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, 'BCC')
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        # Normal portal: enforce LO Root ID access
+        if not has_chatbot_access(user_id, 'BCC'):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'BCC')
     deletion_warning = get_deletion_warning_for_user(user_id, 'BCC')
@@ -1452,11 +1761,20 @@ def index_bcc():
 @login_required
 def index_mi():
     user_id = current_user.id
-    
-    # Check access for MI program
-    if not has_chatbot_access(user_id, 'MI'):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, 'MI')
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        if not has_chatbot_access(user_id, 'MI'):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'MI')
     deletion_warning = get_deletion_warning_for_user(user_id, 'MI')
@@ -1477,11 +1795,20 @@ def index_mi():
 @login_required
 def index_safety():
     user_id = current_user.id
-    
-    # Check access for Safety program
-    if not has_chatbot_access(user_id, 'S&R'):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, 'S&R')
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        if not has_chatbot_access(user_id, 'S&R'):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'S&R')
     deletion_warning = get_deletion_warning_for_user(user_id, 'S&R')
@@ -1501,11 +1828,22 @@ def index_safety():
 @app.route('/index_generic/<program>')
 @login_required
 def index_generic(program):
-    # Check if user has access to this program
+    # Check access, with workstream bypass for INTERNAL_PORTAL chatbots
     user_id = current_user.id
-    if not has_chatbot_access(user_id, program):
-        flash("You don't have access to this chatbot program.", "error")
-        return redirect(url_for('program_select'))
+    if session.get('workstream_mode', False):
+        db_tmp = get_db()
+        try:
+            cb = ChatbotContent.get_by_code(db_tmp, program.upper())
+            cb_tags = [assoc.lo_root_id for assoc in cb.lo_root_ids] if cb else []
+            if INTERNAL_TAG not in cb_tags:
+                flash("You don't have access to this chatbot program.", "error")
+                return redirect(url_for('program_select'))
+        finally:
+            close_db(db_tmp)
+    else:
+        if not has_chatbot_access(user_id, program):
+            flash("You don't have access to this chatbot program.", "error")
+            return redirect(url_for('program_select'))
     
     # Check if the program exists in our chatbot content
     if program not in program_content:
@@ -1528,12 +1866,21 @@ def index_generic(program):
         # Get all active chatbots from database instead of using program_content
         active_chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == True).all()
         for chatbot in active_chatbots:
-            if has_chatbot_access(user_id, chatbot.code):
-                all_available_chatbots.append({
-                    'code': chatbot.code,
-                    'name': chatbot.name,
-                    'category': chatbot.category or 'standard'
-                })
+            if session.get('workstream_mode', False):
+                tags = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
+                if INTERNAL_TAG in tags:
+                    all_available_chatbots.append({
+                        'code': chatbot.code,
+                        'name': chatbot.name,
+                        'category': chatbot.category or 'standard'
+                    })
+            else:
+                if has_chatbot_access(user_id, chatbot.code):
+                    all_available_chatbots.append({
+                        'code': chatbot.code,
+                        'name': chatbot.name,
+                        'category': chatbot.category or 'standard'
+                    })
     finally:
             close_db(db)
     
@@ -1836,6 +2183,9 @@ def clear_chat_history():
 @app.route('/switch_program')
 @login_required
 def switch_program():
+    # If currently in workstream mode, send to workstream_select; otherwise program_select
+    if session.get('workstream_mode', False):
+        return redirect(url_for('workstream_select'))
     return redirect(url_for('program_select'))
 
 # Logout route
@@ -2843,7 +3193,14 @@ def admin_upload():
         display_name = request.form.get('display_name')
         description = request.form.get('description', '')
         category = request.form.get('category', 'standard')
+        # Workstream flags from form
+        is_workstream_flag_raw = request.form.get('is_workstream')
+        is_workstream_flag = str(is_workstream_flag_raw).lower() in ['1', 'true', 'on', 'yes']
+        workstream_category = (request.form.get('workstream_category') or '').strip()
         intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.')
+        # If marked as workstream and intro message is still the default program phrasing, switch it to workstream phrasing
+        if is_workstream_flag and intro_message.strip() == 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.':
+            intro_message = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.'
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
@@ -3038,6 +3395,15 @@ def admin_upload():
                     db.add(association)
         else:
             logger.info("No LO Root IDs specified - chatbot will be accessible to all users")
+
+        # If Workstream chatbot, enforce INTERNAL/WORKSTREAM tags and optional category tag
+        if is_workstream_flag:
+            enforced_tags = [INTERNAL_TAG, 'WORKSTREAM']
+            if workstream_category:
+                enforced_tags.append(workstream_category)
+            logger.info(f"Workstream chatbot detected - enforcing tags: {enforced_tags}")
+            for tag in enforced_tags:
+                db.add(ChatbotLORootAssociation(chatbot_id=new_chatbot.id, lo_root_id=tag))
         
         db.commit()
         
@@ -4458,7 +4824,8 @@ def get_existing_users_lo_mapping(db):
     existing_mapping = {}
     
     try:
-        users = db.query(User).all()
+        # Avoid N+1 queries by eager loading LO Root ID associations.
+        users = db.query(User).options(joinedload(User.lo_root_ids)).all()
         for user in users:
             user_lo_ids = [assoc.lo_root_id for assoc in user.lo_root_ids]
             existing_mapping[user.email.lower()] = {
@@ -4597,9 +4964,9 @@ def admin_upload_authorized_users_csv():
         return redirect(url_for('admin'))
 
     try:
-        # Read and validate CSV
-        csv_content = file.read().decode('utf-8-sig')
-        df = pd.read_csv(StringIO(csv_content))
+        # Read CSV directly from the uploaded stream to avoid unnecessary copies.
+        df = pd.read_csv(file.stream, dtype=str, keep_default_na=False, encoding='utf-8-sig')
+        df.columns = [str(col).strip().lower() for col in df.columns]
         
         # Validate required columns
         required_columns = ['last_name', 'email', 'status', 'lo_root_id']
@@ -4611,7 +4978,7 @@ def admin_upload_authorized_users_csv():
             return redirect(url_for('admin'))
         
         # Filter for active users
-        active_df = df[df['status'].str.lower() == 'active']
+        active_df = df[df['status'].astype(str).str.strip().str.lower() == 'active']
         if active_df.empty:
             session['admin_message'] = 'Error: No active users found in the CSV file.'
             session['admin_message_type'] = 'error'

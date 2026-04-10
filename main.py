@@ -1,4 +1,5 @@
-import openai
+import openai  # Kept for potential future use
+import google.generativeai as genai
 import os
 import datetime
 import smartsheet
@@ -12,7 +13,7 @@ from functools import wraps
 import re
 from models import (
     User, UserLORootID, ChatbotContent, ChatbotLORootAssociation, ChatHistory, 
-    AuthorizedUser, get_db, close_db, Base, engine
+    AuthorizedUser, get_db, close_db, Base, engine, DB_TYPE
 )
 import werkzeug
 import glob
@@ -74,7 +75,10 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: Using Gemini instead
+
+# Configure Gemini API
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -457,42 +461,11 @@ def get_content_hash(content):
 
 def get_embedding(text):
     """
-    Generate OpenAI embedding for the text.
-    Results are cached to prevent duplicate API calls for the same text.
+    Embedding generation disabled - using Gemini which doesn't need separate embeddings for caching.
+    The similarity-based caching is bypassed; each question gets a fresh Gemini response.
     """
-    # Basic preprocessing: lowercase, normalize whitespace
-    normalized_text = re.sub(r'\s+', ' ', text.lower()).strip()
-    
-    # Check if embedding already exists in cache
-    if normalized_text in embedding_cache:
-        logger.debug(f"Embedding cache hit for: {normalized_text[:30]}...")
-        return embedding_cache[normalized_text]
-    
-    try:
-        # Call OpenAI embedding API
-        response = openai.Embedding.create(
-            model="text-embedding-3-small",
-            input=normalized_text
-        )
-        # Ensure embedding is a standard list to avoid method_descriptor errors
-        embedding = list(response['data'][0]['embedding'])
-        
-        # Store in cache
-        with embedding_lock:
-            embedding_cache[normalized_text] = embedding
-            
-            # Limit cache size (optional)
-            if len(embedding_cache) > 10000:
-                # Remove oldest entry
-                oldest_key = next(iter(embedding_cache))
-                embedding_cache.pop(oldest_key)
-        
-        logger.debug(f"Generated embedding for: {normalized_text[:30]}...")
-        return embedding
-    
-    except Exception as e:
-        logger.error(f"Error generating embedding: {str(e)}")
-        return None
+    logger.debug(f"Embedding generation disabled - returning None")
+    return None
 
 def find_similar_question(user_message, content_hash, chatbot_code):
     """
@@ -647,48 +620,50 @@ def get_cached_response(content_hash, user_message, chatbot_code):
             )
         
         close_db(db)
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=1500,  # Increased from 500 to 1500
-            temperature=0.3   # Added for more creative responses
+        
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        full_prompt = f"{system_prompt}\n\nUser: {user_message}"
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=1500,
+                temperature=0.3,
+            )
         )
         
-        # Get the response content
-        response_content = response['choices'][0]['message']['content'].strip()
+        response_content = response.text.strip()
         
-        # Check if response was cut off and try to complete it naturally
-        if response['choices'][0]['finish_reason'] == 'length':
+        finish_reason = getattr(response.candidates[0], 'finish_reason', None) if response.candidates else None
+        if finish_reason and str(finish_reason) in ['MAX_TOKENS', '2']:
             logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
             
             try:
-                # Try to complete the response with a shorter follow-up
-                completion_response = openai.ChatCompletion.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": f"{system_prompt}\n\nIMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion."},
-                        {"role": "user", "content": user_message},
-                        {"role": "assistant", "content": response_content},
-                        {"role": "user", "content": "Please complete your previous response with a brief conclusion."}
-                    ],
-                    max_tokens=300,  # Shorter completion
-                    temperature=0.3
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                completion_prompt = f"""{system_prompt}
+
+IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
+
+User: {user_message}
+Assistant: {response_content}
+User: Please complete your previous response with a brief conclusion."""
+
+                completion_response = model.generate_content(
+                    completion_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        max_output_tokens=300,
+                        temperature=0.3,
+                    )
                 )
                 
-                completion_text = completion_response['choices'][0]['message']['content'].strip()
+                completion_text = completion_response.text.strip()
                 
-                # Combine original response with completion
                 if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
                     response_content = response_content + " " + completion_text
                 else:
-                    # If completion failed, add a natural ending
                     response_content = response_content + "\n\n[Response continues with additional details available in the program content]"
             except Exception as completion_error:
                 logger.error(f"Error completing truncated response: {str(completion_error)}")
-                # Add a natural ending if completion fails
                 response_content = response_content + "\n\n[Response continues with additional details available in the program content]"
         
         return response_content
@@ -1729,46 +1704,48 @@ IMPORTANT GUIDELINES:
 
 CONTENT:
 {program_content.get(current_program, '')}"""
-                response = openai.ChatCompletion.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message}
-                    ],
-                    max_tokens=1500,  # Increased from 500 to 1500
-                    temperature=0.3   # Added for more creative responses
-                )
-                chatbot_reply = response['choices'][0]['message']['content'].strip()
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                full_prompt = f"{system_prompt}\n\nUser: {user_message}"
                 
-                # Check if response was cut off and try to complete it naturally
-                if response['choices'][0]['finish_reason'] == 'length':
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        max_output_tokens=1500,
+                        temperature=0.3,
+                    )
+                )
+                chatbot_reply = response.text.strip()
+                
+                finish_reason = getattr(response.candidates[0], 'finish_reason', None) if response.candidates else None
+                if finish_reason and str(finish_reason) in ['MAX_TOKENS', '2']:
                     logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
                     
                     try:
-                        # Try to complete the response with a shorter follow-up
-                        completion_response = openai.ChatCompletion.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": f"{system_prompt}\n\nIMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion."},
-                                {"role": "user", "content": user_message},
-                                {"role": "assistant", "content": chatbot_reply},
-                                {"role": "user", "content": "Please complete your previous response with a brief conclusion."}
-                            ],
-                            max_tokens=300,  # Shorter completion
-                            temperature=0.3
+                        model = genai.GenerativeModel('gemini-2.5-flash')
+                        completion_prompt = f"""{system_prompt}
+
+IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
+
+User: {user_message}
+Assistant: {chatbot_reply}
+User: Please complete your previous response with a brief conclusion."""
+
+                        completion_response = model.generate_content(
+                            completion_prompt,
+                            generation_config=genai.types.GenerationConfig(
+                                max_output_tokens=300,
+                                temperature=0.3,
+                            )
                         )
                         
-                        completion_text = completion_response['choices'][0]['message']['content'].strip()
+                        completion_text = completion_response.text.strip()
                         
-                        # Combine original response with completion
                         if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
                             chatbot_reply = chatbot_reply + " " + completion_text
                         else:
-                            # If completion failed, add a natural ending
                             chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
                     except Exception as completion_error:
                         logger.error(f"Error completing truncated response: {str(completion_error)}")
-                        # Add a natural ending if completion fails
                         chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
             except Exception as e:
                 logger.error(f"Error getting new response: {str(e)}")
@@ -2697,7 +2674,7 @@ def admin_preview_upload():
             # Show API usage cost warning to the admin BEFORE summarization
             pre_warning = ""
             if original_content_length > 10000:
-                pre_warning = f"Warning: Summarizing this content with GPT-4o-mini may cost approximately ${estimated_cost:.2f} (input: {estimated_tokens:.0f} tokens, output: {output_tokens:.0f} tokens). Proceeding will use your OpenAI API quota."
+                pre_warning = f"Note: Summarizing this content with Gemini (estimated {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens). Using free Gemini API."
                 logger.info(pre_warning)
                 warning_message = pre_warning  # Show this warning before summarization
             
@@ -2709,8 +2686,8 @@ def admin_preview_upload():
             output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
             estimated_cost = estimated_cost + output_cost
             if original_content_length > 10000:  # Only show warning for larger content
-                api_usage_warning = f"Note: Using GPT-4o-mini for summarization will cost approximately ${estimated_cost:.2f} for this content."
-                logger.info(f"Showing API cost warning: ${estimated_cost:.2f} for {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
+                api_usage_warning = f"Note: Using Gemini for summarization (free). Estimated tokens: {estimated_tokens:.0f} input, {output_tokens:.0f} output."
+                logger.info(f"Gemini summarization: {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
                 
             # Apply GPT summarization with fallback to rule-based summarization
             combined_preview_content, percent_reduced = gpt_summarize_text(
@@ -2821,27 +2798,33 @@ def gpt_summarize_text(text, target_length=None, max_length=50000):
     reduction_factor = max(0.1, min(0.3, 1 - (target_length / current_length)))
     
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": """You are a text summarization assistant. Your task is to:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        full_prompt = f"""You are a text summarization assistant. Your task is to:
 1. Preserve ALL important facts, key concepts, definitions, and essential information
 2. Maintain the original document's structure, sections, and flow
 3. Keep ALL section titles, headers, and subheaders exactly as they appear
 4. Remove only clear redundancies and verbose explanations
-5. Do not add any commentary or content not in the original"""},
-                {"role": "user", "content": f"Please summarize the following text to approximately {target_length} characters while preserving as much original content as possible:\n\n{cleaned_text}"}
-            ],
-            max_tokens=4000
+5. Do not add any commentary or content not in the original
+
+Please summarize the following text to approximately {target_length} characters while preserving as much original content as possible:
+
+{cleaned_text}"""
+
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=4000,
+            )
         )
         
-        summary = response['choices'][0]['message']['content'].strip()
+        summary = response.text.strip()
         percent_reduced = round(((current_length - len(summary)) / current_length) * 100, 1)
         
         return summary, percent_reduced
         
     except Exception as e:
-        logger.error(f"Error in GPT summarization: {e}")
+        logger.error(f"Error in Gemini summarization: {e}")
         return smart_text_summarization(text, target_length, max_length), 0
 
 @app.route('/admin/upload', methods=['POST'])
@@ -2973,8 +2956,8 @@ def admin_upload():
                 output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
                 estimated_cost = estimated_cost + output_cost
                 if original_length > 10000:  # Only show warning for larger content
-                    api_usage_warning = f"Note: Using GPT-4o-mini for summarization will cost approximately ${estimated_cost:.2f} for this content."
-                    logger.info(f"API cost: ${estimated_cost:.2f} for {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
+                    api_usage_warning = f"Note: Using Gemini for summarization (free). Estimated tokens: {estimated_tokens:.0f} input, {output_tokens:.0f} output."
+                    logger.info(f"Gemini summarization: {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
                 
                 # Apply GPT summarization with fallback to rule-based summarization
                 final_content, percent_reduced = gpt_summarize_text(final_content, target_length=int(char_limit * 0.95), max_length=char_limit)
@@ -3486,8 +3469,8 @@ def admin_update_chatbot_content():
                 output_cost = (output_tokens / 1_000_000) * 0.60  # $0.60 per 1M output tokens
                 estimated_cost = estimated_cost + output_cost
                 if original_length > 10000:  # Only show warning for larger content
-                    api_usage_warning = f"Note: Using GPT-4o-mini for summarization will cost approximately ${estimated_cost:.2f} for this content."
-                    logger.info(f"API cost: ${estimated_cost:.2f} for {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
+                    api_usage_warning = f"Note: Using Gemini for summarization (free). Estimated tokens: {estimated_tokens:.0f} input, {output_tokens:.0f} output."
+                    logger.info(f"Gemini summarization: {estimated_tokens:.0f} input tokens, {output_tokens:.0f} output tokens")
                 
                 # Apply GPT summarization with fallback to rule-based summarization
                 content, percent_reduced = gpt_summarize_text(content, target_length=int(char_limit * 0.95), max_length=char_limit)
@@ -4905,16 +4888,26 @@ def admin_remove_duplicates():
         logger.info(f"Starting duplicate removal: {initial_duplicates} duplicates found")
         
         # Remove duplicates using SQL (keep the record with the lowest ID)
-        duplicate_removal_sql = text("""
-            DELETE FROM authorized_users 
-            WHERE id NOT IN (
-                SELECT min_id FROM (
-                    SELECT MIN(id) as min_id
+        if DB_TYPE == "sqlite":
+            duplicate_removal_sql = text("""
+                DELETE FROM authorized_users 
+                WHERE id NOT IN (
+                    SELECT MIN(id)
                     FROM authorized_users 
                     GROUP BY email
-                ) AS subquery
-            )
-        """)
+                )
+            """)
+        else:
+            duplicate_removal_sql = text("""
+                DELETE FROM authorized_users 
+                WHERE id NOT IN (
+                    SELECT min_id FROM (
+                        SELECT MIN(id) as min_id
+                        FROM authorized_users 
+                        GROUP BY email
+                    ) AS subquery
+                )
+            """)
         
         result = db.execute(duplicate_removal_sql)
         removed_count = result.rowcount
@@ -4953,8 +4946,30 @@ def admin_security_audit():
     db = get_db()
     try:
         from sqlalchemy import text, func
-        
-        # 1. Get basic connection statistics (lightweight query)
+
+        if DB_TYPE == "sqlite":
+            audit_result = {
+                'timestamp': datetime.now().isoformat(),
+                'security_status': 'good',
+                'threat_level': 'low',
+                'alerts': [],
+                'statistics': {
+                    'total_connections': 1,
+                    'external_connections': 0,
+                    'active_queries': 0,
+                    'long_connections': 0,
+                    'current_backends': 1,
+                    'rollback_ratio': 0,
+                    'deadlocks': 0,
+                    'recent_inserts': 0,
+                    'recent_deletes': 0
+                },
+                'database_type': 'SQLite (local file)',
+                'note': 'SQLite runs locally - connection-level security auditing is not applicable.'
+            }
+            return jsonify({'success': True, 'audit': audit_result})
+
+        # PostgreSQL path
         connection_stats = db.execute(text("""
             SELECT 
                 COUNT(*) as total_connections,
@@ -4970,77 +4985,51 @@ def admin_security_audit():
             WHERE pid != pg_backend_pid()
         """)).fetchone()
         
-        # 2. Get database activity summary (lightweight)
         db_activity = db.execute(text("""
-            SELECT 
-                numbackends,
-                xact_commit,
-                xact_rollback,
-                deadlocks,
-                conflicts
-            FROM pg_stat_database 
-            WHERE datname = current_database()
+            SELECT numbackends, xact_commit, xact_rollback, deadlocks, conflicts
+            FROM pg_stat_database WHERE datname = current_database()
         """)).fetchone()
         
-        # 3. Check for suspicious patterns (very lightweight)
         suspicious_patterns = db.execute(text("""
             SELECT 
                 COUNT(CASE WHEN client_addr IS NOT NULL THEN 1 END) as ip_count,
                 COUNT(DISTINCT client_addr) as unique_ips,
                 MAX(EXTRACT(EPOCH FROM (now() - backend_start))) as max_connection_age
-            FROM pg_stat_activity 
-            WHERE pid != pg_backend_pid()
+            FROM pg_stat_activity WHERE pid != pg_backend_pid()
         """)).fetchone()
         
-        # 4. Get recent table activity (authorized_users only for security focus)
         table_activity = db.execute(text("""
-            SELECT 
-                n_tup_ins as inserts,
-                n_tup_del as deletes,
-                n_dead_tup as dead_tuples
-            FROM pg_stat_user_tables 
-            WHERE relname = 'authorized_users'
+            SELECT n_tup_ins as inserts, n_tup_del as deletes, n_dead_tup as dead_tuples
+            FROM pg_stat_user_tables WHERE relname = 'authorized_users'
         """)).fetchone()
         
-        # Analyze results and determine security status
         security_alerts = []
         threat_level = "low"
         
-        # Check for external connections
-        if connection_stats[1] > 0:  # external_connections
+        if connection_stats[1] > 0:
             security_alerts.append("External connections detected")
             threat_level = "medium"
-        
-        # Check for too many connections
-        if connection_stats[0] > 20:  # total_connections
+        if connection_stats[0] > 20:
             security_alerts.append("High connection count")
             threat_level = "medium"
-        
-        # Check for long-running connections
-        if connection_stats[3] > 0:  # long_connections
+        if connection_stats[3] > 0:
             security_alerts.append("Long-running connections detected")
             if threat_level == "low":
                 threat_level = "medium"
         
-        # Check rollback ratio
         rollback_ratio = 0
-        if db_activity[1] > 0:  # commits > 0
-            rollback_ratio = db_activity[2] / db_activity[1]  # rollbacks / commits
-            if rollback_ratio > 0.15:  # More than 15% rollbacks
+        if db_activity[1] > 0:
+            rollback_ratio = db_activity[2] / db_activity[1]
+            if rollback_ratio > 0.15:
                 security_alerts.append("High transaction rollback ratio")
                 threat_level = "medium"
-        
-        # Check for deadlocks
-        if db_activity[3] > 0:  # deadlocks
+        if db_activity[3] > 0:
             security_alerts.append("Database deadlocks detected")
             threat_level = "high"
-        
-        # Check for conflicts
-        if db_activity[4] > 0:  # conflicts
+        if db_activity[4] > 0:
             security_alerts.append("Database conflicts detected")
             threat_level = "medium"
         
-        # Prepare safe response (no sensitive info)
         audit_result = {
             'timestamp': datetime.now().isoformat(),
             'security_status': 'good' if threat_level == 'low' else 'attention_needed',
@@ -5059,13 +5048,8 @@ def admin_security_audit():
             }
         }
         
-        # Log only non-sensitive summary
         logger.info(f"Security audit completed: {threat_level} threat level, {len(security_alerts)} alerts")
-        
-        return jsonify({
-            'success': True,
-            'audit': audit_result
-        })
+        return jsonify({'success': True, 'audit': audit_result})
         
     except Exception as e:
         logger.error(f"Security audit error: {str(e)}")

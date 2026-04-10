@@ -11,19 +11,34 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import timedelta
 load_dotenv()
 
-# Get the database URL from your Render environment
+# Get the database URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")
-print("DATABASE_URL =", DATABASE_URL)
 
-# Create an engine with proper connection handling 
-engine = create_engine(
-    DATABASE_URL, 
-    pool_pre_ping=True,
-    pool_recycle=1800,  # 30 minutes
-    pool_size=10,
-    max_overflow=20,
-    echo=False  # Set to True for SQL debugging
-)
+# Determine database type and create engine
+if DATABASE_URL and (DATABASE_URL.startswith("postgres") or DATABASE_URL.startswith("cockroach")):
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    DB_TYPE = "postgresql"
+    print(f"DATABASE_URL = (PostgreSQL remote database)")
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_size=10,
+        max_overflow=20,
+        echo=False
+    )
+else:
+    DB_TYPE = "sqlite"
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    SQLITE_PATH = os.path.join(BASE_DIR, "chatbot.db")
+    DATABASE_URL = f"sqlite:///{SQLITE_PATH}"
+    print(f"DATABASE_URL = {DATABASE_URL} (SQLite - free local file)")
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        echo=False
+    )
 
 # Create scoped session to ensure thread safety
 session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -224,16 +239,26 @@ class AuthorizedUser(Base):
             
             # Step 4: Safety check - remove any duplicates that might have slipped through
             from sqlalchemy import text
-            duplicate_removal_sql = text("""
-                DELETE FROM authorized_users 
-                WHERE id NOT IN (
-                    SELECT min_id FROM (
-                        SELECT MIN(id) as min_id
+            if DB_TYPE == "sqlite":
+                duplicate_removal_sql = text("""
+                    DELETE FROM authorized_users 
+                    WHERE id NOT IN (
+                        SELECT MIN(id)
                         FROM authorized_users 
                         GROUP BY email
-                    ) AS subquery
-                )
-            """)
+                    )
+                """)
+            else:
+                duplicate_removal_sql = text("""
+                    DELETE FROM authorized_users 
+                    WHERE id NOT IN (
+                        SELECT min_id FROM (
+                            SELECT MIN(id) as min_id
+                            FROM authorized_users 
+                            GROUP BY email
+                        ) AS subquery
+                    )
+                """)
             
             result = db.execute(duplicate_removal_sql)
             duplicates_removed = result.rowcount

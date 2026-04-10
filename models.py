@@ -26,7 +26,8 @@ if DATABASE_URL and (DATABASE_URL.startswith("postgres") or DATABASE_URL.startsw
         pool_recycle=1800,
         pool_size=10,
         max_overflow=20,
-        echo=False
+        echo=False,
+        connect_args={"sslmode": "require"}
     )
 else:
     DB_TYPE = "sqlite"

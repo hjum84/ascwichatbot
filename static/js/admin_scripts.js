@@ -614,6 +614,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         document.getElementById('editCharLimit').value = data.char_limit;
                         document.getElementById('charLimitDisplay').textContent = data.char_limit.toLocaleString();
                         document.getElementById('editSystemPromptGuidelines').value = data.system_prompt_guidelines || '';
+                        const editChatbotMode = document.getElementById('editChatbotMode');
+                        if (editChatbotMode) {
+                            const normalizedMode = (data.chatbot_mode === 'critical_thinking_agent')
+                                ? 'agent_mode'
+                                : (data.chatbot_mode || 'knowledge_retrieval');
+                            editChatbotMode.value = normalizedMode;
+                        }
+                        const editAiModel = document.getElementById('editAiModel');
+                        if (editAiModel) {
+                            editAiModel.value = data.ai_model || 'gemini-2.5-flash';
+                        }
                         updateCharCount();
                     } else {
                         contentTextarea.value = 'Error: ' + (data.error || 'Failed to load content');
@@ -644,6 +655,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const appendContent = document.getElementById('appendContent').checked;
         const autoSummarize = document.getElementById('editAutoSummarize').checked;
         const systemPromptGuidelines = document.getElementById('editSystemPromptGuidelines').value;
+        const chatbotModeEl = document.getElementById('editChatbotMode');
+        const aiModelEl = document.getElementById('editAiModel');
+        const chatbotMode = chatbotModeEl ? chatbotModeEl.value : '';
+        const aiModel = aiModelEl ? aiModelEl.value : '';
         const saveButton = this;
         
         if (!chatbotCode) {
@@ -687,6 +702,12 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('char_limit', charLimit);
         formData.append('append_content', 'false'); // When editing, we're replacing content, not appending
         formData.append('system_prompt_guidelines', systemPromptGuidelines);
+        if (chatbotMode) {
+            formData.append('chatbot_mode', chatbotMode);
+        }
+        if (aiModel) {
+            formData.append('ai_model', aiModel);
+        }
         
         // Only enable auto-summarize when content exceeds limit
         const contentExceedsLimit = newContent.length > parseInt(charLimit);
@@ -1327,6 +1348,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.innerHTML = originalText;
                 this.disabled = false;
                 alert('Network error while updating intro message. Please try again.');
+            });
+        });
+    });
+
+    // Advanced settings: update chatbot conversation mode + AI model
+    document.querySelectorAll('.update-chatbot-mode-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const form = this.closest('.update-chatbot-mode-form');
+            const chatbotName = form.querySelector('.chatbot-name').value;
+            const chatbotMode = form.querySelector('.chatbot-mode-field').value;
+            const aiModel = form.querySelector('.ai-model-field').value.trim() || 'gemini-2.5-flash';
+
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+            this.disabled = true;
+
+            const formData = new FormData();
+            formData.append('chatbot_code', chatbotName);
+            formData.append('chatbot_mode', chatbotMode);
+            formData.append('ai_model', aiModel);
+
+            fetch(window.adminUrls.updateChatbotMode, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                this.innerHTML = originalText;
+                this.disabled = false;
+
+                if (data.success) {
+                    const successMsg = document.createElement('span');
+                    successMsg.className = 'text-success ms-2';
+                    successMsg.innerHTML = '<i class="bi bi-check-circle"></i> Updated!';
+                    this.parentNode.appendChild(successMsg);
+                    setTimeout(() => successMsg.remove(), 2000);
+                } else {
+                    alert('Error updating agent mode settings: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(() => {
+                this.innerHTML = originalText;
+                this.disabled = false;
+                alert('Network error while updating agent mode settings. Please try again.');
             });
         });
     });

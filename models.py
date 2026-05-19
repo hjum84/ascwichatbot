@@ -312,6 +312,13 @@ class ChatbotContent(Base):
     system_prompt_role = Column(Text, nullable=True)  # System prompt: Role section
     system_prompt_guidelines = Column(Text, nullable=True)  # System prompt: Important Guidelines section
     auto_delete_days = Column(Integer, nullable=True, default=None)  # Auto-delete conversations after N days (NULL = never delete)
+    # Conversation behavior: 'knowledge_retrieval' (stateless Q&A) or 'critical_thinking_agent'
+    # (multi-turn dialogue that uses prior conversation history as context)
+    chatbot_mode = Column(String(50), nullable=False, default='knowledge_retrieval')
+    # Configurable AI model name (e.g. 'gemini-2.5-flash'). Used by the critical-thinking-agent
+    # branch of /chat so the model can be changed per-chatbot from the admin panel without
+    # touching application code.
+    ai_model = Column(String(100), nullable=False, default='gemini-2.5-flash')
 
     # Relationship to handle multiple lo_root_ids
     lo_root_ids = relationship("ChatbotLORootAssociation", backref="chatbot")
@@ -342,7 +349,8 @@ class ChatbotContent(Base):
                         intro_message="Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.",
                         char_limit=50000, is_active=True, category="standard",
                         system_prompt_role=None, system_prompt_guidelines=None,
-                        auto_delete_days=None):  # 👈 NEW: Auto-delete setting (maintains backward compatibility)
+                        auto_delete_days=None,
+                        chatbot_mode=None, ai_model=None):
         """Create or update chatbot content"""
         existing = cls.get_by_code(db, code)
         if existing:
@@ -363,6 +371,10 @@ class ChatbotContent(Base):
             # 👈 NEW: Only update auto_delete_days if explicitly provided
             if auto_delete_days is not None:
                 existing.auto_delete_days = auto_delete_days
+            if chatbot_mode is not None:
+                existing.chatbot_mode = chatbot_mode
+            if ai_model is not None:
+                existing.ai_model = ai_model
             return existing
         else:
             new_content = cls(
@@ -377,7 +389,9 @@ class ChatbotContent(Base):
                 category=category,
                 system_prompt_role=system_prompt_role,
                 system_prompt_guidelines=system_prompt_guidelines,
-                auto_delete_days=auto_delete_days  # 👈 NEW: Auto-delete setting for new chatbots
+                auto_delete_days=auto_delete_days,  # 👈 NEW: Auto-delete setting for new chatbots
+                chatbot_mode=chatbot_mode if chatbot_mode is not None else 'knowledge_retrieval',
+                ai_model=ai_model if ai_model is not None else 'gemini-2.5-flash'
                 # lo_root_ids will be handled separately after creation/update
             )
             db.add(new_content)
@@ -399,6 +413,8 @@ class ChatbotContent(Base):
             "system_prompt_guidelines": self.system_prompt_guidelines,
             "auto_delete_days": self.auto_delete_days,  # 👈 NEW: Include auto-delete setting
             "auto_delete_text": self.get_auto_delete_text(),  # 👈 NEW: Human-readable text
+            "chatbot_mode": self.chatbot_mode,
+            "ai_model": self.ai_model,
             "lo_root_ids": [assoc.lo_root_id for assoc in self.lo_root_ids]
         }
 

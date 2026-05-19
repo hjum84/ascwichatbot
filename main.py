@@ -2018,30 +2018,273 @@ def chat():
 
         start_time = time.time()
         cache_result = "exact_match"
-        
-        chatbot_reply = get_cached_response(content_hash, user_message, current_program)
-        
-        if not chatbot_reply:
-            cache_result = "semantic_match"
+
+        # Determine conversation behavior. Default to 'knowledge_retrieval' so
+        # any chatbot without an explicit mode set keeps the existing stateless
+        # Q&A behavior.
+        chatbot_mode = (getattr(chatbot, 'chatbot_mode', None) or 'knowledge_retrieval').strip()
+        is_agent_mode = chatbot_mode in ('critical_thinking_agent', 'agent_mode')
+
+        if is_agent_mode:
+            # --- CRITICAL THINKING AGENT MODE ----------------------------------
+            # The agent needs to remember earlier turns to engage in meaningful
+            # dialogue. We pull the most recent visible exchanges from
+            # ChatHistory, format them as a labelled transcript, and send them
+            # alongside the new user message. Cache lookups are skipped because
+            # every conversation is unique.
+            cache_result = "agent_mode"
             try:
-                similar_question = find_similar_question(user_message, content_hash, current_program)
-                if similar_question:
-                    logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
-                    chatbot_reply = get_cached_response(content_hash, similar_question, current_program)
-                    logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
-            except Exception as e:
-                logger.error(f"Error finding similar question: {str(e)}")
-                similar_question = None
-        
-        if not chatbot_reply:
-            cache_result = "cache_miss"
-            try:
-                logger.debug(f"Cache miss for {current_program}, getting new response")
-                # Use system prompt from DB if available
+                logger.debug(
+                    f"Critical thinking agent mode for {current_program}, "
+                    f"building conversation history"
+                )
+
+                # Step 1: Retrieve conversation history from database
+                recent_history = db.query(ChatHistory).filter(
+                    ChatHistory.user_id == user_id,
+                    ChatHistory.program_code == current_program,
+                    ChatHistory.is_visible == True
+                ).order_by(ChatHistory.timestamp.desc()).limit(20).all()
+                recent_history = list(reversed(recent_history))
+
+                # Step 2: Format as conversation messages
+                conversation_messages = []
+                for record in recent_history:
+                    if record.user_message:
+                        conversation_messages.append({
+                            "role": "user",
+                            "content": record.user_message
+                        })
+                    if record.bot_message:
+                        conversation_messages.append({
+                            "role": "assistant",
+                            "content": record.bot_message
+                        })
+                conversation_messages.append({
+                    "role": "user",
+                    "content": user_message
+                })
+
+                # If the user asks to "continue", force continuation behavior
+                # so the model extends the prior assistant answer instead of
+                # restarting from scratch.
+                normalized_user_message = (user_message or "").strip().lower()
+                continue_markers = {
+                    "continue",
+                    "please continue",
+                    "go on",
+                    "keep going",
+                    "continue please"
+                }
+                is_continue_request = normalized_user_message in continue_markers
+                effective_user_message = user_message
+                if is_continue_request:
+                    effective_user_message = (
+                        "Please continue your immediately previous response from exactly "
+                        "where it ended. Do not restart or repeat prior sections unless "
+                        "absolutely necessary for clarity."
+                    )
+
+                # Build system prompt (reuse DB-configured prompt if available)
                 if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
-                    system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}\n\nCONTENT:\n{program_content.get(current_program, '')}"
+                    system_prompt = (
+                        f"{chatbot.system_prompt_role}\n\n"
+                        f"IMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}\n\n"
+                        f"CONTENT:\n{program_content.get(current_program, '')}"
+                    )
                 else:
-                    system_prompt = f"""You are an assistant that answers questions based on the following content for the {program_names.get(current_program, 'selected')} program.
+                    system_prompt = (
+                        f"You are an assistant that answers questions based on the following "
+                        f"content for the {program_names.get(current_program, 'selected')} program.\n\n"
+                        f"IMPORTANT GUIDELINES:\n"
+                        f"1. Only answer questions based on the provided content\n"
+                        f"2. If the answer is not in the content, say \"I don't have enough information to answer that question\"\n"
+                        f"3. Be concise but thorough in your responses\n"
+                        f"4. Maintain a professional and helpful tone\n"
+                        f"5. If asked about something not covered in the content, do not make assumptions\n\n"
+                        f"CONTENT:\n{program_content.get(current_program, '')}"
+                    )
+
+                # Step 3: Convert history into a labelled transcript and append
+                # the new user turn. Excludes the trailing new message so it can
+                # be added under its own "User:" label after the history block.
+                history_text = ""
+                for msg in conversation_messages[:-1]:
+                    role_label = "User" if msg["role"] == "user" else "Assistant"
+                    history_text += f"{role_label}: {msg['content']}\n\n"
+
+                full_prompt = (
+                    f"{system_prompt}\n\n"
+                    f"CONVERSATION HISTORY:\n{history_text}"
+                    f"User: {effective_user_message}"
+                )
+
+                model_name = (getattr(chatbot, 'ai_model', None) or 'gemini-2.5-flash').strip()
+                fallback_model_name = 'gemini-2.5-flash'
+
+                def is_transient_model_error(error_text):
+                    lowered = (error_text or "").lower()
+                    transient_markers = [
+                        "503",
+                        "unavailable",
+                        "high demand",
+                        "resource_exhausted",
+                        "rate limit",
+                        "429",
+                        "timeout",
+                        "temporarily unavailable"
+                    ]
+                    return any(marker in lowered for marker in transient_markers)
+
+                def call_agent_model_with_retry(prompt_text, model_to_use, max_attempts=3):
+                    last_error = None
+                    for attempt in range(1, max_attempts + 1):
+                        try:
+                            logger.info(
+                                f"Agent-mode model call attempt {attempt}/{max_attempts} "
+                                f"using model '{model_to_use}'"
+                            )
+                            model_response = gemini_client.models.generate_content(
+                                model=model_to_use,
+                                contents=prompt_text,
+                                config=genai_types.GenerateContentConfig(
+                                    max_output_tokens=3000,
+                                    temperature=0.7,
+                                )
+                            )
+                            return model_response
+                        except Exception as model_error:
+                            last_error = model_error
+                            error_text = str(model_error)
+                            if attempt < max_attempts and is_transient_model_error(error_text):
+                                backoff_seconds = attempt
+                                logger.warning(
+                                    f"Transient agent-mode error from '{model_to_use}' "
+                                    f"(attempt {attempt}/{max_attempts}): {error_text}. "
+                                    f"Retrying in {backoff_seconds}s."
+                                )
+                                time.sleep(backoff_seconds)
+                                continue
+                            raise
+                    if last_error:
+                        raise last_error
+
+                try:
+                    response = call_agent_model_with_retry(full_prompt, model_name, max_attempts=3)
+                except Exception as primary_model_error:
+                    primary_error_text = str(primary_model_error)
+                    can_try_fallback = (
+                        model_name != fallback_model_name and
+                        is_transient_model_error(primary_error_text)
+                    )
+                    if can_try_fallback:
+                        logger.warning(
+                            f"Primary agent model '{model_name}' unavailable: {primary_error_text}. "
+                            f"Falling back to '{fallback_model_name}'."
+                        )
+                        response = call_agent_model_with_retry(full_prompt, fallback_model_name, max_attempts=2)
+                    else:
+                        raise
+
+                chatbot_reply = (response.text or "").strip()
+                if not chatbot_reply:
+                    chatbot_reply = (
+                        "I'm having trouble generating a response right now. "
+                        "Please try again in a moment."
+                    )
+
+                # If the response hit max token limit, automatically ask the
+                # model to complete the same answer cleanly, so users do not
+                # need to type "continue" manually.
+                finish_reason = response.candidates[0].finish_reason if response.candidates else None
+                if finish_reason and str(finish_reason) in ['MAX_TOKENS', 'FinishReason.MAX_TOKENS']:
+                    logger.warning(
+                        f"Agent-mode response was truncated due to token limit for "
+                        f"question: {user_message[:50]}..."
+                    )
+                    completion_prompt = (
+                        f"{system_prompt}\n\n"
+                        f"CONVERSATION HISTORY:\n{history_text}"
+                        f"User: {effective_user_message}\n"
+                        f"Assistant: {chatbot_reply}\n"
+                        f"User: Continue the previous response from the exact cutoff point. "
+                        f"Do not restart. Finish with a concise, complete ending."
+                    )
+
+                    try:
+                        completion_response = call_agent_model_with_retry(
+                            completion_prompt,
+                            model_name,
+                            max_attempts=2
+                        )
+                    except Exception as completion_primary_error:
+                        completion_error_text = str(completion_primary_error)
+                        completion_can_fallback = (
+                            model_name != fallback_model_name and
+                            is_transient_model_error(completion_error_text)
+                        )
+                        if completion_can_fallback:
+                            completion_response = call_agent_model_with_retry(
+                                completion_prompt,
+                                fallback_model_name,
+                                max_attempts=1
+                            )
+                        else:
+                            completion_response = None
+                            logger.error(
+                                f"Error completing agent-mode truncated response: "
+                                f"{completion_error_text}"
+                            )
+
+                    if completion_response and completion_response.text:
+                        completion_text = completion_response.text.strip()
+                        if completion_text and not completion_text.lower().startswith(
+                            ('sorry', 'i cannot', "i don't have")
+                        ):
+                            chatbot_reply = chatbot_reply + " " + completion_text
+                        else:
+                            chatbot_reply = (
+                                chatbot_reply +
+                                "\n\n[Response was truncated. Please ask me to continue.]"
+                            )
+                    else:
+                        chatbot_reply = (
+                            chatbot_reply +
+                            "\n\n[Response was truncated. Please ask me to continue.]"
+                        )
+            except Exception as e:
+                logger.error(f"Error getting agent-mode response: {str(e)}")
+                return jsonify({
+                    "reply": "I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment.",
+                    "html_reply": parse_markdown("I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment."),
+                    "remaining_questions": max(0, quota - message_count),
+                    "quota": quota
+                }), 200
+        else:
+            # --- KNOWLEDGE RETRIEVAL MODE (unchanged behavior) -----------------
+            chatbot_reply = get_cached_response(content_hash, user_message, current_program)
+
+            if not chatbot_reply:
+                cache_result = "semantic_match"
+                try:
+                    similar_question = find_similar_question(user_message, content_hash, current_program)
+                    if similar_question:
+                        logger.debug(f"Using semantically similar question: '{similar_question}' instead of '{user_message}'")
+                        chatbot_reply = get_cached_response(content_hash, similar_question, current_program)
+                        logger.debug(f"Retrieved response for semantically similar question in {time.time() - start_time:.3f} seconds")
+                except Exception as e:
+                    logger.error(f"Error finding similar question: {str(e)}")
+                    similar_question = None
+
+            if not chatbot_reply:
+                cache_result = "cache_miss"
+                try:
+                    logger.debug(f"Cache miss for {current_program}, getting new response")
+                    # Use system prompt from DB if available
+                    if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
+                        system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}\n\nCONTENT:\n{program_content.get(current_program, '')}"
+                    else:
+                        system_prompt = f"""You are an assistant that answers questions based on the following content for the {program_names.get(current_program, 'selected')} program.
 
 IMPORTANT GUIDELINES:
 1. Only answer questions based on the provided content
@@ -2052,24 +2295,24 @@ IMPORTANT GUIDELINES:
 
 CONTENT:
 {program_content.get(current_program, '')}"""
-                full_prompt = f"{system_prompt}\n\nUser: {user_message}"
-                
-                response = gemini_client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=full_prompt,
-                    config=genai_types.GenerateContentConfig(
-                        max_output_tokens=1500,
-                        temperature=0.3,
+                    full_prompt = f"{system_prompt}\n\nUser: {user_message}"
+
+                    response = gemini_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=full_prompt,
+                        config=genai_types.GenerateContentConfig(
+                            max_output_tokens=1500,
+                            temperature=0.3,
+                        )
                     )
-                )
-                chatbot_reply = response.text.strip()
-                
-                finish_reason = response.candidates[0].finish_reason if response.candidates else None
-                if finish_reason and str(finish_reason) in ['MAX_TOKENS', 'FinishReason.MAX_TOKENS']:
-                    logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
-                    
-                    try:
-                        completion_prompt = f"""{system_prompt}
+                    chatbot_reply = response.text.strip()
+
+                    finish_reason = response.candidates[0].finish_reason if response.candidates else None
+                    if finish_reason and str(finish_reason) in ['MAX_TOKENS', 'FinishReason.MAX_TOKENS']:
+                        logger.warning(f"Response was truncated due to token limit for question: {user_message[:50]}...")
+
+                        try:
+                            completion_prompt = f"""{system_prompt}
 
 IMPORTANT: Complete this response naturally and concisely. Provide a proper conclusion.
 
@@ -2077,30 +2320,30 @@ User: {user_message}
 Assistant: {chatbot_reply}
 User: Please complete your previous response with a brief conclusion."""
 
-                        completion_response = gemini_client.models.generate_content(
-                            model='gemini-2.5-flash',
-                            contents=completion_prompt,
-                            config=genai_types.GenerateContentConfig(
-                                max_output_tokens=300,
-                                temperature=0.3,
+                            completion_response = gemini_client.models.generate_content(
+                                model='gemini-2.5-flash',
+                                contents=completion_prompt,
+                                config=genai_types.GenerateContentConfig(
+                                    max_output_tokens=300,
+                                    temperature=0.3,
+                                )
                             )
-                        )
-                        
-                        completion_text = completion_response.text.strip()
-                        
-                        if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
-                            chatbot_reply = chatbot_reply + " " + completion_text
-                        else:
+
+                            completion_text = completion_response.text.strip()
+
+                            if completion_text and not completion_text.lower().startswith(('sorry', 'i cannot', 'i don\'t have')):
+                                chatbot_reply = chatbot_reply + " " + completion_text
+                            else:
+                                chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
+                        except Exception as completion_error:
+                            logger.error(f"Error completing truncated response: {str(completion_error)}")
                             chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
-                    except Exception as completion_error:
-                        logger.error(f"Error completing truncated response: {str(completion_error)}")
-                        chatbot_reply = chatbot_reply + "\n\n[Response continues with additional details available in the program content]"
-            except Exception as e:
-                logger.error(f"Error getting new response: {str(e)}")
-                return jsonify({"error": str(e)}), 500
-        
+                except Exception as e:
+                    logger.error(f"Error getting new response: {str(e)}")
+                    return jsonify({"error": str(e)}), 500
+
         total_time = time.time() - start_time
-        logger.info(f"Cache performance: {cache_result} in {total_time:.3f} seconds")
+        logger.info(f"Cache performance: {cache_result} in {total_time:.3f} seconds (mode={chatbot_mode})")
 
         # Parse markdown in the response
         html_reply = parse_markdown(chatbot_reply)
@@ -3204,7 +3447,16 @@ def admin_upload():
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
-        
+
+        # Conversation behavior + AI model (admin-configurable per chatbot)
+        chatbot_mode = (request.form.get('chatbot_mode') or 'knowledge_retrieval').strip().lower()
+        if chatbot_mode == 'critical_thinking_agent':
+            chatbot_mode = 'agent_mode'
+        if chatbot_mode not in ('knowledge_retrieval', 'agent_mode'):
+            logger.warning(f"Invalid chatbot_mode '{chatbot_mode}', falling back to knowledge_retrieval")
+            chatbot_mode = 'knowledge_retrieval'
+        ai_model = (request.form.get('ai_model') or 'gemini-2.5-flash').strip()
+
         # 👈 NEW: Handle auto-delete setting safely
         auto_delete_days = request.form.get('auto_delete_days')
         if auto_delete_days and auto_delete_days.strip():
@@ -3376,7 +3628,9 @@ def admin_upload():
             category=category,
             system_prompt_role=system_prompt_role,
             system_prompt_guidelines=system_prompt_guidelines,
-            auto_delete_days=auto_delete_days  # 👈 NEW: Auto-delete setting
+            auto_delete_days=auto_delete_days,  # 👈 NEW: Auto-delete setting
+            chatbot_mode=chatbot_mode,
+            ai_model=ai_model
         )
         db.flush()  # Ensure we get the chatbot ID
         
@@ -3747,9 +4001,11 @@ def admin_get_chatbot_content(chatbot_code):
             "char_count": len(chatbot.content),
             "char_limit": chatbot.char_limit,
             "system_prompt_role": chatbot.system_prompt_role,
-            "system_prompt_guidelines": chatbot.system_prompt_guidelines
+            "system_prompt_guidelines": chatbot.system_prompt_guidelines,
+            "chatbot_mode": chatbot.chatbot_mode,
+            "ai_model": chatbot.ai_model
         })
-        
+
     except Exception as e:
         logger.error(f"Error in admin_get_chatbot_content: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -3810,7 +4066,19 @@ def admin_update_chatbot_content():
         content = request.form.get('content')
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
         system_prompt_guidelines = request.form.get('system_prompt_guidelines')
-        
+        # New optional fields: conversation mode and AI model
+        chatbot_mode = request.form.get('chatbot_mode')
+        if chatbot_mode is not None:
+            chatbot_mode = chatbot_mode.strip().lower()
+            if chatbot_mode == 'critical_thinking_agent':
+                chatbot_mode = 'agent_mode'
+            if chatbot_mode not in ('knowledge_retrieval', 'agent_mode'):
+                logger.warning(f"Invalid chatbot_mode '{chatbot_mode}' submitted, ignoring")
+                chatbot_mode = None
+        ai_model = request.form.get('ai_model')
+        if ai_model is not None:
+            ai_model = ai_model.strip() or None
+
         if not chatbot_code or content is None:
             return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
             
@@ -3876,7 +4144,11 @@ def admin_update_chatbot_content():
         chatbot.content = content
         if system_prompt_guidelines is not None:
             chatbot.system_prompt_guidelines = system_prompt_guidelines
-            
+        if chatbot_mode is not None:
+            chatbot.chatbot_mode = chatbot_mode
+        if ai_model is not None:
+            chatbot.ai_model = ai_model
+
         db.commit()
         
         # Clear the cache for get_cached_response as prompts might have changed
@@ -5651,6 +5923,59 @@ def admin_update_auto_delete_days():
         return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if db: close_db(db)
+
+@app.route('/admin/update_chatbot_mode', methods=['POST'])
+@requires_auth
+def admin_update_chatbot_mode():
+    """Update conversation mode + model for an existing chatbot."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        chatbot_mode = (request.form.get('chatbot_mode') or '').strip().lower()
+        ai_model = (request.form.get('ai_model') or '').strip()
+
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+
+        if chatbot_mode == 'critical_thinking_agent':
+            chatbot_mode = 'agent_mode'
+        if chatbot_mode not in ('knowledge_retrieval', 'agent_mode'):
+            return jsonify({
+                "success": False,
+                "error": "Invalid chatbot mode. Must be 'knowledge_retrieval' or 'agent_mode'."
+            }), 400
+
+        if not ai_model:
+            ai_model = 'gemini-2.5-flash'
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+
+        chatbot.chatbot_mode = chatbot_mode
+        chatbot.ai_model = ai_model
+        db.commit()
+
+        # Reload in-memory content for consistency.
+        load_program_content()
+
+        logger.info(
+            f"Updated chatbot mode for {chatbot_code}: mode={chatbot_mode}, ai_model={ai_model}"
+        )
+        return jsonify({
+            "success": True,
+            "message": "Advanced mode settings updated successfully.",
+            "chatbot_mode": chatbot.chatbot_mode,
+            "ai_model": chatbot.ai_model
+        })
+    except Exception as e:
+        if db:
+            db.rollback()
+        logger.error(f"Error in admin_update_chatbot_mode: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db:
+            close_db(db)
 
 def get_deletion_warning_for_user(user_id, program_code):
     """

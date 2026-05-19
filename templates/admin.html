@@ -777,6 +777,30 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
+
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-chat-dots"></i> Agent Mode (Advanced)</h6>
+                                                                <div class="update-chatbot-mode-form">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="mb-2">
+                                                                        <label class="form-label small mb-1">Conversation Mode</label>
+                                                                        <select class="form-select chatbot-mode-field">
+                                                                            <option value="knowledge_retrieval" {% if chatbot.chatbot_mode == 'knowledge_retrieval' or not chatbot.chatbot_mode %}selected{% endif %}>Knowledge Retrieval (stateless Q&amp;A)</option>
+                                                                            <option value="agent_mode" {% if chatbot.chatbot_mode == 'agent_mode' or chatbot.chatbot_mode == 'critical_thinking_agent' %}selected{% endif %}>Agent Mode (multi-turn dialogue)</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div class="mb-2">
+                                                                        <label class="form-label small mb-1">AI Model</label>
+                                                                        <input type="text" class="form-control ai-model-field" value="{{ chatbot.ai_model if chatbot.ai_model else 'gemini-2.5-flash' }}" placeholder="gemini-2.5-flash">
+                                                                    </div>
+                                                                    <button type="button" class="btn btn-secondary update-chatbot-mode-btn">
+                                                                        <i class="bi bi-arrow-clockwise"></i> Update
+                                                                    </button>
+                                                                    <div class="form-text small mt-2">
+                                                                        <i class="bi bi-info-circle"></i> Configure advanced conversation behavior for this chatbot.
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -889,6 +913,32 @@
                                                 <div class="form-text">
                                                     <i class="bi bi-info-circle"></i> 
                                                     Welcome message shown to users. Use <code>{program}</code> to insert program name and <code>{quota}</code> to insert daily quota.
+                                                </div>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label for="chatbot_mode" class="form-label">
+                                                    <i class="bi bi-chat-dots"></i> Conversation Mode
+                                                </label>
+                                                <select class="form-select" id="chatbot_mode" name="chatbot_mode">
+                                                    <option value="knowledge_retrieval" selected>Knowledge Retrieval (stateless Q&amp;A)</option>
+                                                    <option value="agent_mode">Agent Mode (multi-turn dialogue)</option>
+                                                </select>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i>
+                                                    <strong>Knowledge Retrieval</strong> answers each question independently using cached responses (best for FAQ-style usage).
+                                                    <strong>Agent Mode</strong> remembers the last several exchanges so it can ask probing follow-up questions and engage in coaching-style dialogue.
+                                                </div>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label for="ai_model" class="form-label">
+                                                    <i class="bi bi-cpu"></i> AI Model
+                                                </label>
+                                                <input type="text" class="form-control" id="ai_model" name="ai_model" value="gemini-2.5-flash" placeholder="gemini-2.5-flash">
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i>
+                                                    The Gemini model used for this chatbot in Agent Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>). Knowledge Retrieval mode currently uses <code>gemini-2.5-flash</code> regardless of this setting.
                                                 </div>
                                             </div>
                                             
@@ -1838,6 +1888,30 @@
                         <textarea class="form-control" id="editSystemPromptGuidelines" name="system_prompt_guidelines" rows="5" placeholder="Enter guidelines for the chatbot's behavior..."></textarea>
                         <div class="form-text">Specify detailed guidelines and rules for how the chatbot should process and respond to queries.</div>
                     </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="editChatbotMode" class="form-label">
+                                <i class="bi bi-chat-dots"></i> Conversation Mode (Advanced)
+                            </label>
+                            <select class="form-select" id="editChatbotMode" name="chatbot_mode">
+                                <option value="knowledge_retrieval">Knowledge Retrieval (stateless Q&amp;A)</option>
+                                <option value="agent_mode">Agent Mode (multi-turn dialogue)</option>
+                            </select>
+                            <div class="form-text">
+                                Agent Mode passes the last ~10 exchanges back to the model so it can engage in coaching-style dialogue.
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="editAiModel" class="form-label">
+                                <i class="bi bi-cpu"></i> AI Model
+                            </label>
+                            <input type="text" class="form-control" id="editAiModel" name="ai_model" placeholder="gemini-2.5-flash">
+                            <div class="form-text">
+                                Model used in Critical Thinking Agent mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>).
+                            </div>
+                        </div>
+                    </div>
                     
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" id="editAutoSummarize" name="auto_summarize" checked>
@@ -2085,6 +2159,7 @@
                 permanentDeleteChatbot: "{{ url_for('admin_permanent_delete_chatbot') }}",
                 getChatbotContent: "/admin/get_chatbot_content/",
                 updateChatbotContent: "/admin/update_chatbot_content",
+                updateChatbotMode: "/admin/update_chatbot_mode",
                 updateQuota: "/update_quota",
                 updateIntroMessage: "/update_intro_message",
                 updateCategory: "{{ url_for('admin_update_category') }}",

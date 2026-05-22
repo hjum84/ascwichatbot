@@ -207,8 +207,22 @@ app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'
 app.config['MAIL_USE_SSL'] = os.getenv('MAIL_USE_SSL', 'False').lower() == 'true'
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'])
+mail_password_raw = os.getenv('MAIL_PASSWORD')
+if mail_password_raw:
+    # Normalize common .env copy/paste issues:
+    # - surrounding quotes from env files
+    # - grouped Gmail app password with spaces (e.g. "abcd efgh ijkl mnop")
+    normalized_mail_password = mail_password_raw.strip().strip('"').strip("'")
+    if app.config['MAIL_SERVER'] == 'smtp.gmail.com':
+        normalized_mail_password = normalized_mail_password.replace(' ', '')
+    app.config['MAIL_PASSWORD'] = normalized_mail_password
+else:
+    app.config['MAIL_PASSWORD'] = None
+mail_default_sender_env = os.getenv('MAIL_DEFAULT_SENDER')
+if mail_default_sender_env and mail_default_sender_env.strip():
+    app.config['MAIL_DEFAULT_SENDER'] = mail_default_sender_env.strip()
+else:
+    app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
 
 mail = Mail(app)
 
@@ -314,7 +328,8 @@ def send_email(subject, recipient, html_body):
 
     # Fallback to Flask-Mail (SMTP)
     try:
-        msg = Message(subject=subject, recipients=[recipient])
+        sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_USERNAME')
+        msg = Message(subject=subject, recipients=[recipient], sender=sender)
         msg.html = html_body
         mail.send(msg)
         logger.info('✅ Email sent via Flask-Mail (SMTP)')
@@ -440,12 +455,41 @@ def send_password_setup_email(email, name, is_admin_added=False):
         <p>Best regards,<br>ACS Chatbot System</p>
         """
 
-        if send_email('Set Up Your Account Password', email, html_body):
-            logger.info(f"Password setup email sent to {email}")
+        logger.info(f"📧 Attempting to send password setup email to {email}")
+        logger.info(f"MAIL_SERVER: {app.config.get('MAIL_SERVER')}")
+        logger.info(f"MAIL_PORT: {app.config.get('MAIL_PORT')}")
+        logger.info(f"MAIL_USE_TLS: {app.config.get('MAIL_USE_TLS')}")
+        logger.info(f"MAIL_USERNAME set: {bool(app.config.get('MAIL_USERNAME'))}")
+        logger.info(f"MAIL_PASSWORD set: {bool(app.config.get('MAIL_PASSWORD'))}")
+
+        # Retry once for transient SMTP/network hiccups.
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            sent = send_email('Set Up Your Account Password', email, html_body)
+            if sent:
+                logger.info(f"Password setup email sent to {email} (attempt {attempt}/{max_attempts})")
+                return True
+            logger.error(f"Setup email send attempt {attempt}/{max_attempts} failed for {email}")
+            if attempt < max_attempts:
+                time.sleep(1)
+
+        # Final fallback: send a simplified backup email body. This keeps the
+        # same setup flow while reducing the chance of formatting/provider
+        # rejection for the richer HTML template.
+        backup_body = f"""
+        <h2>ACS Account Setup</h2>
+        <p>Hello {name},</p>
+        <p>Please set your account password using the link below:</p>
+        <p><a href="{setup_url}">{setup_url}</a></p>
+        <p>This link expires in 24 hours.</p>
+        """
+        backup_sent = send_email('ACS Account Setup Link', email, backup_body)
+        if backup_sent:
+            logger.info(f"Backup password setup email sent to {email}")
             return True
-        else:
-            logger.error(f"All email send methods failed for setup email to {email}")
-            return False
+
+        logger.error(f"All email send methods failed for setup email to {email}")
+        return False
     except Exception as e:
         logger.error(f"Failed to send password setup email to {email}: {e}")
         return False
@@ -4875,15 +4919,25 @@ def add_user():
 
         db.commit()
         
-        # Send password setup email
-        try:
-            send_password_setup_email(email, last_name, is_admin_added=True)
+        # Send password setup email (do not rollback user creation if delivery fails).
+        email_sent = send_password_setup_email(email, last_name, is_admin_added=True)
+        if email_sent:
             logger.info(f"Password setup email sent to {email} for admin-added user")
-        except Exception as e:
-            logger.error(f"Failed to send password setup email to {email}: {e}")
-            # Don't fail the user creation if email fails
-        
-        return jsonify({'success': True, 'message': 'User added successfully. Password setup email sent.'})
+            return jsonify({
+                'success': True,
+                'email_sent': True,
+                'message': 'User added successfully. Password setup email sent.'
+            })
+        else:
+            logger.error(f"Password setup email failed for admin-added user {email}")
+            return jsonify({
+                'success': True,
+                'email_sent': False,
+                'message': (
+                    'User was added, but password setup email failed to send. '
+                    'Please verify mail configuration and try again.'
+                )
+            })
     except Exception as e:
         db.rollback()
         return jsonify({'success': False, 'error': str(e)})

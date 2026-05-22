@@ -2398,7 +2398,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (errorDiv) errorDiv.remove();
 
                     updateUserTable(); // Update table first
-                    showSuccessMessage(data.message || 'User added successfully'); // Then show message
+                    if (data.email_sent === false) {
+                        showErrorMessage(data.message || 'User added, but password setup email failed.');
+                    } else {
+                        showSuccessMessage(data.message || 'User added successfully'); // Then show message
+                    }
                 } else {
                     // Show error message directly in the modal
                     const addUserModalBody = document.getElementById('addUserModal').querySelector('.modal-body');

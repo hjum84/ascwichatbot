@@ -419,34 +419,38 @@
 
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
 
+    function renderMarkdownIntoElement(element, text) {
+      if (typeof marked !== 'undefined') {
+        const parsedContent = marked.parse(text || '');
+        element.innerHTML = typeof DOMPurify !== 'undefined' ?
+                          DOMPurify.sanitize(parsedContent) :
+                          parsedContent;
+      } else {
+        element.textContent = text || '';
+      }
+    }
+
     function typeMessage(element, text, speed = 10) {
       return new Promise((resolve) => {
         let i = 0;
+        let typedText = '';
         element.classList.add('typing');
         function type() {
           if (i < text.length) {
-            element.textContent += text.charAt(i);
+            typedText += text.charAt(i);
+            // Render Markdown while typing so users see formatted lists/bold
+            // immediately instead of raw markers like "**".
+            renderMarkdownIntoElement(element, typedText);
             i++;
             setTimeout(type, speed);
             scrollToBottom(); // Scroll as message types
           } else {
             element.classList.remove('typing');
-            
-            // After typing is complete, process any Markdown
-            if (typeof marked !== 'undefined') {
-                // Store the raw text before parsing
-                const rawText = element.textContent;
-                // Parse the Markdown and apply it
-                const parsedContent = marked.parse(rawText);
-                element.innerHTML = typeof DOMPurify !== 'undefined' ? 
-                                  DOMPurify.sanitize(parsedContent) : 
-                                  parsedContent;
-            }
-            
+            renderMarkdownIntoElement(element, typedText);
             resolve();
           }
         }
-        element.textContent = '';
+        renderMarkdownIntoElement(element, '');
         type();
       });
     }

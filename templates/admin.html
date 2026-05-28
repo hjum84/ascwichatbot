@@ -801,6 +801,48 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
+
+                                                            <!-- Content Guardrails Section -->
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-shield-exclamation"></i> Content Guardrails</h6>
+                                                                <div class="guardrail-section" data-chatbot-code="{{ chatbot.code }}">
+                                                                    <div class="form-text small mb-2">
+                                                                        <i class="bi bi-info-circle"></i> System guardrails (case data protection, safety decision prevention, off-topic filtering) are <strong>always active</strong>. Add custom rules below to block program-specific phrases.
+                                                                    </div>
+
+                                                                    <!-- Existing rules list -->
+                                                                    <div class="guardrail-rules-list mb-2">
+                                                                        <div class="text-muted small guardrail-loading"><i class="bi bi-arrow-clockwise spinning"></i> Loading rules...</div>
+                                                                    </div>
+
+                                                                    <!-- Add new rule form (hidden by default) -->
+                                                                    <div class="guardrail-add-form" style="display:none;">
+                                                                        <div class="card card-body bg-light border mb-2 p-2">
+                                                                            <div class="mb-2">
+                                                                                <label class="form-label small mb-1 fw-bold">Rule Name</label>
+                                                                                <input type="text" class="form-control form-control-sm guardrail-rule-name" placeholder="e.g., Block case note requests">
+                                                                            </div>
+                                                                            <div class="mb-2">
+                                                                                <label class="form-label small mb-1 fw-bold">Blocked Phrases <span class="text-muted fw-normal">(comma-separated)</span></label>
+                                                                                <textarea class="form-control form-control-sm guardrail-rule-phrases" rows="2" placeholder="e.g., write a case note, draft a case note, create case notes"></textarea>
+                                                                                <div class="form-text small">Enter phrases you want to block. The system automatically handles variations like "write a case note" also catching "write my case notes".</div>
+                                                                            </div>
+                                                                            <div class="mb-2">
+                                                                                <label class="form-label small mb-1 fw-bold">Redirect Message <span class="text-muted fw-normal">(optional)</span></label>
+                                                                                <textarea class="form-control form-control-sm guardrail-rule-message" rows="2" placeholder="Message shown to the user when blocked (leave blank for default)"></textarea>
+                                                                            </div>
+                                                                            <div>
+                                                                                <button type="button" class="btn btn-sm btn-primary guardrail-save-btn"><i class="bi bi-check-circle"></i> Save Rule</button>
+                                                                                <button type="button" class="btn btn-sm btn-outline-secondary guardrail-cancel-btn"><i class="bi bi-x"></i> Cancel</button>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <button type="button" class="btn btn-sm btn-outline-primary guardrail-add-btn">
+                                                                        <i class="bi bi-plus-circle"></i> Add Rule
+                                                                    </button>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -940,6 +982,106 @@
                                                     <i class="bi bi-info-circle"></i>
                                                     The Gemini model used for this chatbot in Agent Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>). Knowledge Retrieval mode currently uses <code>gemini-2.5-flash</code> regardless of this setting.
                                                 </div>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">
+                                                    <i class="bi bi-shield-exclamation"></i> Tier 2 Guardrails (Optional)
+                                                </label>
+                                                <div class="form-text mb-2">
+                                                    Add plain-text blocked phrases for this chatbot at creation time. These rules are enforced before any AI API call.
+                                                </div>
+                                                <div id="create-guardrail-rules-container">
+                                                    <div class="card card-body bg-light border mb-2 create-guardrail-rule-row">
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Rule Name</label>
+                                                            <input type="text" class="form-control" name="create_guardrail_rule_name[]" value="Block case note drafting" placeholder="e.g., Block case note drafting">
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Blocked Phrases <span class="text-muted fw-normal">(comma-separated)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_phrases[]" rows="5" placeholder="e.g., write a case note, draft case note">write a case note, draft a case note, create a case note, compose a case note, help me write a case note, write a progress note, draft a court report, write a petition, write a removal request</textarea>
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Redirect Message <span class="text-muted fw-normal">(optional)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_message[]" rows="5" placeholder="Message shown when this rule blocks input">This tool cannot draft case notes, court reports, or other case-specific documents. For case documentation guidance, please consult your supervisor and refer to your agency's documentation protocols.</textarea>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            <button type="button" class="btn btn-sm btn-outline-danger create-guardrail-remove-btn">
+                                                                <i class="bi bi-trash"></i> Remove Rule
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card card-body bg-light border mb-2 create-guardrail-rule-row">
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Rule Name</label>
+                                                            <input type="text" class="form-control" name="create_guardrail_rule_name[]" value="Block investigation advice" placeholder="e.g., Block case note drafting">
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Blocked Phrases <span class="text-muted fw-normal">(comma-separated)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_phrases[]" rows="5" placeholder="e.g., write a case note, draft case note">how should I investigate this case, what should I do about this investigation, what should I do with this allegation, what should I do in this referral, what should I do about this intake</textarea>
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Redirect Message <span class="text-muted fw-normal">(optional)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_message[]" rows="5" placeholder="Message shown when this rule blocks input">I can help you review investigative frameworks and assessment approaches from the curriculum, but I cannot provide guidance on specific investigations or cases. Please consult your supervisor for case-specific direction.
+
+Try rephrasing as a general question, such as:
+- "What are the key components of a thorough safety assessment?"
+- "What does the curriculum say about interviewing strategies?"</textarea>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            <button type="button" class="btn btn-sm btn-outline-danger create-guardrail-remove-btn">
+                                                                <i class="bi bi-trash"></i> Remove Rule
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card card-body bg-light border mb-2 create-guardrail-rule-row">
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Rule Name</label>
+                                                            <input type="text" class="form-control" name="create_guardrail_rule_name[]" value="Block placement recommendations" placeholder="e.g., Block case note drafting">
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Blocked Phrases <span class="text-muted fw-normal">(comma-separated)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_phrases[]" rows="5" placeholder="e.g., write a case note, draft case note">should I place this child, can we move this child, should we transfer this youth, can I discharge this foster child, should we move this youth</textarea>
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Redirect Message <span class="text-muted fw-normal">(optional)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_message[]" rows="5" placeholder="Message shown when this rule blocks input">This tool cannot make placement or discharge recommendations for specific children or families. Placement decisions must be made through your supervisory chain and in accordance with agency policy.
+
+I can help you review placement-related curriculum content. Try asking:
+- "What factors should be considered in placement decisions?"
+- "What does the curriculum say about trial discharge readiness?"</textarea>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            <button type="button" class="btn btn-sm btn-outline-danger create-guardrail-remove-btn">
+                                                                <i class="bi bi-trash"></i> Remove Rule
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="card card-body bg-light border mb-2 create-guardrail-rule-row">
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Rule Name</label>
+                                                            <input type="text" class="form-control" name="create_guardrail_rule_name[]" value="Block service termination decisions" placeholder="e.g., Block case note drafting">
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Blocked Phrases <span class="text-muted fw-normal">(comma-separated)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_phrases[]" rows="5" placeholder="e.g., write a case note, draft case note">should I close services for this family, can we terminate services for this case, should I end this case, can we discontinue services for this family</textarea>
+                                                        </div>
+                                                        <div class="mb-2">
+                                                            <label class="form-label small mb-1 fw-bold">Redirect Message <span class="text-muted fw-normal">(optional)</span></label>
+                                                            <textarea class="form-control" name="create_guardrail_rule_message[]" rows="5" placeholder="Message shown when this rule blocks input">This tool cannot advise on service termination decisions for specific families. Service closure decisions must follow your agency's protocols and be discussed with your supervisor.
+
+I can help you review the curriculum on service planning and case closure criteria. Try asking in general terms.</textarea>
+                                                        </div>
+                                                        <div class="text-end">
+                                                            <button type="button" class="btn btn-sm btn-outline-danger create-guardrail-remove-btn">
+                                                                <i class="bi bi-trash"></i> Remove Rule
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button type="button" class="btn btn-sm btn-outline-primary" id="create-guardrail-add-btn">
+                                                    <i class="bi bi-plus-circle"></i> Add Another Rule
+                                                </button>
                                             </div>
                                             
                                             <div class="mb-3">
@@ -2170,7 +2312,12 @@
                 adminBase: "{{ url_for('admin') }}",
                 csvUpload: "{{ url_for('admin_upload_authorized_users_csv') }}",
                 csvDownload: "{{ url_for('admin_download_authorized_users_csv') }}",
-                csvStatus: "{{ url_for('admin_authorized_users_status') }}"
+                csvStatus: "{{ url_for('admin_authorized_users_status') }}",
+                getGuardrailRules: "/admin/get_guardrail_rules/",
+                addGuardrailRule: "/admin/add_guardrail_rule",
+                updateGuardrailRule: "/admin/update_guardrail_rule",
+                deleteGuardrailRule: "/admin/delete_guardrail_rule",
+                toggleGuardrailRule: "/admin/toggle_guardrail_rule"
             };
             
             // CSV Management Functions
@@ -2267,12 +2414,164 @@
                     return new bootstrap.Tooltip(tooltipTriggerEl);
                 });
                 
+                // ===== GUARDRAILS UI =====
+                // Load rules for each guardrail section on the page
+                document.querySelectorAll('.guardrail-section').forEach(function(section) {
+                    loadGuardrailRules(section);
+                });
+
+                // Add Rule button - show the form
+                document.addEventListener('click', function(e) {
+                    if (e.target.closest('.guardrail-add-btn')) {
+                        var section = e.target.closest('.guardrail-section');
+                        section.querySelector('.guardrail-add-form').style.display = 'block';
+                        section.querySelector('.guardrail-add-btn').style.display = 'none';
+                        section.querySelector('.guardrail-rule-name').focus();
+                    }
+                });
+
+                // Cancel button - hide the form
+                document.addEventListener('click', function(e) {
+                    if (e.target.closest('.guardrail-cancel-btn')) {
+                        var section = e.target.closest('.guardrail-section');
+                        section.querySelector('.guardrail-add-form').style.display = 'none';
+                        section.querySelector('.guardrail-add-btn').style.display = '';
+                        section.querySelector('.guardrail-rule-name').value = '';
+                        section.querySelector('.guardrail-rule-phrases').value = '';
+                        section.querySelector('.guardrail-rule-message').value = '';
+                    }
+                });
+
+                // Save Rule button
+                document.addEventListener('click', function(e) {
+                    if (e.target.closest('.guardrail-save-btn')) {
+                        var section = e.target.closest('.guardrail-section');
+                        var code = section.getAttribute('data-chatbot-code');
+                        var name = section.querySelector('.guardrail-rule-name').value.trim();
+                        var phrases = section.querySelector('.guardrail-rule-phrases').value.trim();
+                        var message = section.querySelector('.guardrail-rule-message').value.trim();
+
+                        if (!name) { alert('Please enter a rule name.'); return; }
+                        if (!phrases) { alert('Please enter at least one blocked phrase.'); return; }
+
+                        var formData = new FormData();
+                        formData.append('chatbot_code', code);
+                        formData.append('rule_name', name);
+                        formData.append('phrases', phrases);
+                        formData.append('redirect_message', message);
+
+                        fetch(window.adminUrls.addGuardrailRule, { method: 'POST', body: formData })
+                            .then(function(r) { return r.json(); })
+                            .then(function(data) {
+                                if (data.success) {
+                                    section.querySelector('.guardrail-add-form').style.display = 'none';
+                                    section.querySelector('.guardrail-add-btn').style.display = '';
+                                    section.querySelector('.guardrail-rule-name').value = '';
+                                    section.querySelector('.guardrail-rule-phrases').value = '';
+                                    section.querySelector('.guardrail-rule-message').value = '';
+                                    loadGuardrailRules(section);
+                                } else {
+                                    alert('Error: ' + (data.error || 'Unknown error'));
+                                }
+                            })
+                            .catch(function(err) { alert('Error saving rule: ' + err); });
+                    }
+                });
+
+                // Toggle rule on/off
+                document.addEventListener('click', function(e) {
+                    if (e.target.closest('.guardrail-toggle-btn')) {
+                        var btn = e.target.closest('.guardrail-toggle-btn');
+                        var section = btn.closest('.guardrail-section');
+                        var code = section.getAttribute('data-chatbot-code');
+                        var ruleId = btn.getAttribute('data-rule-id');
+
+                        var formData = new FormData();
+                        formData.append('chatbot_code', code);
+                        formData.append('rule_id', ruleId);
+
+                        fetch(window.adminUrls.toggleGuardrailRule, { method: 'POST', body: formData })
+                            .then(function(r) { return r.json(); })
+                            .then(function(data) {
+                                if (data.success) { loadGuardrailRules(section); }
+                                else { alert('Error: ' + (data.error || 'Unknown error')); }
+                            });
+                    }
+                });
+
+                // Delete rule
+                document.addEventListener('click', function(e) {
+                    if (e.target.closest('.guardrail-delete-btn')) {
+                        if (!confirm('Delete this guardrail rule?')) return;
+                        var btn = e.target.closest('.guardrail-delete-btn');
+                        var section = btn.closest('.guardrail-section');
+                        var code = section.getAttribute('data-chatbot-code');
+                        var ruleId = btn.getAttribute('data-rule-id');
+
+                        var formData = new FormData();
+                        formData.append('chatbot_code', code);
+                        formData.append('rule_id', ruleId);
+
+                        fetch(window.adminUrls.deleteGuardrailRule, { method: 'POST', body: formData })
+                            .then(function(r) { return r.json(); })
+                            .then(function(data) {
+                                if (data.success) { loadGuardrailRules(section); }
+                                else { alert('Error: ' + (data.error || 'Unknown error')); }
+                            });
+                    }
+                });
+
                 // Enhanced CSV upload handling is now handled in admin_scripts.js
                 // This provides better feedback including sync information
                 
                 // Any remaining page-specific JS can stay here
             });
             
+            // ===== GUARDRAIL RULES LOADER =====
+            function loadGuardrailRules(section) {
+                var code = section.getAttribute('data-chatbot-code');
+                var listDiv = section.querySelector('.guardrail-rules-list');
+                listDiv.innerHTML = '<div class="text-muted small"><i class="bi bi-arrow-clockwise spinning"></i> Loading...</div>';
+
+                fetch(window.adminUrls.getGuardrailRules + code)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (!data.success || !data.rules || data.rules.length === 0) {
+                            listDiv.innerHTML = '<div class="text-muted small mb-1"><i class="bi bi-info-circle"></i> No custom rules yet. Click "Add Rule" to create one.</div>';
+                            return;
+                        }
+                        var html = '';
+                        data.rules.forEach(function(rule) {
+                            var activeClass = rule.is_active ? 'border-start border-3 border-primary' : 'border-start border-3 border-secondary opacity-50';
+                            var toggleIcon = rule.is_active ? 'bi-toggle-on text-primary' : 'bi-toggle-off text-secondary';
+                            var toggleTitle = rule.is_active ? 'Click to disable' : 'Click to enable';
+                            var statusBadge = rule.is_active ? '<span class="badge bg-primary">Active</span>' : '<span class="badge bg-secondary">Disabled</span>';
+
+                            html += '<div class="card mb-1 ' + activeClass + '" style="font-size:0.85rem;">';
+                            html += '<div class="card-body p-2">';
+                            html += '<div class="d-flex justify-content-between align-items-start">';
+                            html += '<div style="flex:1;">';
+                            html += '<strong>' + rule.name + '</strong> ' + statusBadge;
+                            html += '<div class="text-muted small mt-1"><i class="bi bi-slash-circle"></i> ' + rule.phrases + '</div>';
+                            if (rule.redirect_message) {
+                                html += '<div class="text-muted small mt-1" style="max-height:2.5em;overflow:hidden;"><i class="bi bi-chat-left-text"></i> ' + rule.redirect_message.substring(0, 100) + (rule.redirect_message.length > 100 ? '...' : '') + '</div>';
+                            }
+                            html += '</div>';
+                            html += '<div class="ms-2 text-nowrap">';
+                            html += '<button class="btn btn-sm btn-link p-0 me-1 guardrail-toggle-btn" data-rule-id="' + rule.id + '" title="' + toggleTitle + '"><i class="bi ' + toggleIcon + '" style="font-size:1.3rem;"></i></button>';
+                            html += '<button class="btn btn-sm btn-link p-0 text-danger guardrail-delete-btn" data-rule-id="' + rule.id + '" title="Delete rule"><i class="bi bi-trash" style="font-size:1rem;"></i></button>';
+                            html += '</div>';
+                            html += '</div>';
+                            html += '</div></div>';
+                        });
+                        listDiv.innerHTML = html;
+                    })
+                    .catch(function(err) {
+                        listDiv.innerHTML = '<div class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Error loading rules</div>';
+                        console.error('Guardrail load error:', err);
+                    });
+            }
+
             function initializeDatabaseStats() {
                 // Initialize component breakdown colors and widths
                 const componentBars = document.querySelectorAll('.component-bar');

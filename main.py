@@ -5,6 +5,7 @@ import os
 import datetime
 import smartsheet
 import csv
+import json
 import io
 import threading
 import logging
@@ -17,6 +18,11 @@ import re
 from models import (
     User, UserLORootID, ChatbotContent, ChatbotLORootAssociation, ChatHistory, 
     AuthorizedUser, get_db, close_db, Base, engine, DB_TYPE
+)
+from guardrails import (
+    check_input_guardrails, validate_custom_rules, format_guardrail_log_entry,
+    add_rule_to_json, remove_rule_from_json, toggle_rule_in_json,
+    update_rule_in_json, reorder_rules_in_json, parse_custom_rules
 )
 import werkzeug
 import glob
@@ -2060,6 +2066,32 @@ def chat():
         else:
             logger.info(f"Content for '{current_program}' (length: {len(current_program_content)}) is available for get_cached_response.")
 
+        # ==================================================================
+        # HARNESS GUARDRAIL CHECK — runs BEFORE message reaches the AI model
+        # ==================================================================
+        guardrail_result = check_input_guardrails(user_message, chatbot)
+        if guardrail_result["blocked"]:
+            guardrail_category = guardrail_result["category"]
+            logger.warning(
+                f"Guardrail blocked message from user {user_id} in {current_program}. "
+                f"Category: {guardrail_category}, "
+                f"Rule: {guardrail_result.get('rule_name', 'system')}"
+            )
+            log_entry = format_guardrail_log_entry(
+                user_id, current_program, guardrail_result
+            )
+            logger.info(f"Guardrail log: {json.dumps(log_entry)}")
+            
+            redirect_msg = guardrail_result["redirect_message"]
+            return jsonify({
+                "reply": redirect_msg,
+                "html_reply": parse_markdown(redirect_msg),
+                "remaining_questions": max(0, quota - message_count),
+                "quota": quota,
+                "guardrail_triggered": guardrail_category
+            }), 200
+        # ==================================================================
+
         start_time = time.time()
         cache_result = "exact_match"
 
@@ -3501,6 +3533,44 @@ def admin_upload():
             chatbot_mode = 'knowledge_retrieval'
         ai_model = (request.form.get('ai_model') or 'gemini-2.5-flash').strip()
 
+        # Optional Tier 2 plain-phrase guardrails from "Create New Chatbot" form.
+        # We build JSON through add_rule_to_json so create/edit paths share
+        # one rule format and guardrail evaluation stays centralized.
+        create_rule_names = request.form.getlist('create_guardrail_rule_name[]')
+        create_rule_phrases = request.form.getlist('create_guardrail_rule_phrases[]')
+        create_rule_messages = request.form.getlist('create_guardrail_rule_message[]')
+        create_guardrail_rules_json = None
+        create_rules_count = max(
+            len(create_rule_names),
+            len(create_rule_phrases),
+            len(create_rule_messages)
+        )
+
+        for i in range(create_rules_count):
+            rule_name = (create_rule_names[i] if i < len(create_rule_names) else "").strip()
+            rule_phrases = (create_rule_phrases[i] if i < len(create_rule_phrases) else "").strip()
+            rule_message = (create_rule_messages[i] if i < len(create_rule_messages) else "").strip()
+
+            # Ignore completely empty rows in the UI.
+            if not rule_name and not rule_phrases and not rule_message:
+                continue
+
+            if not rule_name or not rule_phrases:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Guardrail rule #{i + 1} must include both a rule name "
+                        "and blocked phrases."
+                    )
+                }), 400
+
+            create_guardrail_rules_json, _ = add_rule_to_json(
+                create_guardrail_rules_json,
+                rule_name,
+                rule_phrases,
+                rule_message
+            )
+
         # 👈 NEW: Handle auto-delete setting safely
         auto_delete_days = request.form.get('auto_delete_days')
         if auto_delete_days and auto_delete_days.strip():
@@ -3674,7 +3744,8 @@ def admin_upload():
             system_prompt_guidelines=system_prompt_guidelines,
             auto_delete_days=auto_delete_days,  # 👈 NEW: Auto-delete setting
             chatbot_mode=chatbot_mode,
-            ai_model=ai_model
+            ai_model=ai_model,
+            guardrail_rules_json=create_guardrail_rules_json
         )
         db.flush()  # Ensure we get the chatbot ID
         
@@ -4047,7 +4118,8 @@ def admin_get_chatbot_content(chatbot_code):
             "system_prompt_role": chatbot.system_prompt_role,
             "system_prompt_guidelines": chatbot.system_prompt_guidelines,
             "chatbot_mode": chatbot.chatbot_mode,
-            "ai_model": chatbot.ai_model
+            "ai_model": chatbot.ai_model,
+            "guardrail_rules_json": chatbot.guardrail_rules_json
         })
 
     except Exception as e:
@@ -4192,6 +4264,18 @@ def admin_update_chatbot_content():
             chatbot.chatbot_mode = chatbot_mode
         if ai_model is not None:
             chatbot.ai_model = ai_model
+        
+        # Handle guardrail rules update (if submitted with this form)
+        guardrail_rules_raw = request.form.get('guardrail_rules_json')
+        if guardrail_rules_raw is not None:
+            guardrail_rules_raw = guardrail_rules_raw.strip()
+            if guardrail_rules_raw == "":
+                chatbot.guardrail_rules_json = None
+            else:
+                is_valid, error_msg, _ = validate_custom_rules(guardrail_rules_raw)
+                if not is_valid:
+                    return jsonify({"success": False, "error": f"Invalid guardrail rules: {error_msg}"}), 400
+                chatbot.guardrail_rules_json = guardrail_rules_raw
 
         db.commit()
         
@@ -4211,6 +4295,224 @@ def admin_update_chatbot_content():
         return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if db: close_db(db)
+
+# ===========================================================================
+# GUARDRAIL MANAGEMENT ENDPOINTS (Admin Dashboard)
+# ===========================================================================
+
+@app.route('/admin/get_guardrail_rules/<chatbot_code>', methods=['GET'])
+@requires_auth
+def admin_get_guardrail_rules(chatbot_code):
+    """Get the guardrail rules for a specific chatbot."""
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot '{chatbot_code}' not found"}), 404
+        
+        parsed_rules = parse_custom_rules(chatbot.guardrail_rules_json)
+        # Return all rules (including inactive) for admin display
+        all_rules = []
+        if chatbot.guardrail_rules_json:
+            try:
+                data = json.loads(chatbot.guardrail_rules_json)
+                all_rules = data.get("rules", [])
+            except json.JSONDecodeError:
+                pass
+        
+        return jsonify({
+            "success": True,
+            "chatbot_code": chatbot_code,
+            "chatbot_name": chatbot.name,
+            "rules": all_rules,
+            "rule_count": len(all_rules),
+            "active_count": sum(1 for r in all_rules if r.get("is_active", True))
+        })
+    except Exception as e:
+        logger.error(f"Error getting guardrail rules: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+
+@app.route('/admin/add_guardrail_rule', methods=['POST'])
+@requires_auth
+def admin_add_guardrail_rule():
+    """Add a new guardrail rule to a chatbot. Accepts plain-text phrases."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code')
+        rule_name = request.form.get('rule_name', '').strip()
+        phrases = request.form.get('phrases', '').strip()
+        redirect_message = request.form.get('redirect_message', '').strip()
+        
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+        if not rule_name:
+            return jsonify({"success": False, "error": "Rule name is required"}), 400
+        if not phrases:
+            return jsonify({"success": False, "error": "At least one blocked phrase is required"}), 400
+        
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot '{chatbot_code}' not found"}), 404
+        
+        updated_json, new_id = add_rule_to_json(
+            chatbot.guardrail_rules_json, rule_name, phrases, redirect_message
+        )
+        chatbot.guardrail_rules_json = updated_json
+        db.commit()
+        
+        logger.info(f"Added guardrail rule '{rule_name}' (ID: {new_id}) to chatbot {chatbot_code}")
+        return jsonify({
+            "success": True,
+            "message": f"Rule '{rule_name}' added successfully",
+            "rule_id": new_id
+        })
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error adding guardrail rule: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+
+@app.route('/admin/update_guardrail_rule', methods=['POST'])
+@requires_auth
+def admin_update_guardrail_rule():
+    """Update an existing guardrail rule's name, phrases, or redirect message."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code')
+        rule_id = request.form.get('rule_id')
+        rule_name = request.form.get('rule_name')
+        phrases = request.form.get('phrases')
+        redirect_message = request.form.get('redirect_message')
+        
+        if not chatbot_code or not rule_id:
+            return jsonify({"success": False, "error": "Chatbot code and rule ID are required"}), 400
+        
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot '{chatbot_code}' not found"}), 404
+        
+        updated_json = update_rule_in_json(
+            chatbot.guardrail_rules_json, rule_id,
+            name=rule_name, phrases=phrases, redirect_message=redirect_message
+        )
+        chatbot.guardrail_rules_json = updated_json
+        db.commit()
+        
+        logger.info(f"Updated guardrail rule '{rule_id}' for chatbot {chatbot_code}")
+        return jsonify({"success": True, "message": "Rule updated successfully"})
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error updating guardrail rule: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+
+@app.route('/admin/delete_guardrail_rule', methods=['POST'])
+@requires_auth
+def admin_delete_guardrail_rule():
+    """Delete a guardrail rule by ID."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code')
+        rule_id = request.form.get('rule_id')
+        
+        if not chatbot_code or not rule_id:
+            return jsonify({"success": False, "error": "Chatbot code and rule ID are required"}), 400
+        
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot '{chatbot_code}' not found"}), 404
+        
+        updated_json = remove_rule_from_json(chatbot.guardrail_rules_json, rule_id)
+        chatbot.guardrail_rules_json = updated_json
+        db.commit()
+        
+        logger.info(f"Deleted guardrail rule '{rule_id}' from chatbot {chatbot_code}")
+        return jsonify({"success": True, "message": "Rule deleted successfully"})
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error deleting guardrail rule: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+
+@app.route('/admin/toggle_guardrail_rule', methods=['POST'])
+@requires_auth
+def admin_toggle_guardrail_rule():
+    """Toggle a guardrail rule on/off."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code')
+        rule_id = request.form.get('rule_id')
+        
+        if not chatbot_code or not rule_id:
+            return jsonify({"success": False, "error": "Chatbot code and rule ID are required"}), 400
+        
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot '{chatbot_code}' not found"}), 404
+        
+        updated_json, new_state = toggle_rule_in_json(chatbot.guardrail_rules_json, rule_id)
+        chatbot.guardrail_rules_json = updated_json
+        db.commit()
+        
+        state_text = "enabled" if new_state else "disabled"
+        logger.info(f"Toggled guardrail rule '{rule_id}' to {state_text} for chatbot {chatbot_code}")
+        return jsonify({
+            "success": True,
+            "message": f"Rule {state_text} successfully",
+            "is_active": new_state
+        })
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error toggling guardrail rule: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+
+@app.route('/admin/reorder_guardrail_rules', methods=['POST'])
+@requires_auth
+def admin_reorder_guardrail_rules():
+    """Reorder guardrail rules based on a list of rule IDs in desired order."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code')
+        rule_ids_json = request.form.get('rule_ids')  # JSON array of rule IDs in order
+        
+        if not chatbot_code or not rule_ids_json:
+            return jsonify({"success": False, "error": "Chatbot code and rule IDs are required"}), 400
+        
+        try:
+            rule_ids = json.loads(rule_ids_json)
+        except json.JSONDecodeError:
+            return jsonify({"success": False, "error": "Invalid rule IDs format"}), 400
+        
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot '{chatbot_code}' not found"}), 404
+        
+        updated_json = reorder_rules_in_json(chatbot.guardrail_rules_json, rule_ids)
+        chatbot.guardrail_rules_json = updated_json
+        db.commit()
+        
+        logger.info(f"Reordered guardrail rules for chatbot {chatbot_code}")
+        return jsonify({"success": True, "message": "Rules reordered successfully"})
+    except Exception as e:
+        if db: db.rollback()
+        logger.error(f"Error reordering guardrail rules: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db: close_db(db)
+
+# ===========================================================================
 
 @app.route('/admin/update_category', methods=['POST'])
 @requires_auth

@@ -240,6 +240,61 @@ document.addEventListener('DOMContentLoaded', function() {
             this.textContent = 'Create Chatbot';
         });
     });
+
+    // Create-tab Tier 2 guardrail rows
+    const createGuardrailRulesContainer = document.getElementById('create-guardrail-rules-container');
+    const createGuardrailAddBtn = document.getElementById('create-guardrail-add-btn');
+
+    if (createGuardrailRulesContainer && createGuardrailAddBtn) {
+        function buildCreateGuardrailRuleRow() {
+            const row = document.createElement('div');
+            row.className = 'card card-body bg-light border mb-2 create-guardrail-rule-row';
+            row.innerHTML = `
+                <div class="mb-2">
+                    <label class="form-label small mb-1 fw-bold">Rule Name</label>
+                    <input type="text" class="form-control" name="create_guardrail_rule_name[]" placeholder="e.g., Block case note drafting">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1 fw-bold">Blocked Phrases <span class="text-muted fw-normal">(comma-separated)</span></label>
+                    <textarea class="form-control" name="create_guardrail_rule_phrases[]" rows="5" placeholder="e.g., write a case note, draft case note"></textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1 fw-bold">Redirect Message <span class="text-muted fw-normal">(optional)</span></label>
+                    <textarea class="form-control" name="create_guardrail_rule_message[]" rows="5" placeholder="Message shown when this rule blocks input"></textarea>
+                </div>
+                <div class="text-end">
+                    <button type="button" class="btn btn-sm btn-outline-danger create-guardrail-remove-btn">
+                        <i class="bi bi-trash"></i> Remove Rule
+                    </button>
+                </div>
+            `;
+            return row;
+        }
+
+        createGuardrailAddBtn.addEventListener('click', function() {
+            createGuardrailRulesContainer.appendChild(buildCreateGuardrailRuleRow());
+        });
+
+        createGuardrailRulesContainer.addEventListener('click', function(e) {
+            const removeBtn = e.target.closest('.create-guardrail-remove-btn');
+            if (!removeBtn) {
+                return;
+            }
+
+            const rows = createGuardrailRulesContainer.querySelectorAll('.create-guardrail-rule-row');
+            if (rows.length <= 1) {
+                rows[0].querySelectorAll('input, textarea').forEach(function(field) {
+                    field.value = '';
+                });
+                return;
+            }
+
+            const row = removeBtn.closest('.create-guardrail-rule-row');
+            if (row) {
+                row.remove();
+            }
+        });
+    }
     
     // Preview button handler
     document.getElementById('preview-btn').addEventListener('click', function() {

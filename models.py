@@ -320,6 +320,10 @@ class ChatbotContent(Base):
     # touching application code.
     ai_model = Column(String(100), nullable=False, default='gemini-2.5-flash')
 
+    # Per-chatbot guardrail rules (JSON). Admin-configurable Tier 2 rules.
+    # Tier 1 system guardrails are hardcoded in guardrails.py and always active.
+    guardrail_rules_json = Column(Text, nullable=True, default=None)
+
     # Relationship to handle multiple lo_root_ids
     lo_root_ids = relationship("ChatbotLORootAssociation", backref="chatbot")
 
@@ -350,7 +354,8 @@ class ChatbotContent(Base):
                         char_limit=50000, is_active=True, category="standard",
                         system_prompt_role=None, system_prompt_guidelines=None,
                         auto_delete_days=None,
-                        chatbot_mode=None, ai_model=None):
+                        chatbot_mode=None, ai_model=None,
+                        guardrail_rules_json=None):
         """Create or update chatbot content"""
         existing = cls.get_by_code(db, code)
         if existing:
@@ -375,6 +380,8 @@ class ChatbotContent(Base):
                 existing.chatbot_mode = chatbot_mode
             if ai_model is not None:
                 existing.ai_model = ai_model
+            if guardrail_rules_json is not None:
+                existing.guardrail_rules_json = guardrail_rules_json
             return existing
         else:
             new_content = cls(
@@ -391,7 +398,8 @@ class ChatbotContent(Base):
                 system_prompt_guidelines=system_prompt_guidelines,
                 auto_delete_days=auto_delete_days,  # 👈 NEW: Auto-delete setting for new chatbots
                 chatbot_mode=chatbot_mode if chatbot_mode is not None else 'knowledge_retrieval',
-                ai_model=ai_model if ai_model is not None else 'gemini-2.5-flash'
+                ai_model=ai_model if ai_model is not None else 'gemini-2.5-flash',
+                guardrail_rules_json=guardrail_rules_json
                 # lo_root_ids will be handled separately after creation/update
             )
             db.add(new_content)
@@ -415,6 +423,7 @@ class ChatbotContent(Base):
             "auto_delete_text": self.get_auto_delete_text(),  # 👈 NEW: Human-readable text
             "chatbot_mode": self.chatbot_mode,
             "ai_model": self.ai_model,
+            "guardrail_rules_json": self.guardrail_rules_json,
             "lo_root_ids": [assoc.lo_root_id for assoc in self.lo_root_ids]
         }
 

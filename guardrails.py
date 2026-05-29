@@ -30,6 +30,12 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Common filler words that should not change Tier 2 match intent.
+FILLER_WORDS = {
+    "a", "an", "the", "my", "this", "that", "these", "those", "our",
+    "your", "their", "his", "her", "its"
+}
+
 
 # ==============================================================================
 # TIER 1: SYSTEM-LEVEL GUARDRAILS (Hardcoded — cannot be disabled)
@@ -270,16 +276,47 @@ def _phrases_to_pattern(phrases_text):
 
     phrases = [p.strip() for p in str(phrases_text).split(",") if p.strip()]
     parts = []
+    filler_group = r"(?:a|an|the|my|this|that|these|those|our|your|their|his|her|its)"
+    filler_gap = rf"(?:\s+\b{filler_group}\b)*\s+"
+
     for phrase in phrases:
-        words = phrase.split()
-        if not words:
+        # Keep alphanumeric, apostrophe and hyphen; drop other punctuation
+        cleaned = re.sub(r"[^\w\s'\-]", " ", phrase.lower())
+        raw_words = [w for w in cleaned.split() if w]
+        if not raw_words:
             continue
-        escaped = r"\s+".join(re.escape(w) for w in words)
-        parts.append(rf"\b{escaped}\b")
+
+        # Remove filler words so phrase intent is matched, not article choice.
+        core_words = [w for w in raw_words if w not in FILLER_WORDS]
+        if not core_words:
+            core_words = raw_words
+
+        word_parts = [_word_variant_pattern(w) for w in core_words]
+        phrase_pattern = r"\b" + filler_gap.join(word_parts) + r"\b"
+        parts.append(phrase_pattern)
 
     if not parts:
         return None
     return rf"(?i)(?:{'|'.join(parts)})"
+
+
+def _word_variant_pattern(word):
+    """Return a regex that tolerates simple singular/plural variants."""
+    escaped = re.escape(word)
+    if len(word) <= 3:
+        return escaped
+
+    # city -> city|cities
+    if word.endswith("y") and len(word) > 3:
+        stem = re.escape(word[:-1])
+        return rf"(?:{escaped}|{stem}ies)"
+
+    # class -> class|classes, match -> match|matches, box -> box|boxes
+    if word.endswith(("s", "ss", "sh", "ch", "x", "z")):
+        return rf"(?:{escaped}|{escaped}es)"
+
+    # note -> note|notes
+    return rf"(?:{escaped}|{escaped}s)"
 
 
 def build_rules_json(rules_list):

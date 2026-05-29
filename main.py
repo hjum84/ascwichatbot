@@ -84,6 +84,65 @@ except ImportError:
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Tier 3 safety fallback: enforced at model-instruction layer for cases
+# that are not blocked by deterministic Tier 1/2 checks.
+TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT = (
+    "[CRITICAL GUARDRAIL - DO NOT IGNORE]\n"
+    "You are an educational and administrative assistant, NOT a caseworker or supervisor.\n"
+    "Under no circumstances may you make, validate, or recommend clinical safety determinations,\n"
+    "risk assessments, or removal decisions for any hypothetical or real case scenario.\n"
+    "If a user asks whether a situation is safe/unsafe, whether a child is in danger, or what\n"
+    "decision they should make, you must strictly reply:\n"
+    "\"I am an AI assistant and cannot make clinical safety determinations or casework decisions.\n"
+    "Please refer to your agency's safety assessment frameworks and consult directly with your supervisor.\""
+)
+TIER3_SAFETY_GUARDRAIL_START_MARKER = "[[TIER3_SAFETY_GUARDRAIL_PROMPT_START]]"
+TIER3_SAFETY_GUARDRAIL_END_MARKER = "[[TIER3_SAFETY_GUARDRAIL_PROMPT_END]]"
+
+
+def split_guidelines_and_tier3_prompt(guidelines_text):
+    """
+    Split stored guidelines into:
+    - clean guidelines text for UI/prompt display
+    - tier3 prompt text (or default if absent)
+    """
+    text = (guidelines_text or "").strip()
+    if not text:
+        return "", TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT
+
+    start_idx = text.find(TIER3_SAFETY_GUARDRAIL_START_MARKER)
+    end_idx = text.find(TIER3_SAFETY_GUARDRAIL_END_MARKER)
+    if start_idx == -1 or end_idx == -1 or end_idx < start_idx:
+        return text, TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT
+
+    before = text[:start_idx].strip()
+    prompt_start = start_idx + len(TIER3_SAFETY_GUARDRAIL_START_MARKER)
+    tier3_prompt = text[prompt_start:end_idx].strip()
+    after = text[end_idx + len(TIER3_SAFETY_GUARDRAIL_END_MARKER):].strip()
+
+    clean_guidelines = before
+    if after:
+        clean_guidelines = f"{clean_guidelines}\n\n{after}".strip() if clean_guidelines else after
+
+    return clean_guidelines, (tier3_prompt or TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT)
+
+
+def build_guidelines_with_tier3_prompt(guidelines_text, tier3_prompt_text):
+    """
+    Persist Tier 3 prompt inside system_prompt_guidelines using markers so
+    no database migration is required.
+    """
+    clean_guidelines, _ = split_guidelines_and_tier3_prompt(guidelines_text)
+    tier3_prompt = (tier3_prompt_text or "").strip() or TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT
+    tier3_block = (
+        f"{TIER3_SAFETY_GUARDRAIL_START_MARKER}\n"
+        f"{tier3_prompt}\n"
+        f"{TIER3_SAFETY_GUARDRAIL_END_MARKER}"
+    )
+    if clean_guidelines:
+        return f"{clean_guidelines}\n\n{tier3_block}"
+    return tier3_block
+
 # Load environment variables
 load_dotenv()
 # openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: Using Gemini instead
@@ -841,12 +900,14 @@ def get_cached_response(content_hash, user_message, chatbot_code):
 
         if chatbot:
             char_limit_value = str(chatbot.char_limit) if chatbot.char_limit else "50000"
+            saved_guidelines = chatbot.system_prompt_guidelines or ""
+            clean_guidelines_text, tier3_guardrail_text = split_guidelines_and_tier3_prompt(saved_guidelines)
             
             program_display_name = program_names.get(chatbot_code, chatbot_code) # Get display name
             system_prompt_role_text = f"You are an assistant that answers questions ONLY based on the provided content for the '{program_display_name}' program. Your primary goal is to act as a knowledgeable expert on this specific content."
 
-            if chatbot.system_prompt_guidelines:
-                system_prompt_guidelines_text = chatbot.system_prompt_guidelines.replace("{char_limit}", char_limit_value)
+            if clean_guidelines_text:
+                system_prompt_guidelines_text = clean_guidelines_text.replace("{char_limit}", char_limit_value)
             else: # Fallback to default guidelines if not set
                 system_prompt_guidelines_text = f"""1. Only answer questions based on the provided content
 2. When asked to "give an example" or "explain with a scenario," always prioritize real-world relevance based on the provided content
@@ -865,6 +926,7 @@ def get_cached_response(content_hash, user_message, chatbot_code):
                 f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
                 f"{system_prompt_role_text}\n\n"
                 f"IMPORTANT GUIDELINES:\n{system_prompt_guidelines_text}\n\n"
+                f"{tier3_guardrail_text}\n\n"
                 f"RESPONSE APPROACH:\n"
                 f"- Answer questions directly related to the provided content\n"
                 f"- For application-based or scenario-based questions, use the content as a foundation to provide practical guidance\n"
@@ -892,6 +954,7 @@ def get_cached_response(content_hash, user_message, chatbot_code):
                 f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
                 f"{system_prompt_role_fallback}\n\n"
                 f"IMPORTANT GUIDELINES:\n{default_guidelines}\n\n"
+                f"{TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT}\n\n"
                 f"RESPONSE APPROACH:\n"
                 f"- Answer questions directly related to the provided content\n"
                 f"- For application-based or scenario-based questions, use the content as a foundation to provide practical guidance\n"
@@ -2163,9 +2226,13 @@ def chat():
 
                 # Build system prompt (reuse DB-configured prompt if available)
                 if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
+                    clean_guidelines_text, tier3_guardrail_text = split_guidelines_and_tier3_prompt(
+                        chatbot.system_prompt_guidelines
+                    )
                     system_prompt = (
                         f"{chatbot.system_prompt_role}\n\n"
-                        f"IMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}\n\n"
+                        f"IMPORTANT GUIDELINES:\n{clean_guidelines_text}\n\n"
+                        f"{tier3_guardrail_text}\n\n"
                         f"CONTENT:\n{program_content.get(current_program, '')}"
                     )
                 else:
@@ -2178,6 +2245,7 @@ def chat():
                         f"3. Be concise but thorough in your responses\n"
                         f"4. Maintain a professional and helpful tone\n"
                         f"5. If asked about something not covered in the content, do not make assumptions\n\n"
+                        f"{TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT}\n\n"
                         f"CONTENT:\n{program_content.get(current_program, '')}"
                     )
 
@@ -2358,7 +2426,15 @@ def chat():
                     logger.debug(f"Cache miss for {current_program}, getting new response")
                     # Use system prompt from DB if available
                     if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
-                        system_prompt = f"{chatbot.system_prompt_role}\n\nIMPORTANT GUIDELINES:\n{chatbot.system_prompt_guidelines}\n\nCONTENT:\n{program_content.get(current_program, '')}"
+                        clean_guidelines_text, tier3_guardrail_text = split_guidelines_and_tier3_prompt(
+                            chatbot.system_prompt_guidelines
+                        )
+                        system_prompt = (
+                            f"{chatbot.system_prompt_role}\n\n"
+                            f"IMPORTANT GUIDELINES:\n{clean_guidelines_text}\n\n"
+                            f"{tier3_guardrail_text}\n\n"
+                            f"CONTENT:\n{program_content.get(current_program, '')}"
+                        )
                     else:
                         system_prompt = f"""You are an assistant that answers questions based on the following content for the {program_names.get(current_program, 'selected')} program.
 
@@ -2368,6 +2444,8 @@ IMPORTANT GUIDELINES:
 3. Be concise but thorough in your responses
 4. Maintain a professional and helpful tone
 5. If asked about something not covered in the content, do not make assumptions
+
+{TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT}
 
 CONTENT:
 {program_content.get(current_program, '')}"""
@@ -3713,12 +3791,17 @@ def admin_upload():
         logger.info(f"Creating chatbot with final content length: {len(final_content)}")
         logger.info(f"Content source was: {content_source}")
         
-        # Get guidelines from form
+        # Get guidelines + Tier 3 guardrail prompt from form
         system_prompt_guidelines = request.form.get('system_prompt_guidelines')
+        tier3_safety_guardrail_prompt = request.form.get('tier3_safety_guardrail_prompt')
         if not system_prompt_guidelines:
             # Provide default guidelines if not provided
             system_prompt_guidelines = generate_default_guidelines()
             logger.info("Using default system prompt guidelines as none were provided")
+        system_prompt_guidelines = build_guidelines_with_tier3_prompt(
+            system_prompt_guidelines,
+            tier3_safety_guardrail_prompt
+        )
         
         # Generate role that maintains connection with content
         system_prompt_role = "You are an AI assistant specialized in understanding and explaining the provided content. Your role is to provide accurate, helpful, and relevant information while maintaining a professional tone."
@@ -4110,13 +4193,17 @@ def admin_get_chatbot_content(chatbot_code):
         if not chatbot:
             return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
             
+        clean_guidelines_text, tier3_guardrail_text = split_guidelines_and_tier3_prompt(
+            chatbot.system_prompt_guidelines
+        )
         return jsonify({
             "success": True,
             "content": chatbot.content,
             "char_count": len(chatbot.content),
             "char_limit": chatbot.char_limit,
             "system_prompt_role": chatbot.system_prompt_role,
-            "system_prompt_guidelines": chatbot.system_prompt_guidelines,
+            "system_prompt_guidelines": clean_guidelines_text,
+            "tier3_safety_guardrail_prompt": tier3_guardrail_text,
             "chatbot_mode": chatbot.chatbot_mode,
             "ai_model": chatbot.ai_model,
             "guardrail_rules_json": chatbot.guardrail_rules_json
@@ -4182,6 +4269,7 @@ def admin_update_chatbot_content():
         content = request.form.get('content')
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
         system_prompt_guidelines = request.form.get('system_prompt_guidelines')
+        tier3_safety_guardrail_prompt = request.form.get('tier3_safety_guardrail_prompt')
         # New optional fields: conversation mode and AI model
         chatbot_mode = request.form.get('chatbot_mode')
         if chatbot_mode is not None:
@@ -4259,7 +4347,18 @@ def admin_update_chatbot_content():
         # Update content and system prompts
         chatbot.content = content
         if system_prompt_guidelines is not None:
-            chatbot.system_prompt_guidelines = system_prompt_guidelines
+            chatbot.system_prompt_guidelines = build_guidelines_with_tier3_prompt(
+                system_prompt_guidelines,
+                tier3_safety_guardrail_prompt
+            )
+        elif tier3_safety_guardrail_prompt is not None:
+            existing_guidelines, _ = split_guidelines_and_tier3_prompt(
+                chatbot.system_prompt_guidelines
+            )
+            chatbot.system_prompt_guidelines = build_guidelines_with_tier3_prompt(
+                existing_guidelines,
+                tier3_safety_guardrail_prompt
+            )
         if chatbot_mode is not None:
             chatbot.chatbot_mode = chatbot_mode
         if ai_model is not None:

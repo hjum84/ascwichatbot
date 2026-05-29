@@ -669,6 +669,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         document.getElementById('editCharLimit').value = data.char_limit;
                         document.getElementById('charLimitDisplay').textContent = data.char_limit.toLocaleString();
                         document.getElementById('editSystemPromptGuidelines').value = data.system_prompt_guidelines || '';
+                        const editTier3SafetyPrompt = document.getElementById('editTier3SafetyPrompt');
+                        if (editTier3SafetyPrompt) {
+                            editTier3SafetyPrompt.value = data.tier3_safety_guardrail_prompt || '';
+                        }
                         const editChatbotMode = document.getElementById('editChatbotMode');
                         if (editChatbotMode) {
                             const normalizedMode = (data.chatbot_mode === 'critical_thinking_agent')
@@ -710,6 +714,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const appendContent = document.getElementById('appendContent').checked;
         const autoSummarize = document.getElementById('editAutoSummarize').checked;
         const systemPromptGuidelines = document.getElementById('editSystemPromptGuidelines').value;
+        const tier3SafetyPromptEl = document.getElementById('editTier3SafetyPrompt');
+        const tier3SafetyPrompt = tier3SafetyPromptEl ? tier3SafetyPromptEl.value : '';
         const chatbotModeEl = document.getElementById('editChatbotMode');
         const aiModelEl = document.getElementById('editAiModel');
         const chatbotMode = chatbotModeEl ? chatbotModeEl.value : '';
@@ -757,6 +763,7 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('char_limit', charLimit);
         formData.append('append_content', 'false'); // When editing, we're replacing content, not appending
         formData.append('system_prompt_guidelines', systemPromptGuidelines);
+        formData.append('tier3_safety_guardrail_prompt', tier3SafetyPrompt);
         if (chatbotMode) {
             formData.append('chatbot_mode', chatbotMode);
         }

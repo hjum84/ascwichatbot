@@ -1187,6 +1187,21 @@ I can help you review the curriculum on service planning and case closure criter
                                                     </div>
                                                 </div>
                                             </div>
+
+                                            <div class="mb-3">
+                                                <label for="tier3_safety_guardrail_prompt" class="form-label">Tier 3 Safety Guardrail Prompt</label>
+                                                <textarea class="form-control" id="tier3_safety_guardrail_prompt" name="tier3_safety_guardrail_prompt" rows="6">[CRITICAL GUARDRAIL - DO NOT IGNORE]
+You are an educational and administrative assistant, NOT a caseworker or supervisor.
+Under no circumstances may you make, validate, or recommend clinical safety determinations,
+risk assessments, or removal decisions for any hypothetical or real case scenario.
+If a user asks whether a situation is safe/unsafe, whether a child is in danger, or what
+decision they should make, you must strictly reply:
+"I am an AI assistant and cannot make clinical safety determinations or casework decisions.
+Please refer to your agency's safety assessment frameworks and consult directly with your supervisor."</textarea>
+                                                <div class="form-text">
+                                                    Fallback model-level guardrail used when Tier 1/Tier 2 deterministic checks do not block.
+                                                </div>
+                                            </div>
                                             
                                             <div class="d-flex justify-content-start mt-3">
                                                 <button type="button" id="preview-btn" class="btn btn-secondary me-2"><i class="bi bi-eye"></i> Preview Content</button>
@@ -2029,6 +2044,12 @@ I can help you review the curriculum on service planning and case closure criter
                         <label for="editSystemPromptGuidelines" class="form-label">System Prompt Guidelines</label>
                         <textarea class="form-control" id="editSystemPromptGuidelines" name="system_prompt_guidelines" rows="5" placeholder="Enter guidelines for the chatbot's behavior..."></textarea>
                         <div class="form-text">Specify detailed guidelines and rules for how the chatbot should process and respond to queries.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="editTier3SafetyPrompt" class="form-label">Tier 3 Safety Guardrail Prompt</label>
+                        <textarea class="form-control" id="editTier3SafetyPrompt" name="tier3_safety_guardrail_prompt" rows="6" placeholder="Enter Tier 3 fallback safety guardrail prompt..."></textarea>
+                        <div class="form-text">Editable model-level fallback guardrail for safety/casework decision requests.</div>
                     </div>
 
                     <div class="row g-3 mb-3">

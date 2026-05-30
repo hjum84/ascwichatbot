@@ -43,7 +43,7 @@ import atexit
 from datetime import datetime, timedelta
 import pandas as pd
 from io import StringIO, BytesIO
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import joinedload
 import markdown2  # Add markdown2 for markdown parsing
 import pytz  # Add pytz for timezone conversion
@@ -142,6 +142,60 @@ def build_guidelines_with_tier3_prompt(guidelines_text, tier3_prompt_text):
     if clean_guidelines:
         return f"{clean_guidelines}\n\n{tier3_block}"
     return tier3_block
+
+
+def map_blocked_guardrail_tier(guardrail_result):
+    """Map deterministic guardrail categories to persisted tier labels."""
+    category = (guardrail_result or {}).get("category")
+    if category == "case_data":
+        return "tier1_case_data"
+    if category == "safety_decision":
+        return "tier1_safety_decision"
+    if category == "off_topic":
+        return "tier1_off_topic"
+    if category == "custom_rule":
+        return "tier2_custom"
+    return "guardrail_blocked"
+
+
+def build_blocked_message_placeholder(guardrail_tier, guardrail_result):
+    """Redact blocked user text while preserving useful analytics context."""
+    category = (guardrail_result or {}).get("category") or "guardrail"
+    rule_name = (guardrail_result or {}).get("rule_name")
+    if rule_name:
+        return (
+            f"[Message blocked by {guardrail_tier} ({category}); "
+            f"matched rule: {rule_name}. Original user text redacted.]"
+        )
+    return (
+        f"[Message blocked by {guardrail_tier} ({category}). "
+        f"Original user text redacted.]"
+    )
+
+
+def detect_tier3_model_fallback(chatbot_reply):
+    """
+    Best-effort Tier 3 detection from response text.
+    Tier 3 is model-instruction fallback (not deterministic pre-blocking).
+    """
+    normalized = re.sub(r"\s+", " ", (chatbot_reply or "").lower()).strip()
+    if not normalized:
+        return False
+
+    required_fragments = (
+        "cannot make clinical safety determinations",
+        "consult directly with your supervisor"
+    )
+    return all(fragment in normalized for fragment in required_fragments)
+
+
+def get_guardrail_metadata_for_chat_record(guardrail_result=None, chatbot_reply=""):
+    """Return (guardrail_tier, guardrail_rule_name) for ChatHistory logging."""
+    if guardrail_result and guardrail_result.get("blocked"):
+        return map_blocked_guardrail_tier(guardrail_result), guardrail_result.get("rule_name")
+    if detect_tier3_model_fallback(chatbot_reply):
+        return "tier3_model", None
+    return "passed", None
 
 # Load environment variables
 load_dotenv()
@@ -1823,7 +1877,12 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == program_code,
             ChatHistory.timestamp >= today_start_utc,
-            ChatHistory.timestamp <= today_end_utc
+            ChatHistory.timestamp <= today_end_utc,
+            or_(
+                ChatHistory.guardrail_tier.is_(None),   # Backward compatibility for older rows
+                ChatHistory.guardrail_tier == 'passed',
+                ChatHistory.guardrail_tier == 'tier3_model'
+            )
         ).count()
         
         remaining_questions = max(0, quota - message_count)
@@ -2088,7 +2147,12 @@ def chat():
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == current_program,
             ChatHistory.timestamp >= today_start_utc,
-            ChatHistory.timestamp <= today_end_utc
+            ChatHistory.timestamp <= today_end_utc,
+            or_(
+                ChatHistory.guardrail_tier.is_(None),  # Backward compatibility for older rows
+                ChatHistory.guardrail_tier == 'passed',
+                ChatHistory.guardrail_tier == 'tier3_model'
+            )
         ).count()
         
         logger.info(f"Current message count for user {user_id} in program {current_program}: {message_count}/{quota}")
@@ -2146,6 +2210,35 @@ def chat():
             logger.info(f"Guardrail log: {json.dumps(log_entry)}")
             
             redirect_msg = guardrail_result["redirect_message"]
+            guardrail_tier, guardrail_rule_name = get_guardrail_metadata_for_chat_record(
+                guardrail_result=guardrail_result
+            )
+            redacted_user_message = build_blocked_message_placeholder(
+                guardrail_tier,
+                guardrail_result
+            )
+
+            # Persist blocked exchanges for analytics/conversation continuity,
+            # but always redact original blocked user text.
+            try:
+                blocked_chat_entry = ChatHistory(
+                    user_id=user_id,
+                    program_code=current_program,
+                    user_message=redacted_user_message,
+                    bot_message=redirect_msg,
+                    guardrail_tier=guardrail_tier,
+                    guardrail_rule_name=guardrail_rule_name,
+                    timestamp=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                db.add(blocked_chat_entry)
+                db.commit()
+            except Exception as log_error:
+                db.rollback()
+                logger.error(
+                    f"Failed to save blocked chat entry for user {user_id} in {current_program}: "
+                    f"{str(log_error)}"
+                )
+
             return jsonify({
                 "reply": redirect_msg,
                 "html_reply": parse_markdown(redirect_msg),
@@ -2503,11 +2596,16 @@ User: Please complete your previous response with a brief conclusion."""
         html_reply = parse_markdown(chatbot_reply)
 
         # Save to chat history with UTC timestamp
+        guardrail_tier, guardrail_rule_name = get_guardrail_metadata_for_chat_record(
+            chatbot_reply=chatbot_reply
+        )
         chat_entry = ChatHistory(
             user_id=user_id,
             program_code=current_program,
             user_message=user_message,
             bot_message=chatbot_reply,
+            guardrail_tier=guardrail_tier,
+            guardrail_rule_name=guardrail_rule_name,
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None)  # Store as UTC without timezone info
         )
         db.add(chat_entry)

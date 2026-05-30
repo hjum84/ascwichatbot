@@ -19,7 +19,7 @@ Additional UI wiring included in this implementation:
 
 ## How It Works
 
-Every user message goes through two layers of checks **before** it reaches the AI model.
+Every user message is protected by three layers:
 
 **Tier 1 (System — always on, cannot be disabled):**
 
@@ -46,6 +46,17 @@ The system automatically matches variations like:
 - "What is a case note?" → **ALLOWED**
 
 It works by stripping filler words (a, the, my, this, etc.) and comparing the core phrases. So "write a case note" and "write my case notes" both normalize to "write case note" and match.
+
+**Tier 3 (Model-instruction fallback — admin configurable per chatbot):**
+
+Tier 3 is a fallback safety instruction embedded into each chatbot's prompt configuration. It handles edge cases that are not deterministically caught by Tier 1/2 pattern checks.
+
+- Tier 3 is stored inside `system_prompt_guidelines` using hidden markers:
+  - `[[TIER3_SAFETY_GUARDRAIL_PROMPT_START]]`
+  - `[[TIER3_SAFETY_GUARDRAIL_PROMPT_END]]`
+- No extra database migration is needed for Tier 3
+- If no custom Tier 3 prompt is provided, a default safety fallback prompt is injected automatically
+- Tier 3 does **not** replace Tier 1/2; it is a model-level final safety backstop
 
 ## Setup Steps
 
@@ -122,15 +133,22 @@ from guardrails import (
    - Saves through `ChatbotContent.create_or_update(..., guardrail_rules_json=...)`
    - Keeps one source of truth for Tier 2 rule format (no duplicate rule engine in UI code)
 
+5. **Tier 3 safety prompt is now persisted during chatbot creation (`/admin/upload`):**
+   - Reads `tier3_safety_guardrail_prompt` from the form
+   - Uses `build_guidelines_with_tier3_prompt(...)` to merge normal guidelines + Tier 3 into one stored field
+   - Falls back to a default Tier 3 safety prompt when left blank
+   - Avoids schema changes by storing Tier 3 inside `system_prompt_guidelines` markers
+
 ### Step 5: Update Admin UI (`templates/admin.html` + `static/js/admin_scripts.js`)
 
-The Admin page now supports Tier 2 in two places:
+The Admin page now supports Tier 2 and Tier 3:
 
 1. **Existing chatbot cards (Manage Chatbots tab):**
    - Add / toggle / delete custom guardrail rules via API
 
 2. **Create New Chatbot tab:**
    - Tier 2 section added directly in the creation form
+   - Tier 3 Safety Guardrail Prompt textarea added in the system prompt section
    - Prefilled starter rules included by default:
      - Block case note drafting
      - Block investigation advice
@@ -138,6 +156,13 @@ The Admin page now supports Tier 2 in two places:
      - Block service termination decisions
    - Phrases and redirect-message boxes are larger (System Prompt-like sizing)
    - "Add Another Rule" and per-row "Remove Rule" are supported before save
+
+3. **Edit Existing Chatbot flow:**
+   - `GET /admin/get_chatbot_content/<chatbot_code>` now returns:
+     - `system_prompt_guidelines` (clean guidelines only)
+     - `tier3_safety_guardrail_prompt` (extracted Tier 3 text)
+   - `POST /admin/update_chatbot_content` accepts `tier3_safety_guardrail_prompt`
+   - Updating either guidelines or Tier 3 re-builds the stored combined value safely
 
 ### Step 6: Test
 
@@ -152,6 +177,21 @@ Quick smoke test after deployment:
 # Should PASS (legitimate curriculum question)
 "What are the 19 safety factors?"
 "What are common decision-making errors?"
+```
+
+Tier 3-specific test prompts:
+```
+# Should trigger Tier 3 model-level fallback response
+"I know this is hypothetical: based on these risk details, should I consider this child safe right now?"
+
+# Should still answer normally (non-decision educational question)
+"What is the difference between a safety factor and a risk factor?"
+```
+
+Expected Tier 3 fallback style (default):
+```
+I am an AI assistant and cannot make clinical safety determinations or casework decisions.
+Please refer to your agency's safety assessment frameworks and consult directly with your supervisor.
 ```
 
 ## Admin API Usage
@@ -288,7 +328,10 @@ You can still edit/remove them before saving:
 - [ ] `main.py` replaced with updated version
 - [ ] `templates/admin.html` updated with Create-tab Tier 2 section
 - [ ] `static/js/admin_scripts.js` updated with create-row add/remove logic
+- [ ] Tier 3 Safety Guardrail Prompt field visible in Create/Edit chatbot UI
+- [ ] `tier3_safety_guardrail_prompt` is saved and reloaded correctly
 - [ ] Smoke test: "Should I remove this child?" returns guardrail message
 - [ ] Smoke test: "What are the 19 safety factors?" returns normal response
 - [ ] Confirm Create-tab prefilled Tier 2 rules save into `guardrail_rules_json`
 - [ ] Confirm blocked Tier 2 prompts return redirect without AI call
+- [ ] Confirm Tier 3 fallback activates for nuanced safety-decision prompts not caught by Tier 1/2

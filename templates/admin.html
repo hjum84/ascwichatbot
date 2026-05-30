@@ -243,7 +243,7 @@
                                             </div>
                                             <div>
                                                 <h2 class="mb-1">{{ db_stats.total_size }}</h2>
-                                                <p class="text-muted mb-0">of {{ db_stats.max_size_pretty }} used</p>
+                                                <p class="text-muted mb-0">of {{ db_stats.max_size_pretty }} {{ db_stats.capacity_source_label|default('capacity')|lower }} used</p>
                                                 <small class="text-{{ storage_health.color }}">
                                                     <i class="bi bi-{{ storage_health.icon }}"></i> {{ storage_health.status|title }}
                                                 </small>
@@ -254,13 +254,13 @@
                                                 {% if db_stats.detection_successful %}
                                                     <div class="mt-1">
                                                         <small class="text-success">
-                                                            <i class="bi bi-check-circle"></i> Auto-detected
+                                                            <i class="bi bi-check-circle"></i> Using configured limit
                                                         </small>
                                                     </div>
                                                 {% else %}
                                                     <div class="mt-1">
                                                         <small class="text-warning">
-                                                            <i class="bi bi-exclamation-circle"></i> Using fallback
+                                                            <i class="bi bi-exclamation-circle"></i> Using default fallback limit
                                                         </small>
                                                     </div>
                                                 {% endif %}
@@ -344,7 +344,7 @@
                                                     <i class="bi bi-table fs-2 text-warning"></i>
                                                 </div>
                                                 <h4 class="mb-1">{{ db_stats.total_tables_count }}</h4>
-                                                <small class="text-muted">Database Tables</small>
+                                                <small class="text-muted">Tracked Tables (Schemas)</small>
                                             </div>
                                         </div>
                                     </div>
@@ -355,9 +355,9 @@
                                 <div class="card border-0 shadow-sm mb-4">
                                     <div class="card-header bg-white border-bottom">
                                         <h5 class="mb-0">
-                                            <i class="bi bi-pie-chart me-2"></i>Complete Database Breakdown
+                                            <i class="bi bi-pie-chart me-2"></i>Measured Storage Breakdown
                                         </h5>
-                                        <small class="text-muted">Shows what's using your {{ db_stats.total_size }} of database space</small>
+                                        <small class="text-muted">Measured components only (no fixed overhead estimates)</small>
                                     </div>
                                     <div class="card-body">
                                         <div class="row">
@@ -365,14 +365,16 @@
                                             <div class="col-md-6 mb-3">
                                                 <div class="d-flex align-items-center p-3 bg-light rounded">
                                                     <div class="icon-circle me-3 bg-primary bg-opacity-10">
-                                                        {% if 'User Tables' in component_type %}
+                                                        {% if 'Live Table Data' in component_type %}
                                                             <i class="bi bi-table text-primary"></i>
                                                         {% elif 'Indexes' in component_type %}
                                                             <i class="bi bi-list-columns text-success"></i>
-                                                        {% elif 'WAL' in component_type %}
-                                                            <i class="bi bi-journal-text text-info"></i>
-                                                        {% elif 'System' in component_type %}
-                                                            <i class="bi bi-gear text-warning"></i>
+                                                        {% elif 'Estimated Dead/Reclaimable' in component_type %}
+                                                            <i class="bi bi-recycle text-warning"></i>
+                                                        {% elif 'TOAST' in component_type %}
+                                                            <i class="bi bi-file-earmark-zip text-info"></i>
+                                                        {% elif 'Other Internal' in component_type %}
+                                                            <i class="bi bi-gear text-secondary"></i>
                                                         {% else %}
                                                             <i class="bi bi-question-circle text-secondary"></i>
                                                         {% endif %}
@@ -400,10 +402,11 @@
                                                 <i class="bi bi-info-circle"></i> What Each Component Means:
                                             </h6>
                                             <ul class="mb-0 small">
-                                                <li><strong>User Tables:</strong> Your application data (chat history, chatbot content, user accounts)</li>
-                                                <li><strong>User Indexes:</strong> Database indexes for faster data retrieval (automatically created)</li>
-                                                <li><strong>System Overhead:</strong> PostgreSQL system components (WAL files, catalogs, buffers, temp files)</li>
-                                                <li><strong>Unaccounted/Other:</strong> Small remaining space for database operations and housekeeping</li>
+                                                <li><strong>Live Table Data:</strong> Active rows stored in your app tables</li>
+                                                <li><strong>Estimated Dead/Reclaimable:</strong> Space tied to dead tuples/free pages that VACUUM can reclaim</li>
+                                                <li><strong>Indexes:</strong> B-tree and other index structures used for query performance</li>
+                                                <li><strong>TOAST / Large Values:</strong> Overflow storage for large text/JSON values (PostgreSQL)</li>
+                                                <li><strong>Other Internal:</strong> Measured remainder not attributed to user relations</li>
                                             </ul>
                                         </div>
                                         
@@ -413,9 +416,8 @@
                                                 <i class="bi bi-check-circle"></i> Summary:
                                             </h6>
                                             <p class="mb-0 small">
-                                                Your user tables account for <strong>{{ db_stats.total_tables_size_pretty }}</strong> 
-                                                of the total <strong>{{ db_stats.total_size }}</strong> database usage.
-                                                The remaining space is used by system components that are necessary for database operation.
+                                                Total user relations currently account for <strong>{{ db_stats.total_tables_size_pretty }}</strong>.
+                                                Capacity is shown against your configured limit (<strong>{{ db_stats.max_size_pretty }}</strong>).
                                             </p>
                                         </div>
                                         {% endif %}
@@ -429,7 +431,7 @@
                                         <h5 class="mb-0">
                                             <i class="bi bi-table me-2"></i>Detailed Storage by Table
                                         </h5>
-                                        <small class="text-muted">Individual breakdown of each database table and its storage usage</small>
+                                        <small class="text-muted">Per-table totals with live data, indexes, reclaimable estimate, and row count</small>
                                     </div>
                                     <div class="card-body p-0">
                                         {% if db_stats.sorted_tables %}
@@ -497,8 +499,14 @@
                                                     </div>
                                                     <div class="row small text-muted">
                                                         <div class="col-md-6">
-                                                            <i class="bi bi-hdd"></i> Table: {{ table.table_size_pretty }}
+                                                            <i class="bi bi-hdd"></i> Live: {{ table.live_table_size_pretty|default(table.table_size_pretty) }}
                                                             <span class="ms-2"><i class="bi bi-search"></i> Indexes: {{ table.index_size_pretty }}</span>
+                                                            {% if table.dead_estimate_pretty %}
+                                                            <span class="ms-2"><i class="bi bi-recycle"></i> Reclaimable: {{ table.dead_estimate_pretty }}</span>
+                                                            {% endif %}
+                                                            {% if table.toast_size_pretty %}
+                                                            <span class="ms-2"><i class="bi bi-file-earmark-zip"></i> TOAST: {{ table.toast_size_pretty }}</span>
+                                                            {% endif %}
                                                         </div>
                                                         <div class="col-md-6 text-md-end">
                                                             <i class="bi bi-list-ol"></i> {{ table.row_count|default(0) }} rows
@@ -515,9 +523,9 @@
                                                             {% elif table.name == 'authorized_users' %}
                                                                 🔐 Access control and user permissions
                                                             {% elif table.name == 'user_lo_root_ids' %}
-                                                                🔑 User authentication and session management
+                                                                🔑 Links users to LO root tags
                                                             {% elif table.name == 'chatbot_lo_root_association' %}
-                                                                🔗 Links between users and chatbot access
+                                                                🔗 Links chatbots to LO root tags
                                                             {% else %}
                                                                 📊 Database table: {{ table.name }}
                                                             {% endif %}
@@ -544,21 +552,21 @@
                                     <div class="card-body">
                                         <div class="row">
                                             <div class="col-md-6">
-                                                <h6 class="text-success mb-2">✅ To free up space:</h6>
+                                                <h6 class="text-success mb-2">✅ To reduce storage usage:</h6>
                                                 <ul class="small mb-0">
-                                                    <li>Enable auto-delete for chat histories</li>
-                                                    <li>Remove unused chatbot contents</li>
-                                                    <li>Clean up inactive user accounts</li>
-                                                    <li>Optimize large chatbot knowledge bases</li>
+                                                    <li>Enable retention/auto-delete for chat history</li>
+                                                    <li>Delete stale `authorized_users` whitelist rows</li>
+                                                    <li>Archive or trim oversized chatbot content blobs</li>
+                                                    <li>Run `VACUUM` (SQLite) / `VACUUM ANALYZE` (PostgreSQL)</li>
                                                 </ul>
                                             </div>
                                             <div class="col-md-6">
-                                                <h6 class="text-info mb-2">🚀 To increase capacity:</h6>
+                                                <h6 class="text-info mb-2">🚀 To improve capacity accuracy:</h6>
                                                 <ul class="small mb-0">
-                                                    <li>Upgrade your Render database plan</li>
-                                                    <li>Contact Render support for custom limits</li>
-                                                    <li>Consider database archiving strategies</li>
-                                                    <li>Implement data retention policies</li>
+                                                    <li>Set `DB_MAX_SIZE_BYTES` to your actual Neon/Render plan limit</li>
+                                                    <li>Review this page after plan upgrades/downgrades</li>
+                                                    <li>Track dead/reclaimable growth and vacuum regularly</li>
+                                                    <li>Use monthly archive exports for long-term retention</li>
                                                 </ul>
                                             </div>
                                         </div>
@@ -2601,14 +2609,16 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                     const percentage = bar.getAttribute('data-component-percentage');
                     let color = '#8E8E93'; // default
                     
-                    if (componentType.includes('User Tables')) {
-                        color = '#007AFF';  // Blue for user data
-                    } else if (componentType.includes('User Indexes')) {
+                    if (componentType.includes('Live Table Data')) {
+                        color = '#007AFF';  // Blue for live table data
+                    } else if (componentType.includes('Indexes')) {
                         color = '#34C759';  // Green for indexes
-                    } else if (componentType.includes('System Overhead')) {
-                        color = '#FF9500';  // Orange for system overhead
-                    } else if (componentType.includes('Unaccounted')) {
-                        color = '#8E8E93';  // Gray for unaccounted
+                    } else if (componentType.includes('Estimated Dead/Reclaimable')) {
+                        color = '#FF9500';  // Orange for reclaimable/dead tuples
+                    } else if (componentType.includes('TOAST')) {
+                        color = '#17A2B8';  // Teal for TOAST/large values
+                    } else if (componentType.includes('Other Internal')) {
+                        color = '#8E8E93';  // Gray for internal remainder
                     }
                     
                     bar.style.backgroundColor = color;
@@ -2626,10 +2636,11 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                     if (breakdownInfo) {
                         // Colors matching the component breakdown
                         const componentColors = {
-                            'User Tables': '#007AFF',        // Blue for user data
-                            'User Indexes': '#34C759',       // Green for indexes
-                            'System Overhead': '#FF9500',    // Orange for system overhead
-                            'Unaccounted/Other': '#8E8E93'   // Gray for unaccounted
+                            'Live Table Data': '#007AFF',
+                            'Indexes': '#34C759',
+                            'Estimated Dead/Reclaimable': '#FF9500',
+                            'TOAST / Large Values': '#17A2B8',
+                            'Other Internal': '#8E8E93'
                         };
                         
                         let usedWidth = 0;
@@ -2695,10 +2706,11 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                     
                     // Set color based on component type
                     const componentColors = {
-                        'User Tables': '#007AFF',        // Blue for user data
-                        'User Indexes': '#34C759',       // Green for indexes
-                        'System Overhead': '#FF9500',    // Orange for system overhead
-                        'Unaccounted/Other': '#8E8E93'   // Gray for unaccounted
+                        'Live Table Data': '#007AFF',
+                        'Indexes': '#34C759',
+                        'Estimated Dead/Reclaimable': '#FF9500',
+                        'TOAST / Large Values': '#17A2B8',
+                        'Other Internal': '#8E8E93'
                     };
                     
                     bar.style.backgroundColor = componentColors[componentType] || '#8E8E93';

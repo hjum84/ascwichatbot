@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Database size limits (in bytes)
-DB_MAX_SIZE_BYTES = int(os.getenv('DB_MAX_SIZE_BYTES', 1073741824))  # 1GB default
+DEFAULT_DB_MAX_SIZE_BYTES = 536870912  # 0.5 GB fallback only
+DB_MAX_SIZE_ENV = os.getenv('DB_MAX_SIZE_BYTES')
+DB_MAX_SIZE_BYTES = int(DB_MAX_SIZE_ENV) if DB_MAX_SIZE_ENV else DEFAULT_DB_MAX_SIZE_BYTES
 DB_SIZE_LIMIT = DB_MAX_SIZE_BYTES  # Use max size as limit
 CHAT_HISTORY_LIMIT = 500 * 1024 * 1024  # 500MB
 WARNING_THRESHOLD = 0.8  # 80% of limit
@@ -43,10 +45,10 @@ def _build_fallback_result(source='error'):
         'unique_users': 0,
         'timestamp': datetime.utcnow(),
         'max_size_bytes': DB_MAX_SIZE_BYTES,
-        'max_size_pretty': "1.0 GB",
+        'max_size_pretty': format_bytes(DB_MAX_SIZE_BYTES),
         'percent_used': 0,
         'remaining_bytes': DB_MAX_SIZE_BYTES,
-        'remaining_pretty': "1.0 GB",
+        'remaining_pretty': format_bytes(DB_MAX_SIZE_BYTES),
         'table_stats': {},
         'sorted_tables': [],
         'total_tables_count': 0,
@@ -54,6 +56,7 @@ def _build_fallback_result(source='error'):
         'total_tables_size_bytes': 0,
         'total_tables_size_pretty': '0 B',
         'capacity_source': f'{source}_fallback',
+        'capacity_source_label': 'Fallback',
         'env_max_size': DB_MAX_SIZE_BYTES,
         'detection_successful': False,
     }
@@ -82,6 +85,11 @@ def _get_database_size_sqlite():
         total_messages = safe_count("SELECT COUNT(*) FROM chat_history")
         total_chatbots = safe_count("SELECT COUNT(*) FROM chatbot_contents")
         unique_users = safe_count("SELECT COUNT(DISTINCT user_id) FROM chat_history")
+
+        page_size = safe_count("PRAGMA page_size")
+        page_count = safe_count("PRAGMA page_count")
+        freelist_count = safe_count("PRAGMA freelist_count")
+        estimated_reclaimable_bytes = freelist_count * page_size if page_size and freelist_count else 0
 
         # Build table stats
         table_names = ['chat_history', 'chatbot_contents', 'users', 'authorized_users',
@@ -123,15 +131,34 @@ def _get_database_size_sqlite():
 
         sorted_tables = sorted(table_stats.values(), key=lambda x: x['size_bytes'], reverse=True)
 
+        live_table_bytes = max(0, total_tables_size - estimated_reclaimable_bytes)
+        accounted_bytes = live_table_bytes + estimated_reclaimable_bytes
+        other_internal_bytes = max(0, total_db_bytes - accounted_bytes)
+
         db_breakdown = {
-            'User Tables': {
-                'type': 'User Tables',
-                'size_bytes': total_tables_size,
-                'size_pretty': format_bytes(total_tables_size),
-                'percentage': round((total_tables_size / total_db_bytes) * 100, 2) if total_db_bytes > 0 else 0,
-                'percentage_of_total_capacity': round((total_tables_size / actual_max_size) * 100, 3) if actual_max_size > 0 else 0,
+            'Live Table Data': {
+                'type': 'Live Table Data',
+                'size_bytes': live_table_bytes,
+                'size_pretty': format_bytes(live_table_bytes),
+                'percentage': round((live_table_bytes / total_db_bytes) * 100, 2) if total_db_bytes > 0 else 0,
+                'percentage_of_total_capacity': round((live_table_bytes / actual_max_size) * 100, 3) if actual_max_size > 0 else 0,
+            },
+            'Estimated Reclaimable': {
+                'type': 'Estimated Reclaimable',
+                'size_bytes': estimated_reclaimable_bytes,
+                'size_pretty': format_bytes(estimated_reclaimable_bytes),
+                'percentage': round((estimated_reclaimable_bytes / total_db_bytes) * 100, 2) if total_db_bytes > 0 else 0,
+                'percentage_of_total_capacity': round((estimated_reclaimable_bytes / actual_max_size) * 100, 3) if actual_max_size > 0 else 0,
             }
         }
+        if other_internal_bytes > 0:
+            db_breakdown['Other Internal'] = {
+                'type': 'Other Internal',
+                'size_bytes': other_internal_bytes,
+                'size_pretty': format_bytes(other_internal_bytes),
+                'percentage': round((other_internal_bytes / total_db_bytes) * 100, 2) if total_db_bytes > 0 else 0,
+                'percentage_of_total_capacity': round((other_internal_bytes / actual_max_size) * 100, 3) if actual_max_size > 0 else 0,
+            }
 
         return {
             'total_size': total_db_size,
@@ -151,9 +178,10 @@ def _get_database_size_sqlite():
             'db_breakdown': db_breakdown,
             'total_tables_size_bytes': total_tables_size,
             'total_tables_size_pretty': format_bytes(total_tables_size),
-            'capacity_source': 'sqlite_file',
+            'capacity_source': 'sqlite_file_plus_configured_limit',
+            'capacity_source_label': 'Configured Limit',
             'env_max_size': DB_MAX_SIZE_BYTES,
-            'detection_successful': True,
+            'detection_successful': bool(DB_MAX_SIZE_ENV),
         }
     except Exception as e:
         logger.error(f"Error in SQLite get_database_size: {e}")
@@ -170,71 +198,12 @@ def get_database_size():
     if DB_TYPE == "sqlite":
         return _get_database_size_sqlite()
 
-    # --- PostgreSQL path (kept for future use if you re-subscribe) ---
+    # --- PostgreSQL path ---
     db = get_db()
     try:
-        try:
-            capacity_result = db.execute(text("""
-                WITH system_info AS (
-                    SELECT 
-                        CASE 
-                            WHEN EXISTS (SELECT 1 FROM pg_tablespace WHERE spcname != 'pg_default') THEN
-                                (SELECT pg_tablespace_size(oid) FROM pg_tablespace WHERE spcname != 'pg_default' LIMIT 1)
-                            ELSE NULL
-                        END as tablespace_size,
-                        CASE 
-                            WHEN has_function_privilege('pg_stat_file(text)', 'execute') THEN
-                                (SELECT (pg_stat_file('.')).size * 1000 FROM pg_stat_file('.') WHERE (pg_stat_file('.')).isdir LIMIT 1)
-                            ELSE NULL
-                        END as disk_info,
-                        CASE 
-                            WHEN current_setting('shared_buffers', true) ~ '^[0-9]+kB$' THEN
-                                (regexp_replace(current_setting('shared_buffers'), '[^0-9]', '', 'g')::bigint * 1024 * 8)
-                            WHEN current_setting('shared_buffers', true) ~ '^[0-9]+MB$' THEN
-                                (regexp_replace(current_setting('shared_buffers'), '[^0-9]', '', 'g')::bigint * 1024 * 1024 * 8)
-                            ELSE NULL
-                        END as estimated_from_buffers,
-                        pg_database_size(current_database()) as current_db_size,
-                        CASE 
-                            WHEN current_setting('max_wal_size', true) ~ '^[0-9]+GB$' THEN
-                                (regexp_replace(current_setting('max_wal_size'), '[^0-9]', '', 'g')::bigint * 1024 * 1024 * 1024 * 50)
-                            WHEN current_setting('max_wal_size', true) ~ '^[0-9]+MB$' THEN
-                                (regexp_replace(current_setting('max_wal_size'), '[^0-9]', '', 'g')::bigint * 1024 * 1024 * 50)
-                            ELSE NULL
-                        END as estimated_from_wal
-                ),
-                capacity_detection AS (
-                    SELECT 
-                        tablespace_size, disk_info, estimated_from_buffers, estimated_from_wal, current_db_size,
-                        CASE 
-                            WHEN tablespace_size IS NOT NULL AND tablespace_size > current_db_size THEN tablespace_size
-                            WHEN estimated_from_buffers IS NOT NULL AND estimated_from_buffers > current_db_size AND estimated_from_buffers < :max_reasonable_size THEN estimated_from_buffers
-                            WHEN estimated_from_wal IS NOT NULL AND estimated_from_wal > current_db_size AND estimated_from_wal < :max_reasonable_size THEN estimated_from_wal
-                            ELSE :fallback_size
-                        END as detected_capacity
-                    FROM system_info
-                )
-                SELECT detected_capacity, current_db_size, tablespace_size, estimated_from_buffers, estimated_from_wal, 'system_detected' as detection_method
-                FROM capacity_detection
-            """), {
-                'fallback_size': DB_MAX_SIZE_BYTES,
-                'max_reasonable_size': 100 * 1024 * 1024 * 1024
-            })
-            capacity_info = capacity_result.fetchone()
-            if capacity_info and capacity_info[0] > DB_MAX_SIZE_BYTES:
-                actual_max_size = capacity_info[0]
-                capacity_source = f"detected_{capacity_info[5]}"
-            else:
-                actual_max_size = DB_MAX_SIZE_BYTES
-                capacity_source = 'environment_fallback'
-        except Exception as e:
-            logger.warning(f"Database capacity detection failed: {e}")
-            actual_max_size = DB_MAX_SIZE_BYTES
-            capacity_source = 'error_fallback'
-            try:
-                db.rollback()
-            except:
-                pass
+        actual_max_size = DB_MAX_SIZE_BYTES
+        capacity_source = 'configured_env_limit' if DB_MAX_SIZE_ENV else 'default_fallback_limit'
+        capacity_source_label = 'Configured Limit' if DB_MAX_SIZE_ENV else 'Fallback Default'
 
         try:
             overall_result = db.execute(text("""
@@ -254,68 +223,49 @@ def get_database_size():
 
         try:
             tables_result = db.execute(text("""
-                WITH table_stats AS (
-                    SELECT schemaname, tablename,
-                        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size_pretty,
-                        pg_total_relation_size(schemaname||'.'||tablename) as size_bytes,
-                        pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) AS table_size_pretty,
-                        pg_relation_size(schemaname||'.'||tablename) as table_size_bytes,
-                        (pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) as index_size_bytes
-                    FROM pg_tables WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
-                ) SELECT * FROM table_stats ORDER BY size_bytes DESC
+                WITH base AS (
+                    SELECT
+                        t.schemaname,
+                        t.tablename,
+                        pg_total_relation_size(format('%I.%I', t.schemaname, t.tablename)) AS total_size_bytes,
+                        pg_relation_size(format('%I.%I', t.schemaname, t.tablename)) AS table_size_bytes,
+                        pg_indexes_size(format('%I.%I', t.schemaname, t.tablename)) AS index_size_bytes,
+                        GREATEST(
+                            pg_total_relation_size(format('%I.%I', t.schemaname, t.tablename))
+                            - pg_relation_size(format('%I.%I', t.schemaname, t.tablename))
+                            - pg_indexes_size(format('%I.%I', t.schemaname, t.tablename)),
+                            0
+                        ) AS toast_size_bytes
+                    FROM pg_tables t
+                    WHERE t.schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+                ),
+                stats AS (
+                    SELECT
+                        schemaname,
+                        relname AS tablename,
+                        COALESCE(n_live_tup, 0) AS n_live_tup,
+                        COALESCE(n_dead_tup, 0) AS n_dead_tup
+                    FROM pg_stat_user_tables
+                )
+                SELECT
+                    b.schemaname,
+                    b.tablename,
+                    b.total_size_bytes,
+                    b.table_size_bytes,
+                    b.index_size_bytes,
+                    b.toast_size_bytes,
+                    COALESCE(s.n_live_tup, 0) AS n_live_tup,
+                    COALESCE(s.n_dead_tup, 0) AS n_dead_tup
+                FROM base b
+                LEFT JOIN stats s
+                    ON s.schemaname = b.schemaname AND s.tablename = b.tablename
+                ORDER BY b.total_size_bytes DESC
             """))
             db.commit()
         except Exception as e:
             logger.error(f"Failed to get table statistics: {e}")
             db.rollback()
             tables_result = []
-
-        try:
-            db_breakdown_result = db.execute(text("""
-                WITH total_db_size AS (
-                    SELECT pg_database_size(current_database()) as total_bytes
-                ),
-                user_tables AS (
-                    SELECT 'User Tables' as component_type,
-                        COALESCE(SUM(pg_total_relation_size(schemaname||'.'||tablename)), 0) as size_bytes
-                    FROM pg_tables WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-                ),
-                user_indexes AS (
-                    SELECT 'User Indexes' as component_type,
-                        COALESCE(SUM(pg_indexes_size(schemaname||'.'||tablename)), 0) as size_bytes
-                    FROM pg_tables WHERE schemaname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
-                ),
-                system_overhead AS (
-                    SELECT 'System Overhead' as component_type,
-                        GREATEST(tds.total_bytes * 0.20, 1048576)::bigint as size_bytes
-                    FROM total_db_size tds
-                ),
-                all_components AS (
-                    SELECT * FROM user_tables UNION ALL SELECT * FROM user_indexes UNION ALL SELECT * FROM system_overhead
-                ),
-                accounted_total AS (
-                    SELECT SUM(size_bytes) as accounted_bytes FROM all_components
-                ),
-                final_breakdown AS (
-                    SELECT ac.component_type, ac.size_bytes,
-                        pg_size_pretty(ac.size_bytes) as size_pretty,
-                        ROUND((ac.size_bytes::numeric / tds.total_bytes::numeric) * 100, 2) as percentage
-                    FROM all_components ac, total_db_size tds WHERE ac.size_bytes > 0
-                    UNION ALL
-                    SELECT 'Unaccounted/Other' as component_type,
-                        GREATEST(0, tds.total_bytes - at.accounted_bytes) as size_bytes,
-                        pg_size_pretty(GREATEST(0, tds.total_bytes - at.accounted_bytes)) as size_pretty,
-                        ROUND((GREATEST(0, tds.total_bytes - at.accounted_bytes)::numeric / tds.total_bytes::numeric) * 100, 2) as percentage
-                    FROM accounted_total at, total_db_size tds
-                    WHERE (tds.total_bytes - at.accounted_bytes) > 1024
-                )
-                SELECT component_type, size_bytes, size_pretty, percentage FROM final_breakdown WHERE size_bytes > 0 ORDER BY size_bytes DESC
-            """))
-            db.commit()
-        except Exception as e:
-            logger.error(f"Failed to get database breakdown: {e}")
-            db.rollback()
-            db_breakdown_result = []
 
         try:
             row_counts_result = db.execute(text("""
@@ -334,34 +284,82 @@ def get_database_size():
 
         table_stats = {}
         total_tables_size = 0
+        live_table_total = 0
+        dead_tuple_estimate_total = 0
+        index_total = 0
+        toast_total = 0
         if tables_result:
             try:
                 for row in tables_result:
-                    schema, table_name, size_pretty, size_bytes, table_size_pretty, table_size_bytes, index_size_bytes = row
+                    (
+                        schema,
+                        table_name,
+                        size_bytes,
+                        table_size_bytes,
+                        index_size_bytes,
+                        toast_size_bytes,
+                        n_live_tup,
+                        n_dead_tup
+                    ) = row
+
+                    total_tuples = max((n_live_tup or 0) + (n_dead_tup or 0), 0)
+                    avg_tuple_bytes = (table_size_bytes / total_tuples) if total_tuples > 0 else 0
+                    dead_estimate_bytes = int(min(table_size_bytes, (n_dead_tup or 0) * avg_tuple_bytes))
+                    live_table_bytes = max(0, table_size_bytes - dead_estimate_bytes)
+
                     total_tables_size += size_bytes
+                    live_table_total += live_table_bytes
+                    dead_tuple_estimate_total += dead_estimate_bytes
+                    index_total += max(index_size_bytes, 0)
+                    toast_total += max(toast_size_bytes, 0)
                     table_stats[table_name] = {
-                        'name': table_name, 'size_pretty': size_pretty, 'size_bytes': size_bytes,
-                        'table_size_pretty': table_size_pretty, 'table_size_bytes': table_size_bytes,
-                        'index_size_bytes': index_size_bytes, 'index_size_pretty': format_bytes(index_size_bytes),
-                        'percentage': 0, 'row_count': 0
+                        'name': table_name,
+                        'size_pretty': format_bytes(size_bytes),
+                        'size_bytes': size_bytes,
+                        'table_size_pretty': format_bytes(table_size_bytes),
+                        'table_size_bytes': table_size_bytes,
+                        'live_table_size_bytes': live_table_bytes,
+                        'live_table_size_pretty': format_bytes(live_table_bytes),
+                        'dead_estimate_bytes': dead_estimate_bytes,
+                        'dead_estimate_pretty': format_bytes(dead_estimate_bytes),
+                        'index_size_bytes': index_size_bytes,
+                        'index_size_pretty': format_bytes(index_size_bytes),
+                        'toast_size_bytes': toast_size_bytes,
+                        'toast_size_pretty': format_bytes(toast_size_bytes),
+                        'n_dead_tup': int(n_dead_tup or 0),
+                        'percentage': 0,
+                        'row_count': 0
                     }
             except Exception as e:
                 logger.error(f"Error processing table statistics: {e}")
                 table_stats = {}
 
         db_breakdown = {}
-        if db_breakdown_result:
-            try:
-                for row in db_breakdown_result:
-                    component_type, size_bytes, size_pretty, percentage = row
-                    db_breakdown[component_type] = {
-                        'type': component_type, 'size_bytes': size_bytes, 'size_pretty': size_pretty,
-                        'percentage': percentage,
-                        'percentage_of_total_capacity': round((size_bytes / actual_max_size) * 100, 3) if actual_max_size > 0 else 0
-                    }
-            except Exception as e:
-                logger.error(f"Error processing database breakdown: {e}")
-                db_breakdown = {}
+        current_used_bytes = overall_stats[1] if overall_stats else 0
+        other_internal_bytes = max(
+            0,
+            current_used_bytes - (live_table_total + dead_tuple_estimate_total + index_total + toast_total)
+        )
+
+        breakdown_components = [
+            ("Live Table Data", live_table_total),
+            ("Estimated Dead/Reclaimable", dead_tuple_estimate_total),
+            ("Indexes", index_total),
+            ("TOAST / Large Values", toast_total),
+        ]
+        if other_internal_bytes > 0:
+            breakdown_components.append(("Other Internal", other_internal_bytes))
+
+        for component_type, size_bytes in breakdown_components:
+            if size_bytes <= 0:
+                continue
+            db_breakdown[component_type] = {
+                'type': component_type,
+                'size_bytes': size_bytes,
+                'size_pretty': format_bytes(size_bytes),
+                'percentage': round((size_bytes / current_used_bytes) * 100, 2) if current_used_bytes > 0 else 0,
+                'percentage_of_total_capacity': round((size_bytes / actual_max_size) * 100, 3) if actual_max_size > 0 else 0
+            }
 
         if row_counts_result:
             try:
@@ -372,7 +370,6 @@ def get_database_size():
             except Exception as e:
                 logger.error(f"Error processing row counts: {e}")
 
-        current_used_bytes = overall_stats[1] if overall_stats else 0
         for table_name in table_stats:
             table_stats[table_name]['percentage'] = round(
                 (table_stats[table_name]['size_bytes'] / current_used_bytes) * 100, 2
@@ -409,8 +406,9 @@ def get_database_size():
                 'total_tables_size_bytes': total_tables_size,
                 'total_tables_size_pretty': format_bytes(total_tables_size),
                 'capacity_source': capacity_source,
+                'capacity_source_label': capacity_source_label,
                 'env_max_size': DB_MAX_SIZE_BYTES,
-                'detection_successful': actual_max_size != DB_MAX_SIZE_BYTES,
+                'detection_successful': bool(DB_MAX_SIZE_ENV),
             }
         except Exception as e:
             logger.error(f"Error in final processing: {e}")
@@ -466,10 +464,18 @@ def check_database_limits():
             'message': f'Database size ({stats["total_size"]}) is approaching the limit of {DB_SIZE_LIMIT / (1024*1024*1024):.2f} GB'
         })
     
-    if stats['total_messages'] > CHAT_HISTORY_LIMIT * WARNING_THRESHOLD:
+    chat_history_size = (
+        stats.get('table_stats', {})
+        .get('chat_history', {})
+        .get('size_bytes', 0)
+    )
+    if chat_history_size > CHAT_HISTORY_LIMIT * WARNING_THRESHOLD:
         alerts.append({
             'level': 'warning',
-            'message': f'Chat history size ({stats["total_messages"]}) is approaching the limit of {CHAT_HISTORY_LIMIT / (1024*1024):.2f} MB'
+            'message': (
+                f'Chat history storage ({format_bytes(chat_history_size)}) is approaching '
+                f'the limit of {CHAT_HISTORY_LIMIT / (1024*1024):.2f} MB'
+            )
         })
     
     return alerts

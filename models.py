@@ -1,7 +1,7 @@
 # models.py
 import os
 import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session, relationship, joinedload
 from sqlalchemy.sql import func
@@ -435,6 +435,8 @@ class ChatHistory(Base):
     program_code = Column(String, nullable=False, index=True)
     user_message = Column(Text, nullable=False)
     bot_message = Column(Text, nullable=False)
+    guardrail_tier = Column(String(32), nullable=True, default=None)
+    guardrail_rule_name = Column(String(255), nullable=True, default=None)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     is_visible = Column(Boolean, nullable=False, default=True)  # For UI hiding
     deletion_notified_at = Column(DateTime, nullable=True, default=None)  # 👈 NEW: Track when deletion notification was sent
@@ -462,6 +464,34 @@ class ChatHistory(Base):
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_chat_history_guardrail_columns():
+    """
+    Add guardrail metadata columns for existing databases.
+    Safe no-op when columns already exist.
+    """
+    inspector = inspect(engine)
+    try:
+        existing_columns = {col["name"] for col in inspector.get_columns("chat_history")}
+    except Exception:
+        return
+
+    statements = []
+    if "guardrail_tier" not in existing_columns:
+        statements.append("ALTER TABLE chat_history ADD COLUMN guardrail_tier VARCHAR(32)")
+    if "guardrail_rule_name" not in existing_columns:
+        statements.append("ALTER TABLE chat_history ADD COLUMN guardrail_rule_name VARCHAR(255)")
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
+ensure_chat_history_guardrail_columns()
 
 # Database session management
 def get_db():

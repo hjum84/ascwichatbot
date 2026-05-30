@@ -687,7 +687,7 @@
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ program: '{{ program }}'}) // Send current program
+                body: JSON.stringify({ program: '{{ program_code }}'}) // Send current program
             })
             .then(response => response.json())
             .then(data => {

@@ -141,10 +141,6 @@ REDIRECT_MESSAGES = {
         "**This tool is designed for curriculum-based knowledge retrieval and "
         "should not be used with identifying case information** (names, addresses, "
         "case numbers, or other details specific to a family or individual).\n\n"
-        "Please rephrase your question in general terms. For example, instead of "
-        "describing a specific family situation, you might ask:\n"
-        "- \"What are the key factors to consider when assessing [topic]?\"\n"
-        "- \"What does the curriculum say about [framework or concept]?\"\n\n"
         "For case-specific guidance, please consult your direct supervisor."
     ),
     "safety_decision": (
@@ -152,23 +148,15 @@ REDIRECT_MESSAGES = {
         "decisions for specific cases.** Safety assessments and decisions must "
         "always be made through proper supervisory channels and documented "
         "through CONNECTIONS.\n\n"
-        "I can help you review the safety assessment frameworks and decision-making "
-        "processes from the curriculum. For example, you might ask:\n"
-        "- \"What are the 19 safety factors?\"\n"
-        "- \"What are common decision-making errors in safety assessments?\"\n"
-        "- \"How should supervisors coach workers on accurate safety assessments?\"\n\n"
         "For case-specific safety decisions, please consult your supervisor immediately."
     ),
     "off_topic": (
         "I'm designed to help with content related to this learning program. "
         "Your question appears to be outside the scope of the materials I've been "
-        "trained on.\n\n"
-        "Try asking about topics covered in the curriculum, such as supervisory "
-        "frameworks, coaching strategies, critical thinking, or specific program content."
+        "trained on."
     ),
     "custom_rule": (
         "Your message was flagged by a program-specific content guideline. "
-        "Please rephrase your question to focus on the curriculum content. "
         "For case-specific guidance, consult your direct supervisor."
     ),
 }
@@ -654,12 +642,8 @@ def get_default_rules_dcp():
                 "category": "custom",
                 "pattern": r"(?i)\b(?:how\s+should\s+I|what\s+should\s+I\s+do\s+(?:about|with|in))\s+(?:investigate\s+)?(?:this|my|the)\s+(?:investigation|allegation|report|referral|intake)",
                 "redirect_message": (
-                    "I can help you review investigative frameworks and assessment approaches "
-                    "from the curriculum, but I cannot provide guidance on specific investigations "
-                    "or cases. Please consult your supervisor for case-specific direction.\n\n"
-                    "Try rephrasing as a general question, such as:\n"
-                    "- \"What are the key components of a thorough safety assessment?\"\n"
-                    "- \"What does the curriculum say about interviewing strategies?\""
+                    "I cannot provide guidance on specific investigations or cases. "
+                    "Please consult your supervisor for case-specific direction."
                 ),
                 "is_active": True,
                 "priority": 20
@@ -680,10 +664,7 @@ def get_default_rules_foster_care():
                 "redirect_message": (
                     "This tool cannot make placement or discharge recommendations for specific "
                     "children or families. Placement decisions must be made through your "
-                    "supervisory chain and in accordance with agency policy.\n\n"
-                    "I can help you review placement-related curriculum content. Try asking:\n"
-                    "- \"What factors should be considered in placement decisions?\"\n"
-                    "- \"What does the curriculum say about trial discharge readiness?\""
+                    "supervisory chain and in accordance with agency policy."
                 ),
                 "is_active": True,
                 "priority": 10
@@ -704,9 +685,7 @@ def get_default_rules_prevention():
                 "redirect_message": (
                     "This tool cannot advise on service termination decisions for specific "
                     "families. Service closure decisions must follow your agency's protocols "
-                    "and be discussed with your supervisor.\n\n"
-                    "I can help you review the curriculum on service planning and case closure "
-                    "criteria. Try asking in general terms."
+                    "and be discussed with your supervisor."
                 ),
                 "is_active": True,
                 "priority": 10

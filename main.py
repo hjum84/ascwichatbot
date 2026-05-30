@@ -197,6 +197,39 @@ def get_guardrail_metadata_for_chat_record(guardrail_result=None, chatbot_reply=
         return "tier3_model", None
     return "passed", None
 
+
+def build_guardrail_user_notice(guardrail_tier, guardrail_result):
+    """Create a brief, user-visible tier/reason notice for reporting transparency."""
+    category = (guardrail_result or {}).get("category")
+    rule_name = (guardrail_result or {}).get("rule_name")
+
+    tier_label_map = {
+        "tier1_case_data": "Tier 1",
+        "tier1_safety_decision": "Tier 1",
+        "tier1_off_topic": "Tier 1",
+        "tier2_custom": "Tier 2",
+        "tier3_model": "Tier 3",
+    }
+    reason_label_map = {
+        "case_data": "Case-identifying information detected",
+        "safety_decision": "Case-specific safety decision request detected",
+        "off_topic": "Prompt is outside approved program scope",
+        "custom_rule": "Program-specific guardrail rule matched",
+    }
+
+    tier_label = tier_label_map.get(guardrail_tier, "Guardrail")
+    reason_label = reason_label_map.get(category, "Guardrail policy triggered")
+
+    if guardrail_tier == "tier2_custom" and rule_name:
+        reason_label = f"{reason_label} ({rule_name})"
+
+    notice_text = f"Guardrail Notice: {tier_label} - {reason_label}."
+    return {
+        "text": notice_text,
+        "tier": tier_label,
+        "reason": reason_label
+    }
+
 # Load environment variables
 load_dotenv()
 # openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: Using Gemini instead
@@ -2213,6 +2246,11 @@ def chat():
             guardrail_tier, guardrail_rule_name = get_guardrail_metadata_for_chat_record(
                 guardrail_result=guardrail_result
             )
+            guardrail_notice = build_guardrail_user_notice(
+                guardrail_tier,
+                guardrail_result
+            )
+            user_guardrail_reply = f"{redirect_msg}\n\n{guardrail_notice['text']}"
             redacted_user_message = build_blocked_message_placeholder(
                 guardrail_tier,
                 guardrail_result
@@ -2225,7 +2263,7 @@ def chat():
                     user_id=user_id,
                     program_code=current_program,
                     user_message=redacted_user_message,
-                    bot_message=redirect_msg,
+                    bot_message=user_guardrail_reply,
                     guardrail_tier=guardrail_tier,
                     guardrail_rule_name=guardrail_rule_name,
                     timestamp=datetime.now(timezone.utc).replace(tzinfo=None)
@@ -2240,11 +2278,13 @@ def chat():
                 )
 
             return jsonify({
-                "reply": redirect_msg,
-                "html_reply": parse_markdown(redirect_msg),
+                "reply": user_guardrail_reply,
+                "html_reply": parse_markdown(user_guardrail_reply),
                 "remaining_questions": max(0, quota - message_count),
                 "quota": quota,
-                "guardrail_triggered": guardrail_category
+                "guardrail_triggered": guardrail_category,
+                "guardrail_tier": guardrail_notice["tier"],
+                "guardrail_reason": guardrail_notice["reason"]
             }), 200
         # ==================================================================
 
@@ -2646,9 +2686,9 @@ User: Please complete your previous response with a brief conclusion."""
 @login_required
 def clear_chat_history():
     user_id = current_user.id
-    # Ensure program_code is fetched from the request body, not session, for robustness
-    data = request.get_json()
-    program_code = data.get('program')
+    # Prefer explicit request payload; fallback to session for robustness.
+    data = request.get_json(silent=True) or {}
+    program_code = (data.get('program') or session.get('current_program') or "").strip().upper()
 
     if not program_code:
         logger.error("Program code not provided in clear_chat_history request.")

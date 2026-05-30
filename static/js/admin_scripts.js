@@ -675,8 +675,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         const editChatbotMode = document.getElementById('editChatbotMode');
                         if (editChatbotMode) {
-                            const normalizedMode = (data.chatbot_mode === 'critical_thinking_agent')
-                                ? 'agent_mode'
+                            const normalizedMode = (data.chatbot_mode === 'critical_thinking_agent' || data.chatbot_mode === 'agent_mode')
+                                ? 'dialogue_mode'
                                 : (data.chatbot_mode || 'knowledge_retrieval');
                             editChatbotMode.value = normalizedMode;
                         }
@@ -1447,13 +1447,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     this.parentNode.appendChild(successMsg);
                     setTimeout(() => successMsg.remove(), 2000);
                 } else {
-                    alert('Error updating agent mode settings: ' + (data.error || 'Unknown error'));
+                    alert('Error updating dialogue mode settings: ' + (data.error || 'Unknown error'));
                 }
             })
             .catch(() => {
                 this.innerHTML = originalText;
                 this.disabled = false;
-                alert('Network error while updating agent mode settings. Please try again.');
+                alert('Network error while updating dialogue mode settings. Please try again.');
             });
         });
     });

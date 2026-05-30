@@ -138,7 +138,7 @@ OFF_TOPIC_PATTERNS = [
 
 REDIRECT_MESSAGES = {
     "case_data": (
-        "**This tool is designed for curriculum-based knowledge retrieval and "
+        "**This tool is designed for approved training support and "
         "should not be used with identifying case information** (names, addresses, "
         "case numbers, or other details specific to a family or individual).\n\n"
         "For case-specific guidance, please consult your direct supervisor."

@@ -787,14 +787,14 @@
                                                             </div>
 
                                                             <div class="chatbot-form-section">
-                                                                <h6><i class="bi bi-chat-dots"></i> Agent Mode (Advanced)</h6>
+                                                                <h6><i class="bi bi-chat-dots"></i> Dialogue Mode (Advanced)</h6>
                                                                 <div class="update-chatbot-mode-form">
                                                                     <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
                                                                     <div class="mb-2">
                                                                         <label class="form-label small mb-1">Conversation Mode</label>
                                                                         <select class="form-select chatbot-mode-field">
                                                                             <option value="knowledge_retrieval" {% if chatbot.chatbot_mode == 'knowledge_retrieval' or not chatbot.chatbot_mode %}selected{% endif %}>Knowledge Retrieval (stateless Q&amp;A)</option>
-                                                                            <option value="agent_mode" {% if chatbot.chatbot_mode == 'agent_mode' or chatbot.chatbot_mode == 'critical_thinking_agent' %}selected{% endif %}>Agent Mode (multi-turn dialogue)</option>
+                                                                            <option value="dialogue_mode" {% if chatbot.chatbot_mode == 'dialogue_mode' or chatbot.chatbot_mode == 'agent_mode' or chatbot.chatbot_mode == 'critical_thinking_agent' %}selected{% endif %}>Dialogue Mode (multi-turn dialogue)</option>
                                                                         </select>
                                                                     </div>
                                                                     <div class="mb-2">
@@ -972,12 +972,12 @@
                                                 </label>
                                                 <select class="form-select" id="chatbot_mode" name="chatbot_mode">
                                                     <option value="knowledge_retrieval" selected>Knowledge Retrieval (stateless Q&amp;A)</option>
-                                                    <option value="agent_mode">Agent Mode (multi-turn dialogue)</option>
+                                                    <option value="dialogue_mode">Dialogue Mode (multi-turn dialogue)</option>
                                                 </select>
                                                 <div class="form-text">
                                                     <i class="bi bi-info-circle"></i>
                                                     <strong>Knowledge Retrieval</strong> answers each question independently using cached responses (best for FAQ-style usage).
-                                                    <strong>Agent Mode</strong> remembers the last several exchanges so it can ask probing follow-up questions and engage in coaching-style dialogue.
+                                                    <strong>Dialogue Mode</strong> remembers the last several exchanges so it can ask probing follow-up questions and engage in coaching-style dialogue.
                                                 </div>
                                             </div>
 
@@ -988,7 +988,7 @@
                                                 <input type="text" class="form-control" id="ai_model" name="ai_model" value="gemini-2.5-flash" placeholder="gemini-2.5-flash">
                                                 <div class="form-text">
                                                     <i class="bi bi-info-circle"></i>
-                                                    The Gemini model used for this chatbot in Agent Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>). Knowledge Retrieval mode currently uses <code>gemini-2.5-flash</code> regardless of this setting.
+                                                    The Gemini model used for this chatbot in Dialogue Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>). Knowledge Retrieval mode currently uses <code>gemini-2.5-flash</code> regardless of this setting.
                                                 </div>
                                             </div>
 
@@ -2067,10 +2067,10 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                             </label>
                             <select class="form-select" id="editChatbotMode" name="chatbot_mode">
                                 <option value="knowledge_retrieval">Knowledge Retrieval (stateless Q&amp;A)</option>
-                                <option value="agent_mode">Agent Mode (multi-turn dialogue)</option>
+                                <option value="dialogue_mode">Dialogue Mode (multi-turn dialogue)</option>
                             </select>
                             <div class="form-text">
-                                Agent Mode passes the last ~10 exchanges back to the model so it can engage in coaching-style dialogue.
+                                Dialogue Mode passes the last ~10 exchanges back to the model so it can engage in coaching-style dialogue.
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -2079,7 +2079,7 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                             </label>
                             <input type="text" class="form-control" id="editAiModel" name="ai_model" placeholder="gemini-2.5-flash">
                             <div class="form-text">
-                                Model used in Critical Thinking Agent mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>).
+                                Model used in Dialogue Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>).
                             </div>
                         </div>
                     </div>

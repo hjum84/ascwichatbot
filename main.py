@@ -198,6 +198,16 @@ def get_guardrail_metadata_for_chat_record(guardrail_result=None, chatbot_reply=
     return "passed", None
 
 
+def normalize_chatbot_mode(mode_value, default='knowledge_retrieval'):
+    """Normalize legacy/new mode names to supported canonical values."""
+    raw_mode = (mode_value or "").strip().lower()
+    if raw_mode in ('dialogue_mode', 'agent_mode', 'critical_thinking_agent'):
+        return 'dialogue_mode'
+    if raw_mode == 'knowledge_retrieval':
+        return 'knowledge_retrieval'
+    return default
+
+
 def build_guardrail_user_notice(guardrail_tier, guardrail_result):
     """Create a brief, user-visible tier/reason notice for reporting transparency."""
     category = (guardrail_result or {}).get("category")
@@ -2294,20 +2304,20 @@ def chat():
         # Determine conversation behavior. Default to 'knowledge_retrieval' so
         # any chatbot without an explicit mode set keeps the existing stateless
         # Q&A behavior.
-        chatbot_mode = (getattr(chatbot, 'chatbot_mode', None) or 'knowledge_retrieval').strip()
-        is_agent_mode = chatbot_mode in ('critical_thinking_agent', 'agent_mode')
+        chatbot_mode = normalize_chatbot_mode(getattr(chatbot, 'chatbot_mode', None))
+        is_dialogue_mode = chatbot_mode == 'dialogue_mode'
 
-        if is_agent_mode:
-            # --- CRITICAL THINKING AGENT MODE ----------------------------------
+        if is_dialogue_mode:
+            # --- DIALOGUE MODE ---------------------------------------------------
             # The agent needs to remember earlier turns to engage in meaningful
             # dialogue. We pull the most recent visible exchanges from
             # ChatHistory, format them as a labelled transcript, and send them
             # alongside the new user message. Cache lookups are skipped because
             # every conversation is unique.
-            cache_result = "agent_mode"
+            cache_result = "dialogue_mode"
             try:
                 logger.debug(
-                    f"Critical thinking agent mode for {current_program}, "
+                    f"Dialogue mode for {current_program}, "
                     f"building conversation history"
                 )
 
@@ -3741,10 +3751,8 @@ def admin_upload():
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
 
         # Conversation behavior + AI model (admin-configurable per chatbot)
-        chatbot_mode = (request.form.get('chatbot_mode') or 'knowledge_retrieval').strip().lower()
-        if chatbot_mode == 'critical_thinking_agent':
-            chatbot_mode = 'agent_mode'
-        if chatbot_mode not in ('knowledge_retrieval', 'agent_mode'):
+        chatbot_mode = normalize_chatbot_mode(request.form.get('chatbot_mode'))
+        if chatbot_mode not in ('knowledge_retrieval', 'dialogue_mode'):
             logger.warning(f"Invalid chatbot_mode '{chatbot_mode}', falling back to knowledge_retrieval")
             chatbot_mode = 'knowledge_retrieval'
         ai_model = (request.form.get('ai_model') or 'gemini-2.5-flash').strip()
@@ -4342,7 +4350,7 @@ def admin_get_chatbot_content(chatbot_code):
             "system_prompt_role": chatbot.system_prompt_role,
             "system_prompt_guidelines": clean_guidelines_text,
             "tier3_safety_guardrail_prompt": tier3_guardrail_text,
-            "chatbot_mode": chatbot.chatbot_mode,
+            "chatbot_mode": normalize_chatbot_mode(chatbot.chatbot_mode),
             "ai_model": chatbot.ai_model,
             "guardrail_rules_json": chatbot.guardrail_rules_json
         })
@@ -4411,10 +4419,8 @@ def admin_update_chatbot_content():
         # New optional fields: conversation mode and AI model
         chatbot_mode = request.form.get('chatbot_mode')
         if chatbot_mode is not None:
-            chatbot_mode = chatbot_mode.strip().lower()
-            if chatbot_mode == 'critical_thinking_agent':
-                chatbot_mode = 'agent_mode'
-            if chatbot_mode not in ('knowledge_retrieval', 'agent_mode'):
+            chatbot_mode = normalize_chatbot_mode(chatbot_mode, default='')
+            if chatbot_mode not in ('knowledge_retrieval', 'dialogue_mode'):
                 logger.warning(f"Invalid chatbot_mode '{chatbot_mode}' submitted, ignoring")
                 chatbot_mode = None
         ai_model = request.form.get('ai_model')
@@ -6530,12 +6536,11 @@ def admin_update_chatbot_mode():
         if not chatbot_code:
             return jsonify({"success": False, "error": "Chatbot code is required"}), 400
 
-        if chatbot_mode == 'critical_thinking_agent':
-            chatbot_mode = 'agent_mode'
-        if chatbot_mode not in ('knowledge_retrieval', 'agent_mode'):
+        chatbot_mode = normalize_chatbot_mode(chatbot_mode, default='')
+        if chatbot_mode not in ('knowledge_retrieval', 'dialogue_mode'):
             return jsonify({
                 "success": False,
-                "error": "Invalid chatbot mode. Must be 'knowledge_retrieval' or 'agent_mode'."
+                "error": "Invalid chatbot mode. Must be 'knowledge_retrieval' or 'dialogue_mode'."
             }), 400
 
         if not ai_model:

@@ -312,10 +312,10 @@ class ChatbotContent(Base):
     system_prompt_role = Column(Text, nullable=True)  # System prompt: Role section
     system_prompt_guidelines = Column(Text, nullable=True)  # System prompt: Important Guidelines section
     auto_delete_days = Column(Integer, nullable=True, default=None)  # Auto-delete conversations after N days (NULL = never delete)
-    # Conversation behavior: 'knowledge_retrieval' (stateless Q&A) or 'critical_thinking_agent'
+    # Conversation behavior: 'knowledge_retrieval' (stateless Q&A) or 'dialogue_mode'
     # (multi-turn dialogue that uses prior conversation history as context)
     chatbot_mode = Column(String(50), nullable=False, default='knowledge_retrieval')
-    # Configurable AI model name (e.g. 'gemini-2.5-flash'). Used by the critical-thinking-agent
+    # Configurable AI model name (e.g. 'gemini-2.5-flash'). Used by the dialogue-mode
     # branch of /chat so the model can be changed per-chatbot from the admin panel without
     # touching application code.
     ai_model = Column(String(100), nullable=False, default='gemini-2.5-flash')

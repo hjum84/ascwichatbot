@@ -253,7 +253,6 @@ def fallback_suggested_questions(chatbot_name, mode_label, count):
         base = [
             "Can we role-play a scenario and practice step by step?",
             "Please provide me with a possible scenario",
-            f"Give me a realistic case example and guide my response using {chatbot_name}.",
         ]
     else:
         base = [
@@ -314,7 +313,17 @@ load_dotenv()
 # openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: Using Gemini instead
 
 # Configure Gemini API
-gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# 로컬은 API 키, Render는 Vertex AI로 분기.
+USE_VERTEX = os.getenv("USE_VERTEX_AI", "").lower() in ("1", "true", "yes")
+
+if USE_VERTEX:
+    gemini_client = genai.Client(
+        vertexai=True,
+        project=os.getenv("GCP_PROJECT_ID"),
+        location=os.getenv("GCP_LOCATION", "us-central1"),
+    )
+else:
+    gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Initialize Flask application
 app = Flask(__name__)

@@ -251,11 +251,9 @@ def fallback_suggested_questions(chatbot_name, mode_label, count):
     normalized_mode = "dialogue" if mode_label == "Dialogue Mode" else "knowledge"
     if normalized_mode == "dialogue":
         base = [
-            f"Can we role-play a {chatbot_name} scenario and practice step by step?",
-            f"Ask me follow-up questions to coach me through a {chatbot_name} situation.",
-            f"Help me reflect on a mistake I made and how to improve in {chatbot_name}.",
+            "Can we role-play a scenario and practice step by step?",
+            "Please provide me with a possible scenario",
             f"Give me a realistic case example and guide my response using {chatbot_name}.",
-            f"What questions should I ask myself during a live {chatbot_name} conversation?",
         ]
     else:
         base = [
@@ -315,32 +313,8 @@ def build_guardrail_user_notice(guardrail_tier, guardrail_result):
 load_dotenv()
 # openai.api_key = os.getenv("OPENAI_API_KEY")  # PARKED: Using Gemini instead
 
-# Configure Gemini client.
-# Prefer Vertex AI in production (region-controlled, better for hosted deployments),
-# while keeping API-key fallback for local/dev environments.
-GEMINI_VERTEX_LOCATION = os.getenv("GEMINI_VERTEX_LOCATION", "us-central1")
-GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-USE_VERTEX_AI = os.getenv("USE_VERTEX_AI", "true").strip().lower() in ("1", "true", "yes", "on")
-
-if USE_VERTEX_AI and GCP_PROJECT_ID:
-    gemini_client = genai.Client(
-        vertexai=True,
-        project=GCP_PROJECT_ID,
-        location=GEMINI_VERTEX_LOCATION,
-    )
-    logging.getLogger(__name__).info(
-        "Gemini client initialized with Vertex AI (project=%s, location=%s)",
-        GCP_PROJECT_ID,
-        GEMINI_VERTEX_LOCATION
-    )
-else:
-    gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
-    if USE_VERTEX_AI and not GCP_PROJECT_ID:
-        logging.getLogger(__name__).warning(
-            "USE_VERTEX_AI=true but GCP_PROJECT_ID is missing; falling back to API key mode."
-        )
-    logging.getLogger(__name__).info("Gemini client initialized with API key mode")
+# Configure Gemini API
+gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -1067,38 +1041,6 @@ def find_similar_question(user_message, content_hash, chatbot_code):
     # If we found a similar question, return it
     return best_question
 
-
-def is_location_restriction_error(error_text):
-    """Detect Gemini location restriction/API precondition failures."""
-    lowered = (error_text or "").lower()
-    return (
-        "user location is not supported" in lowered or
-        "failed_precondition" in lowered
-    )
-
-
-def get_gemini_model_fallback_chain(primary_model):
-    """
-    Return ordered Gemini models to try.
-    You can override with env var GEMINI_FALLBACK_MODELS as comma-separated list.
-    """
-    env_models = os.getenv("GEMINI_FALLBACK_MODELS", "").strip()
-    fallback_models = []
-    if env_models:
-        fallback_models = [m.strip() for m in env_models.split(",") if m.strip()]
-    else:
-        fallback_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-
-    ordered = []
-    primary = (primary_model or "").strip()
-    if primary:
-        ordered.append(primary)
-    for m in fallback_models:
-        if m not in ordered:
-            ordered.append(m)
-    return ordered
-
-
 @lru_cache(maxsize=1000)
 def get_cached_response(content_hash, user_message, chatbot_code):
     """Get cached response for the same content, user message, and chatbot code.
@@ -1191,34 +1133,15 @@ def get_cached_response(content_hash, user_message, chatbot_code):
         close_db(db)
         
         full_prompt = f"{system_prompt}\n\nUser: {user_message}"
-        selected_model = None
-        response = None
-        last_error_text = ""
-        for model_name in get_gemini_model_fallback_chain("gemini-2.5-flash"):
-            try:
-                selected_model = model_name
-                response = gemini_client.models.generate_content(
-                    model=model_name,
-                    contents=full_prompt,
-                    config=genai_types.GenerateContentConfig(
-                        max_output_tokens=1500,
-                        temperature=0.3,
-                    )
-                )
-                break
-            except Exception as model_error:
-                last_error_text = str(model_error)
-                if is_location_restriction_error(last_error_text):
-                    logger.warning(
-                        f"Gemini model '{model_name}' blocked by location in get_cached_response; trying next model."
-                    )
-                    continue
-                raise
-        if response is None:
-            logger.error(
-                f"All Gemini models failed in get_cached_response for {chatbot_code}. Last error: {last_error_text}"
+        
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=full_prompt,
+            config=genai_types.GenerateContentConfig(
+                max_output_tokens=1500,
+                temperature=0.3,
             )
-            return None
+        )
         
         response_content = response.text.strip()
         
@@ -1236,7 +1159,7 @@ Assistant: {response_content}
 User: Please complete your previous response with a brief conclusion."""
 
                 completion_response = gemini_client.models.generate_content(
-                    model=selected_model or 'gemini-2.5-flash',
+                    model='gemini-2.5-flash',
                     contents=completion_prompt,
                     config=genai_types.GenerateContentConfig(
                         max_output_tokens=300,
@@ -1257,8 +1180,7 @@ User: Please complete your previous response with a brief conclusion."""
         return response_content
         
     except Exception as e:
-        error_text = str(e)
-        logger.error(f"Error getting cached response: {error_text}")
+        logger.error(f"Error getting cached response: {str(e)}")
         return None
 
 # Load content summaries for each program from database
@@ -2564,12 +2486,26 @@ def chat():
                     )
 
                 # Build system prompt (reuse DB-configured prompt if available)
+                # Dialogue mode is expected to support guided role-play/practice.
+                # This explicit block prevents model refusals for allowed
+                # educational simulation while preserving safety boundaries.
+                dialogue_mode_behavior = (
+                    "DIALOGUE MODE BEHAVIOR:\n"
+                    "1. You are in Dialogue Mode. Interactive coaching and role-play are allowed.\n"
+                    "2. If the user asks to role-play, actively simulate a realistic practice scenario step by step.\n"
+                    "3. Stay grounded in the provided program content and cite key framework elements when relevant.\n"
+                    "4. Ask concise follow-up questions during role-play to keep the interaction dynamic.\n"
+                    "5. Do not provide real-case clinical/safety determinations or supervisory decisions. "
+                    "If asked for those, redirect to agency policy and supervisor consultation.\n"
+                    "6. Do not refuse role-play solely because it is a simulation; only refuse when it violates the safety constraint above."
+                )
                 if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
                     clean_guidelines_text, tier3_guardrail_text = split_guidelines_and_tier3_prompt(
                         chatbot.system_prompt_guidelines
                     )
                     system_prompt = (
                         f"{chatbot.system_prompt_role}\n\n"
+                        f"{dialogue_mode_behavior}\n\n"
                         f"IMPORTANT GUIDELINES:\n{clean_guidelines_text}\n\n"
                         f"{tier3_guardrail_text}\n\n"
                         f"CONTENT:\n{program_content.get(current_program, '')}"
@@ -2578,6 +2514,7 @@ def chat():
                     system_prompt = (
                         f"You are an assistant that answers questions based on the following "
                         f"content for the {program_names.get(current_program, 'selected')} program.\n\n"
+                        f"{dialogue_mode_behavior}\n\n"
                         f"IMPORTANT GUIDELINES:\n"
                         f"1. Only answer questions based on the provided content\n"
                         f"2. If the answer is not in the content, say \"I don't have enough information to answer that question\"\n"
@@ -2603,8 +2540,7 @@ def chat():
                 )
 
                 model_name = (getattr(chatbot, 'ai_model', None) or 'gemini-2.5-flash').strip()
-                model_chain = get_gemini_model_fallback_chain(model_name)
-                fallback_model_name = model_chain[1] if len(model_chain) > 1 else model_chain[0]
+                fallback_model_name = 'gemini-2.5-flash'
 
                 def is_transient_model_error(error_text):
                     lowered = (error_text or "").lower()
@@ -2658,30 +2594,15 @@ def chat():
                 except Exception as primary_model_error:
                     primary_error_text = str(primary_model_error)
                     can_try_fallback = (
-                        model_name != fallback_model_name and (
-                            is_transient_model_error(primary_error_text) or
-                            is_location_restriction_error(primary_error_text)
-                        )
+                        model_name != fallback_model_name and
+                        is_transient_model_error(primary_error_text)
                     )
                     if can_try_fallback:
-                        response = None
-                        last_fallback_error = primary_error_text
-                        for fallback_candidate in model_chain[1:]:
-                            try:
-                                logger.warning(
-                                    f"Primary agent model '{model_name}' failed: {primary_error_text}. "
-                                    f"Trying fallback model '{fallback_candidate}'."
-                                )
-                                response = call_agent_model_with_retry(
-                                    full_prompt, fallback_candidate, max_attempts=2
-                                )
-                                fallback_model_name = fallback_candidate
-                                break
-                            except Exception as fallback_error:
-                                last_fallback_error = str(fallback_error)
-                                continue
-                        if response is None:
-                            raise Exception(last_fallback_error)
+                        logger.warning(
+                            f"Primary agent model '{model_name}' unavailable: {primary_error_text}. "
+                            f"Falling back to '{fallback_model_name}'."
+                        )
+                        response = call_agent_model_with_retry(full_prompt, fallback_model_name, max_attempts=2)
                     else:
                         raise
 
@@ -2719,23 +2640,15 @@ def chat():
                     except Exception as completion_primary_error:
                         completion_error_text = str(completion_primary_error)
                         completion_can_fallback = (
-                            model_name != fallback_model_name and (
-                                is_transient_model_error(completion_error_text) or
-                                is_location_restriction_error(completion_error_text)
-                            )
+                            model_name != fallback_model_name and
+                            is_transient_model_error(completion_error_text)
                         )
                         if completion_can_fallback:
-                            completion_response = None
-                            for completion_fallback_candidate in model_chain[1:]:
-                                try:
-                                    completion_response = call_agent_model_with_retry(
-                                        completion_prompt,
-                                        completion_fallback_candidate,
-                                        max_attempts=1
-                                    )
-                                    break
-                                except Exception:
-                                    continue
+                            completion_response = call_agent_model_with_retry(
+                                completion_prompt,
+                                fallback_model_name,
+                                max_attempts=1
+                            )
                         else:
                             completion_response = None
                             logger.error(
@@ -2760,8 +2673,7 @@ def chat():
                             "\n\n[Response was truncated. Please ask me to continue.]"
                         )
             except Exception as e:
-                error_text = str(e)
-                logger.error(f"Error getting agent-mode response: {error_text}")
+                logger.error(f"Error getting agent-mode response: {str(e)}")
                 return jsonify({
                     "reply": "I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment.",
                     "html_reply": parse_markdown("I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment."),

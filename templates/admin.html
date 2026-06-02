@@ -849,7 +849,17 @@
                                                                     </div>
                                                                     <div class="mb-2">
                                                                         <label class="form-label small mb-1">AI Model</label>
-                                                                        <input type="text" class="form-control ai-model-field" value="{{ chatbot.ai_model if chatbot.ai_model else 'gemini-2.5-flash' }}" placeholder="gemini-2.5-flash">
+                                                                        <select class="form-select ai-model-field">
+                                                                            <option value="gemini-2.5-flash" {% if (chatbot.ai_model if chatbot.ai_model else 'gemini-2.5-flash') == 'gemini-2.5-flash' %}selected{% endif %}>Gemini 2.5 Flash</option>
+                                                                            <option value="gemini-2.5-flash-lite" {% if chatbot.ai_model == 'gemini-2.5-flash-lite' %}selected{% endif %}>Gemini 2.5 Flash Lite</option>
+                                                                            <option value="gemini-2.5-pro" {% if chatbot.ai_model == 'gemini-2.5-pro' %}selected{% endif %}>Gemini 2.5 Pro</option>
+                                                                            <option value="gemini-3.0-flash" {% if chatbot.ai_model == 'gemini-3.0-flash' %}selected{% endif %}>Gemini 3.0 Flash</option>
+                                                                            <option value="gemini-3.0-flash-lite" {% if chatbot.ai_model == 'gemini-3.0-flash-lite' %}selected{% endif %}>Gemini 3.0 Flash Lite</option>
+                                                                            <option value="gemini-3.0-pro" {% if chatbot.ai_model == 'gemini-3.0-pro' %}selected{% endif %}>Gemini 3.0 Pro</option>
+                                                                            {% if chatbot.ai_model and chatbot.ai_model not in ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-3.0-flash', 'gemini-3.0-flash-lite', 'gemini-3.0-pro'] %}
+                                                                                <option value="{{ chatbot.ai_model }}" selected>Custom ({{ chatbot.ai_model }})</option>
+                                                                            {% endif %}
+                                                                        </select>
                                                                     </div>
                                                                     <button type="button" class="btn btn-secondary update-chatbot-mode-btn">
                                                                         <i class="bi bi-arrow-clockwise"></i> Update
@@ -1063,10 +1073,17 @@
                                                 <label for="ai_model" class="form-label">
                                                     <i class="bi bi-cpu"></i> AI Model
                                                 </label>
-                                                <input type="text" class="form-control" id="ai_model" name="ai_model" value="gemini-2.5-flash" placeholder="gemini-2.5-flash">
+                                                <select class="form-select" id="ai_model" name="ai_model">
+                                                    <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash</option>
+                                                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                                                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                                                    <option value="gemini-3.0-flash">Gemini 3.0 Flash</option>
+                                                    <option value="gemini-3.0-flash-lite">Gemini 3.0 Flash Lite</option>
+                                                    <option value="gemini-3.0-pro">Gemini 3.0 Pro</option>
+                                                </select>
                                                 <div class="form-text">
                                                     <i class="bi bi-info-circle"></i>
-                                                    The Gemini model used for this chatbot in Dialogue Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>). Knowledge Retrieval mode currently uses <code>gemini-2.5-flash</code> regardless of this setting.
+                                                    The Gemini model used for this chatbot in Dialogue Mode. Knowledge Retrieval mode currently uses <code>gemini-2.5-flash</code> regardless of this setting.
                                                 </div>
                                             </div>
 
@@ -2176,9 +2193,16 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                             <label for="editAiModel" class="form-label">
                                 <i class="bi bi-cpu"></i> AI Model
                             </label>
-                            <input type="text" class="form-control" id="editAiModel" name="ai_model" placeholder="gemini-2.5-flash">
+                            <select class="form-select" id="editAiModel" name="ai_model">
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                                <option value="gemini-3.0-flash">Gemini 3.0 Flash</option>
+                                <option value="gemini-3.0-flash-lite">Gemini 3.0 Flash Lite</option>
+                                <option value="gemini-3.0-pro">Gemini 3.0 Pro</option>
+                            </select>
                             <div class="form-text">
-                                Model used in Dialogue Mode (e.g. <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code>).
+                                Model used in Dialogue Mode.
                             </div>
                         </div>
                     </div>

@@ -687,7 +687,23 @@
         },
         body: JSON.stringify({ message: message }),
       })
-      .then(response => response.json())
+      .then(async (response) => {
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          data = {};
+        }
+
+        if (!response.ok) {
+          const error = new Error(data.error || 'Unable to process your request right now.');
+          error.payload = data;
+          error.status = response.status;
+          throw error;
+        }
+
+        return data;
+      })
       .then(data => {
         setTimeout(() => {
           removeTypingIndicator();
@@ -705,7 +721,19 @@
       .catch(error => {
         console.error('Error:', error);
         removeTypingIndicator();
-        addMessage('Error: Could not connect to the server.', 'bot');
+
+        if (error && error.status === 403 && error.payload && error.payload.disclaimer_required) {
+          addMessage(error.payload.error || 'Please accept the disclaimer before chatting.', 'bot');
+          setTimeout(() => {
+            window.location.reload();
+          }, 700);
+          return;
+        }
+
+        const fallbackMessage = (error && error.message) ?
+          error.message :
+          'Error: Could not connect to the server.';
+        addMessage(fallbackMessage, 'bot');
       });
     }
     

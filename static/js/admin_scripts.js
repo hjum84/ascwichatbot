@@ -683,7 +683,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         const editAiModel = document.getElementById('editAiModel');
                         if (editAiModel) {
-                            editAiModel.value = data.ai_model || 'gemini-2.5-flash';
+                            const selectedModel = data.ai_model || 'gemini-2.5-flash';
+                            const hasOption = Array.from(editAiModel.options).some(option => option.value === selectedModel);
+                            if (!hasOption && selectedModel) {
+                                const customOption = document.createElement('option');
+                                customOption.value = selectedModel;
+                                customOption.textContent = `Custom (${selectedModel})`;
+                                editAiModel.appendChild(customOption);
+                            }
+                            editAiModel.value = selectedModel;
                         }
                         // Populate disclaimer fields
                         const editDisclaimerRequired = document.getElementById('editDisclaimerRequired');
@@ -1559,7 +1567,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const form = this.closest('.update-chatbot-mode-form');
             const chatbotName = form.querySelector('.chatbot-name').value;
             const chatbotMode = form.querySelector('.chatbot-mode-field').value;
-            const aiModel = form.querySelector('.ai-model-field').value.trim() || 'gemini-2.5-flash';
+            const aiModel = form.querySelector('.ai-model-field').value || 'gemini-2.5-flash';
 
             const originalText = this.innerHTML;
             this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';

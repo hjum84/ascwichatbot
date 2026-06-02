@@ -2885,21 +2885,22 @@ def delete_registration():
     try:
         user = db.query(User).filter(User.email == email).first()
         if user:
-            db.delete(user)
-            db.commit()
-            message = "Your registration has been successfully removed."
-            status_code = 200
+            if User.delete_user(db, user.id):
+                message = "Your registration has been successfully removed."
+                status_code = 200
+            else:
+                message = "User not found. No registration to remove."
+                status_code = 404
         else:
             message = "User not found. No registration to remove."
             status_code = 404
-        close_db(db)
         return message, status_code
     except Exception as e:
-        db.rollback()
         message = f"Error during deletion: {str(e)}"
         status_code = 500
-        close_db(db)
         return message, status_code
+    finally:
+        close_db(db)
 
 @app.route('/export_users', methods=['GET'])
 @requires_auth

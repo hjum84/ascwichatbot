@@ -169,6 +169,10 @@ class User(UserMixin, Base):
     def delete_all_users(cls, db):
         """Delete all users and their associated lo_root_ids"""
         try:
+            # Remove dependent disclaimer acceptance rows first (FK to users.id)
+            db.query(DisclaimerAcceptance).delete()
+            # Remove user chat history rows for clean data management
+            db.query(ChatHistory).delete()
             # First delete all associated lo_root_ids
             db.query(UserLORootID).delete()
             # Then delete all users
@@ -183,6 +187,14 @@ class User(UserMixin, Base):
     def delete_user(cls, db, user_id):
         """Delete a specific user and their associated lo_root_ids"""
         try:
+            # Remove dependent disclaimer acceptance rows first (FK to users.id)
+            db.query(DisclaimerAcceptance).filter(
+                DisclaimerAcceptance.user_id == user_id
+            ).delete()
+            # Remove user chat history rows for clean data management
+            db.query(ChatHistory).filter(
+                ChatHistory.user_id == user_id
+            ).delete()
             # First delete associated lo_root_ids
             db.query(UserLORootID).filter(UserLORootID.user_id == user_id).delete()
             # Then delete the user

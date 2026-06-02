@@ -302,8 +302,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const wsChk = document.getElementById('is_workstream');
         const introFieldEl = document.getElementById('intro_message');
         const defProg = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
-        const defWs = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.';
-        if (wsChk && wsChk.checked && introFieldEl && introFieldEl.value.trim() === defProg) {
+        const defProgMode = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.';
+        const defWs = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day in {mode}.';
+        if (wsChk && wsChk.checked && introFieldEl && [defProg, defProgMode].includes(introFieldEl.value.trim())) {
             introFieldEl.value = defWs;
         }
         if (uploadedFiles.length === 0) {
@@ -684,6 +685,19 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (editAiModel) {
                             editAiModel.value = data.ai_model || 'gemini-2.5-flash';
                         }
+                        // Populate disclaimer fields
+                        const editDisclaimerRequired = document.getElementById('editDisclaimerRequired');
+                        if (editDisclaimerRequired) {
+                            editDisclaimerRequired.checked = !!data.disclaimer_required;
+                        }
+                        const editDisclaimerText = document.getElementById('editDisclaimerText');
+                        if (editDisclaimerText) {
+                            editDisclaimerText.value = data.disclaimer_text || '';
+                        }
+                        const editDisclaimerVersion = document.getElementById('editDisclaimerVersion');
+                        if (editDisclaimerVersion) {
+                            editDisclaimerVersion.textContent = data.disclaimer_version || 1;
+                        }
                         updateCharCount();
                     } else {
                         contentTextarea.value = 'Error: ' + (data.error || 'Failed to load content');
@@ -770,7 +784,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (aiModel) {
             formData.append('ai_model', aiModel);
         }
-        
+        // Append disclaimer fields
+        const editDisclaimerRequiredEl = document.getElementById('editDisclaimerRequired');
+        if (editDisclaimerRequiredEl) {
+            formData.append('disclaimer_required', editDisclaimerRequiredEl.checked ? 'true' : 'false');
+        }
+        const editDisclaimerTextEl = document.getElementById('editDisclaimerText');
+        if (editDisclaimerTextEl) {
+            formData.append('disclaimer_text', editDisclaimerTextEl.value);
+        }
+
         // Only enable auto-summarize when content exceeds limit
         const contentExceedsLimit = newContent.length > parseInt(charLimit);
         formData.append('auto_summarize', (autoSummarize && contentExceedsLimit).toString());
@@ -1274,6 +1297,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Get quota from the same chatbot card
         const chatbotCard = form.closest('.chatbot-card');
         const quotaField = chatbotCard.querySelector('.quota-field');
+        const modeField = chatbotCard.querySelector('.chatbot-mode-field');
         const displayName = chatbotCard.querySelector('.card-header h5').textContent.trim();
         
         // Update preview when intro message is edited
@@ -1283,24 +1307,35 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Also update preview when quota changes
         quotaField.addEventListener('change', function() {
-            updateIntroPreview(introField.value, displayName, this.value);
+            updateIntroPreview(introField.value, displayName, this.value, modeField ? modeField.value : 'knowledge_retrieval');
         });
+        if (modeField) {
+            modeField.addEventListener('change', function() {
+                updateIntroPreview(introField.value, displayName, quotaField.value, this.value);
+            });
+        }
         
         // Reset to default intro message
         resetBtn.addEventListener('click', function() {
-            const defaultIntro = "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.";
+            const defaultIntro = "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.";
             introField.value = defaultIntro;
-            updateIntroPreview(defaultIntro, displayName, quotaField.value);
+            updateIntroPreview(defaultIntro, displayName, quotaField.value, modeField ? modeField.value : 'knowledge_retrieval');
         });
         
         // Function to update the preview
-        function updateIntroPreview(text, program, quota) {
-            let preview = text.replace('{program}', program).replace('{quota}', quota);
+        function updateIntroPreview(text, program, quota, mode) {
+            const modeLabel = mode === 'dialogue_mode' ? 'Dialogue Mode' : 'Knowledge Retrieval Mode';
+            const modeShort = mode === 'dialogue_mode' ? 'dialogue' : 'knowledge retrieval';
+            let preview = (text || '')
+                .replace(/\{program\}/g, program)
+                .replace(/\{quota\}/g, quota)
+                .replace(/\{mode\}/g, modeLabel)
+                .replace(/\{mode_short\}/g, modeShort);
             previewText.textContent = preview;
         }
         
         // Initialize preview
-        updateIntroPreview(introField.value, displayName, quotaField.value);
+        updateIntroPreview(introField.value, displayName, quotaField.value, modeField ? modeField.value : 'knowledge_retrieval');
     });
 
     // Update the Create New Chatbot form as well with intro message preview
@@ -1309,6 +1344,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const introField = createForm.querySelector('#intro_message');
         const quotaField = createForm.querySelector('#default_quota');
         const displayNameField = createForm.querySelector('#display_name');
+        const modeField = createForm.querySelector('#chatbot_mode');
         
         if (introField && displayNameField) {
             // Add a preview section after the intro message field
@@ -1329,13 +1365,21 @@ document.addEventListener('DOMContentLoaded', function() {
             function updateCreatePreview() {
                 const displayName = displayNameField.value || "[Program Name]";
                 const quota = quotaField ? quotaField.value : "3";
-                let preview = introField.value.replace('{program}', displayName).replace('{quota}', quota);
+                const modeValue = modeField ? modeField.value : 'knowledge_retrieval';
+                const modeLabel = modeValue === 'dialogue_mode' ? 'Dialogue Mode' : 'Knowledge Retrieval Mode';
+                const modeShort = modeValue === 'dialogue_mode' ? 'dialogue' : 'knowledge retrieval';
+                let preview = (introField.value || '')
+                    .replace(/\{program\}/g, displayName)
+                    .replace(/\{quota\}/g, quota)
+                    .replace(/\{mode\}/g, modeLabel)
+                    .replace(/\{mode_short\}/g, modeShort);
                 previewText.textContent = preview;
             }
             
             introField.addEventListener('input', updateCreatePreview);
             if (displayNameField) displayNameField.addEventListener('input', updateCreatePreview);
             if (quotaField) quotaField.addEventListener('input', updateCreatePreview);
+            if (modeField) modeField.addEventListener('change', updateCreatePreview);
             
             // Add reset button to intro message field
             const helpText = introField.nextElementSibling;
@@ -1345,7 +1389,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 resetBtn.className = 'btn btn-sm btn-link text-decoration-none p-0 ms-2';
                 resetBtn.textContent = 'Reset to default';
                 resetBtn.addEventListener('click', function() {
-                    const defaultIntro = "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.";
+                    const defaultIntro = "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.";
                     introField.value = defaultIntro;
                     updateCreatePreview();
                 });
@@ -1410,6 +1454,101 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.innerHTML = originalText;
                 this.disabled = false;
                 alert('Network error while updating intro message. Please try again.');
+            });
+        });
+    });
+
+    document.querySelectorAll('.update-suggested-questions-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const form = this.closest('.update-suggested-questions-form');
+            if (!form) return;
+            const chatbotName = form.querySelector('.chatbot-name').value;
+            const countField = form.querySelector('.suggested-questions-count-field');
+            const questionsField = form.querySelector('.suggested-questions-field');
+            const questionCount = countField ? countField.value : '3';
+            const questionsText = questionsField ? questionsField.value : '';
+
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> Updating...';
+            this.disabled = true;
+
+            const formData = new FormData();
+            formData.append('chatbot_code', chatbotName);
+            formData.append('suggested_questions_count', questionCount);
+            formData.append('suggested_questions_text', questionsText);
+
+            fetch(window.adminUrls.updateSuggestedQuestions, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                this.innerHTML = originalText;
+                this.disabled = false;
+                if (data.success) {
+                    if (countField && data.suggested_questions_count) {
+                        countField.value = String(data.suggested_questions_count);
+                    }
+                    if (questionsField && Array.isArray(data.suggested_questions)) {
+                        questionsField.value = data.suggested_questions.join('\n');
+                    }
+                    const successMsg = document.createElement('span');
+                    successMsg.className = 'text-success ms-2';
+                    successMsg.innerHTML = '<i class="bi bi-check-circle"></i> Updated!';
+                    this.parentNode.appendChild(successMsg);
+                    setTimeout(() => successMsg.remove(), 2000);
+                } else {
+                    alert('Error updating suggested questions: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(() => {
+                this.innerHTML = originalText;
+                this.disabled = false;
+                alert('Network error while updating suggested questions. Please try again.');
+            });
+        });
+    });
+
+    document.querySelectorAll('.generate-suggested-questions-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const form = this.closest('.update-suggested-questions-form');
+            if (!form) return;
+            const chatbotName = form.querySelector('.chatbot-name').value;
+            const countField = form.querySelector('.suggested-questions-count-field');
+            const questionsField = form.querySelector('.suggested-questions-field');
+            const questionCount = countField ? countField.value : '3';
+
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> Generating...';
+            this.disabled = true;
+
+            const formData = new FormData();
+            formData.append('chatbot_code', chatbotName);
+            formData.append('suggested_questions_count', questionCount);
+
+            fetch(window.adminUrls.generateSuggestedQuestionsDefaults, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                this.innerHTML = originalText;
+                this.disabled = false;
+                if (data.success) {
+                    if (countField && data.suggested_questions_count) {
+                        countField.value = String(data.suggested_questions_count);
+                    }
+                    if (questionsField && Array.isArray(data.suggested_questions)) {
+                        questionsField.value = data.suggested_questions.join('\n');
+                    }
+                } else {
+                    alert('Error generating default suggested questions: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(() => {
+                this.innerHTML = originalText;
+                this.disabled = false;
+                alert('Network error while generating default suggested questions. Please try again.');
             });
         });
     });
@@ -4030,8 +4169,9 @@ const loRootIdsSection = document.getElementById('lo_root_ids_section');
 const introMessageField = document.getElementById('intro_message');
 
 // Default intro messages
-const programIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
-const workstreamIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.';
+const programIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.';
+const programIntroMessageLegacy = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
+const workstreamIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day in {mode}.';
 
 if (isWorkstreamCheckbox && workstreamCategorySection && programCategorySection && loRootIdsSection) {
     // Initialize sections on load
@@ -4040,9 +4180,7 @@ if (isWorkstreamCheckbox && workstreamCategorySection && programCategorySection 
         programCategorySection.style.display = 'none';
         loRootIdsSection.style.display = 'none';
         if (introMessageField) {
-            const programIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.';
-            const workstreamIntroMessage = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.';
-            if (introMessageField.value.trim() === programIntroMessage) {
+            if ([programIntroMessage, programIntroMessageLegacy].includes(introMessageField.value.trim())) {
                 introMessageField.value = workstreamIntroMessage;
             }
         }
@@ -4055,7 +4193,7 @@ if (isWorkstreamCheckbox && workstreamCategorySection && programCategorySection 
             loRootIdsSection.style.display = 'none';
             
             // Update intro message if it's still the default program message
-            if (introMessageField && introMessageField.value.trim() === programIntroMessage) {
+            if (introMessageField && [programIntroMessage, programIntroMessageLegacy].includes(introMessageField.value.trim())) {
                 introMessageField.value = workstreamIntroMessage;
             }
         } else {

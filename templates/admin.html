@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -121,6 +121,24 @@
                 gap: 0.75rem;
                 font-size: 0.8rem;
             }
+        }
+
+        .create-section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 1.1rem 0 0.65rem;
+            padding-bottom: 0.35rem;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .create-section-subnote {
+            font-size: 0.84rem;
+            color: #64748b;
+            margin: -0.2rem 0 0.8rem;
         }
     </style>
 </head>
@@ -642,7 +660,7 @@
                                                         
                                                         <!-- Toggle for Details -->
                                                         <button class="chatbot-details-toggle collapsed" type="button" data-bs-toggle="collapse" 
-                                                                data-bs-target="#details-{{ chatbot.code }}" aria-expanded="false">
+                                                                data-bs-target="#details-{{ chatbot.id }}" aria-expanded="false">
                                                             <div class="d-flex justify-content-between align-items-center">
                                                                 <span><i class="bi bi-gear"></i> Advanced Settings</span>
                                                                 <i class="bi bi-chevron-down toggle-icon"></i>
@@ -650,7 +668,7 @@
                                                         </button>
                                                         
                                                         <!-- Collapsible Details Content -->
-                                                        <div class="collapse chatbot-details-content" id="details-{{ chatbot.code }}">
+                                                        <div class="collapse chatbot-details-content" id="details-{{ chatbot.id }}">
                                                             <!-- Description Section -->
                                                             <div class="chatbot-form-section">
                                                                 <h6><i class="bi bi-card-text"></i> Description</h6>
@@ -744,15 +762,47 @@
                                                                             </div>
                                                                         </div>
                                                                     <div class="mb-2">
-                                                                        <textarea class="form-control intro-field" rows="2">{% if 'intro_message' in chatbot %}{{ chatbot.intro_message }}{% else %}Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.{% endif %}</textarea>
+                                                                        <textarea class="form-control intro-field" rows="2">{% if 'intro_message' in chatbot %}{{ chatbot.intro_message }}{% else %}Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.{% endif %}</textarea>
                                                                         <div class="form-text small">
-                                                                            <i class="bi bi-info-circle"></i> Use <code>{program}</code> and <code>{quota}</code> placeholders
+                                                                            <i class="bi bi-info-circle"></i> Use <code>{program}</code>, <code>{quota}</code>, <code>{mode}</code>, and <code>{mode_short}</code> placeholders
                                                                             <button type="button" class="btn btn-sm btn-link text-decoration-none reset-intro-btn p-0 ms-2">Reset to default</button>
                                                                         </div>
                                                                     </div>
                                                                     <button type="button" class="btn btn-primary update-intro-btn">
                                                                         <i class="bi bi-check-circle"></i> Update Intro Message
                                                                     </button>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="chatbot-form-section">
+                                                                <h6><i class="bi bi-chat-square-text"></i> Suggested Questions</h6>
+                                                                <div class="update-suggested-questions-form">
+                                                                    <input type="hidden" class="chatbot-name" value="{{ chatbot.code }}">
+                                                                    <div class="mb-2">
+                                                                        <label class="form-label small mb-1">Number of Suggested Questions</label>
+                                                                        <select class="form-select suggested-questions-count-field">
+                                                                            <option value="1" {% if chatbot.suggested_questions_count == 1 %}selected{% endif %}>1</option>
+                                                                            <option value="2" {% if chatbot.suggested_questions_count == 2 %}selected{% endif %}>2</option>
+                                                                            <option value="3" {% if chatbot.suggested_questions_count == 3 or not chatbot.suggested_questions_count %}selected{% endif %}>3</option>
+                                                                            <option value="4" {% if chatbot.suggested_questions_count == 4 %}selected{% endif %}>4</option>
+                                                                            <option value="5" {% if chatbot.suggested_questions_count == 5 %}selected{% endif %}>5</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div class="mb-2">
+                                                                        <label class="form-label small mb-1">Questions (one per line)</label>
+                                                                        <textarea class="form-control suggested-questions-field" rows="5" placeholder="Enter one suggested question per line">{% if chatbot.suggested_questions %}{{ chatbot.suggested_questions | join('\n') }}{% endif %}</textarea>
+                                                                        <div class="form-text small">
+                                                                            <i class="bi bi-info-circle"></i> Leave blank and click "Generate Defaults" to create module-specific AI questions from content.
+                                                                        </div>
+                                                                    </div>
+                                                                    <div class="d-flex flex-wrap gap-2">
+                                                                        <button type="button" class="btn btn-primary update-suggested-questions-btn">
+                                                                            <i class="bi bi-check-circle"></i> Update Suggested Questions
+                                                                        </button>
+                                                                        <button type="button" class="btn btn-outline-secondary generate-suggested-questions-btn">
+                                                                            <i class="bi bi-magic"></i> Generate Defaults
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                             
@@ -879,6 +929,8 @@
                                         
                                         <!-- Use an AJAX form submission with manual handling -->
                                         <form id="upload-form" enctype="multipart/form-data">
+                                            <div class="create-section-title"><i class="bi bi-card-heading"></i> Basic Information</div>
+                                            <div class="create-section-subnote">Set the chatbot identity and how it appears to users.</div>
                                             <div class="row">
                                                 <div class="col-md-6">
                                                     <div class="mb-3">
@@ -903,6 +955,8 @@
                                             </div>
                                             
                                             <!-- Workstream Chatbot toggle -->
+                                            <div class="create-section-title"><i class="bi bi-shield-lock"></i> Access & Visibility</div>
+                                            <div class="create-section-subnote">Control where this chatbot appears and who can access it.</div>
                                             <div class="form-check mb-3">
                                                 <input class="form-check-input" type="checkbox" id="is_workstream" name="is_workstream">
                                                 <label class="form-check-label" for="is_workstream">
@@ -957,12 +1011,36 @@
                                                 </div>
                                             </div>
                                             
+                                            <div class="create-section-title"><i class="bi bi-chat-square-text"></i> Chat Experience</div>
+                                            <div class="create-section-subnote">Configure user-facing intro text, mode, and suggested prompts.</div>
                                             <div class="mb-3">
                                                 <label for="intro_message" class="form-label">Chatbot Intro Message</label>
-                                                <textarea class="form-control" id="intro_message" name="intro_message" rows="2">Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.</textarea>
+                                                <textarea class="form-control" id="intro_message" name="intro_message" rows="2">Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.</textarea>
                                                 <div class="form-text">
                                                     <i class="bi bi-info-circle"></i> 
-                                                    Welcome message shown to users. Use <code>{program}</code> to insert program name and <code>{quota}</code> to insert daily quota.
+                                                    Welcome message shown to users. Use <code>{program}</code>, <code>{quota}</code>, <code>{mode}</code>, and <code>{mode_short}</code> placeholders.
+                                                </div>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label for="suggested_questions_count" class="form-label">Suggested Questions Count</label>
+                                                <select class="form-select" id="suggested_questions_count" name="suggested_questions_count">
+                                                    <option value="1">1</option>
+                                                    <option value="2">2</option>
+                                                    <option value="3" selected>3</option>
+                                                    <option value="4">4</option>
+                                                    <option value="5">5</option>
+                                                </select>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i> Number of suggestion chips shown under the intro on chat page.
+                                                </div>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label for="suggested_questions_text" class="form-label">Suggested Questions (optional)</label>
+                                                <textarea class="form-control" id="suggested_questions_text" name="suggested_questions_text" rows="5" placeholder="One question per line. Leave blank to auto-generate from module content."></textarea>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i> If left blank, defaults are generated from this module's content and selected mode.
                                                 </div>
                                             </div>
 
@@ -992,6 +1070,40 @@
                                                 </div>
                                             </div>
 
+                                            <div class="mb-3">
+                                                <label for="default_quota" class="form-label">Default Daily Question Quota</label>
+                                                <div class="input-group">
+                                                    <input type="number" class="form-control" id="default_quota" name="default_quota" min="1" max="20" value="3">
+                                                    <span class="input-group-text">questions per day</span>
+                                                </div>
+                                                <div class="form-text">Maximum number of questions a user can ask per day. Default is 3.</div>
+                                            </div>
+
+                                            <!-- 👈 NEW: Auto-delete setting for conversations -->
+                                            <div class="mb-3">
+                                                <label for="auto_delete_days" class="form-label">
+                                                    <i class="bi bi-clock-history"></i> Conversation Auto-Delete Settings
+                                                </label>
+                                                <div class="input-group">
+                                                    <select class="form-select" id="auto_delete_days" name="auto_delete_days">
+                                                        <option value="">Keep conversations (never delete)</option>
+                                                        <option value="7">Auto-delete after 7 days</option>
+                                                        <option value="30" selected>Auto-delete after 30 days (recommended)</option>
+                                                        <option value="60">Auto-delete after 60 days</option>
+                                                        <option value="90">Auto-delete after 90 days</option>
+                                                        <option value="180">Auto-delete after 180 days</option>
+                                                    </select>
+                                                    <span class="input-group-text"><i class="bi bi-shield-check"></i></span>
+                                                </div>
+                                                <div class="form-text">
+                                                    <i class="bi bi-info-circle"></i> 
+                                                    <strong>Privacy Protection:</strong> User conversations will be automatically deleted after the specified period.<br>
+                                                    <small class="text-muted">Users will be notified 3 days before deletion. Leave empty to keep conversations indefinitely.</small>
+                                                </div>
+                                            </div>
+
+                                            <div class="create-section-title"><i class="bi bi-shield-exclamation"></i> Safety & Compliance</div>
+                                            <div class="create-section-subnote">Configure guardrails and required disclaimer behavior.</div>
                                             <div class="mb-3">
                                                 <label class="form-label">
                                                     <i class="bi bi-shield-exclamation"></i> Tier 2 Guardrails (Optional)
@@ -1092,42 +1204,23 @@ I can help you review the curriculum on service planning and case closure criter
                                                 </button>
                                             </div>
                                             
+                                            <!-- Disclaimer / Consent Gate (Create form) -->
                                             <div class="mb-3">
-                                                <label for="default_quota" class="form-label">Default Daily Question Quota</label>
-                                                <div class="input-group">
-                                                    <input type="number" class="form-control" id="default_quota" name="default_quota" min="1" max="20" value="3">
-                                                    <span class="input-group-text">questions per day</span>
+                                                <label class="form-label fw-bold"><i class="bi bi-file-earmark-text"></i> Disclaimer / Consent Gate</label>
+                                                <div class="form-check mb-2">
+                                                    <input type="checkbox" class="form-check-input" id="disclaimer_required" name="disclaimer_required" value="true" checked>
+                                                    <label class="form-check-label" for="disclaimer_required">Require users to accept a disclaimer before chatting</label>
                                                 </div>
-                                                <div class="form-text">Maximum number of questions a user can ask per day. Default is 3.</div>
+                                                <textarea class="form-control" id="disclaimer_text" name="disclaimer_text" rows="5" placeholder="Leave blank to use the system default (shown below)."></textarea>
+                                                <div class="form-text mb-1"><i class="bi bi-info-circle"></i> If enabled, users see a blocking notice they must accept before the chat unlocks. Leave blank for the system default. Editing the text bumps the version so users must re-accept. <strong>Have Legal/Privacy approve before production.</strong></div>
+                                                <details class="mt-1"><summary class="text-muted small" style="cursor:pointer;"><i class="bi bi-eye"></i> View system default disclaimer</summary>
+                                                    <div class="mt-2 p-2 bg-light border rounded small" style="max-height:220px;overflow-y:auto;font-size:0.82rem;line-height:1.6;color:#334155;">{% for para in (default_disclaimer_text|default('', true)).split('\n\n') %}{% if para.strip() %}<p style="margin:0 0 0.75em 0;">{{ para.strip() }}</p>{% endif %}{% endfor %}</div>
+                                                </details>
                                             </div>
-                                            
-                                            <!-- 👈 NEW: Auto-delete setting for conversations -->
-                                            <div class="mb-3">
-                                                <label for="auto_delete_days" class="form-label">
-                                                    <i class="bi bi-clock-history"></i> Conversation Auto-Delete Settings
-                                                </label>
-                                                <div class="input-group">
-                                                    <select class="form-select" id="auto_delete_days" name="auto_delete_days">
-                                                        <option value="">Keep conversations (never delete)</option>
-                                                        <option value="7">Auto-delete after 7 days</option>
-                                                        <option value="30" selected>Auto-delete after 30 days (recommended)</option>
-                                                        <option value="60">Auto-delete after 60 days</option>
-                                                        <option value="90">Auto-delete after 90 days</option>
-                                                        <option value="180">Auto-delete after 180 days</option>
-                                                    </select>
-                                                    <span class="input-group-text"><i class="bi bi-shield-check"></i></span>
-                                                </div>
-                                                <div class="form-text">
-                                                    <i class="bi bi-info-circle"></i> 
-                                                    <strong>Privacy Protection:</strong> User conversations will be automatically deleted after the specified period.<br>
-                                                    <small class="text-muted">Users will be notified 3 days before deletion. Leave empty to keep conversations indefinitely.</small>
-                                                </div>
-                                            </div>
-                                            
-                                            
 
-                                                <!-- Workforce Institute Staff Flag in Add User Modal (user management area already exists; ensure field is present) -->
-                                            
+<!-- Workforce Institute Staff Flag in Add User Modal (user management area already exists; ensure field is present) -->
+                                            <div class="create-section-title"><i class="bi bi-journal-text"></i> Knowledge Content & Prompting</div>
+                                            <div class="create-section-subnote">Upload source files and define model instruction behavior.</div>
                                             <div class="mb-3">
                                                 <label for="char_limit" class="form-label">Character Limit</label>
                                                 <input type="number" class="form-control" id="char_limit" name="char_limit" min="50000" max="200000" value="50000">
@@ -1793,6 +1886,12 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                                                     <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=conversations&format=csv'">Conversations (CSV)</button>
                                                     <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=conversations&format=excel'">Conversations (Excel)</button>
                                                 </div>
+                                                <div class="mb-3">
+                                                    <h6><i class="bi bi-file-earmark-check me-1"></i> Disclaimer Acceptances (Audit Trail)</h6>
+                                                    <p class="text-muted small mb-2">One row per acceptance: who accepted, which program, the disclaimer version, the exact text agreed to, and the UTC timestamp.</p>
+                                                    <button class="btn btn-outline-primary me-2" onclick="window.location.href='/admin/export_data?type=disclaimers&format=csv'">Disclaimers (CSV)</button>
+                                                    <button class="btn btn-outline-success" onclick="window.location.href='/admin/export_data?type=disclaimers&format=excel'">Disclaimers (Excel)</button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -2084,6 +2183,20 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                         </div>
                     </div>
                     
+                    <!-- Disclaimer / Consent Gate (Edit modal) -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold"><i class="bi bi-file-earmark-text"></i> Disclaimer / Consent Gate</label>
+                        <div class="form-check mb-2">
+                            <input type="checkbox" class="form-check-input" id="editDisclaimerRequired" name="disclaimer_required" value="true">
+                            <label class="form-check-label" for="editDisclaimerRequired">Require users to accept a disclaimer before chatting</label>
+                        </div>
+                        <textarea class="form-control" id="editDisclaimerText" name="disclaimer_text" rows="5" placeholder="Leave blank to use the system default (shown below)."></textarea>
+                        <div class="form-text mb-1"><i class="bi bi-info-circle"></i> Clear to revert to the system default. Saving new text auto-increments the version so users must re-accept. Current version: <strong><span id="editDisclaimerVersion">1</span></strong></div>
+                        <details class="mt-1"><summary class="text-muted small" style="cursor:pointer;"><i class="bi bi-eye"></i> View system default disclaimer</summary>
+                            <div class="mt-2 p-2 bg-light border rounded small" style="max-height:220px;overflow-y:auto;font-size:0.82rem;line-height:1.6;color:#334155;">{% for para in (default_disclaimer_text|default('', true)).split('\n\n') %}{% if para.strip() %}<p style="margin:0 0 0.75em 0;">{{ para.strip() }}</p>{% endif %}{% endfor %}</div>
+                        </details>
+                    </div>
+
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" id="editAutoSummarize" name="auto_summarize" checked>
                         <label class="form-check-label" for="editAutoSummarize">Automatically summarize content if it exceeds the character limit</label>
@@ -2333,6 +2446,8 @@ Please refer to your agency's safety assessment frameworks and consult directly 
                 updateChatbotMode: "/admin/update_chatbot_mode",
                 updateQuota: "/update_quota",
                 updateIntroMessage: "/update_intro_message",
+                updateSuggestedQuestions: "/admin/update_suggested_questions",
+                generateSuggestedQuestionsDefaults: "/admin/generate_suggested_questions_defaults",
                 updateCategory: "{{ url_for('admin_update_category') }}",
                 deleteSelectedUsers: "/admin/delete_selected_users",
                 addUser: "/admin/add_user",

@@ -17,7 +17,8 @@ from functools import wraps
 import re
 from models import (
     User, UserLORootID, ChatbotContent, ChatbotLORootAssociation, ChatHistory, 
-    AuthorizedUser, get_db, close_db, Base, engine, DB_TYPE
+    AuthorizedUser, DisclaimerAcceptance, DEFAULT_DISCLAIMER_TEXT,
+    get_db, close_db, Base, engine, DB_TYPE
 )
 from guardrails import (
     check_input_guardrails, validate_custom_rules, format_guardrail_log_entry,
@@ -206,6 +207,76 @@ def normalize_chatbot_mode(mode_value, default='knowledge_retrieval'):
     if raw_mode == 'knowledge_retrieval':
         return 'knowledge_retrieval'
     return default
+
+
+def user_has_accepted_disclaimer(db, user_id, chatbot):
+    """True when acceptance isn't required or user accepted current disclaimer version."""
+    if not chatbot or not chatbot.disclaimer_required:
+        return True
+    rec = db.query(DisclaimerAcceptance).filter(
+        DisclaimerAcceptance.user_id == user_id,
+        DisclaimerAcceptance.chatbot_code == chatbot.code,
+        DisclaimerAcceptance.accepted_version >= chatbot.disclaimer_version
+    ).first()
+    return rec is not None
+
+
+def get_chatbot_mode_label(mode_value):
+    """Human-friendly chatbot mode label for UI placeholders."""
+    mode = normalize_chatbot_mode(mode_value)
+    return "Dialogue Mode" if mode == "dialogue_mode" else "Knowledge Retrieval Mode"
+
+
+def parse_suggested_questions_json(raw_value):
+    """Parse suggested questions JSON into a clean list of strings."""
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    cleaned = []
+    for item in parsed:
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                cleaned.append(text)
+    return cleaned
+
+
+def fallback_suggested_questions(chatbot_name, mode_label, count):
+    """Deterministic mode-aware defaults for suggested questions."""
+    normalized_mode = "dialogue" if mode_label == "Dialogue Mode" else "knowledge"
+    if normalized_mode == "dialogue":
+        base = [
+            f"Can we role-play a {chatbot_name} scenario and practice step by step?",
+            f"Ask me follow-up questions to coach me through a {chatbot_name} situation.",
+            f"Help me reflect on a mistake I made and how to improve in {chatbot_name}.",
+            f"Give me a realistic case example and guide my response using {chatbot_name}.",
+            f"What questions should I ask myself during a live {chatbot_name} conversation?",
+        ]
+    else:
+        base = [
+            f"What are the core concepts in {chatbot_name}?",
+            f"Give me a beginner-friendly overview of {chatbot_name}.",
+            f"What are the most common mistakes in {chatbot_name}?",
+            f"Summarize key best practices I should remember for {chatbot_name}.",
+            f"Which framework or checklist from {chatbot_name} should I use first?",
+        ]
+    return base[:max(1, min(5, int(count or 3)))]
+
+
+def generate_suggested_questions_from_content(chatbot, count):
+    """
+    Generate deterministic default suggested questions by mode/module.
+    This intentionally avoids AI calls to keep loading and admin actions fast.
+    """
+    desired_count = max(1, min(5, int(count or 3)))
+    mode_label = get_chatbot_mode_label(getattr(chatbot, "chatbot_mode", None))
+    chatbot_name = getattr(chatbot, "name", "this module")
+    return fallback_suggested_questions(chatbot_name, mode_label, desired_count)
 
 
 def build_guardrail_user_notice(guardrail_tier, guardrail_result):
@@ -1960,12 +2031,13 @@ def index_bcc():
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'BCC')
     deletion_warning = get_deletion_warning_for_user(user_id, 'BCC')
-    intro_message = get_intro_message('BCC')
+    intro_message, suggested_questions = get_intro_and_suggested_questions('BCC')
     
     return render_template('index.html',
                          program_display_name="Building Coaching Competency",
                          program_code="BCC",
                          intro_message=intro_message,
+                         suggested_questions=suggested_questions,
                          chat_history=chat_history,
                          remaining_questions=remaining_quota,
                          quota=quota,
@@ -1994,12 +2066,13 @@ def index_mi():
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'MI')
     deletion_warning = get_deletion_warning_for_user(user_id, 'MI')
-    intro_message = get_intro_message('MI')
+    intro_message, suggested_questions = get_intro_and_suggested_questions('MI')
     
     return render_template('index.html',
                          program_display_name="Motivational Interviewing",
                          program_code="MI",
                          intro_message=intro_message,
+                         suggested_questions=suggested_questions,
                          chat_history=chat_history,
                          remaining_questions=remaining_quota,
                          quota=quota,
@@ -2028,12 +2101,13 @@ def index_safety():
     
     chat_history, remaining_quota, quota = get_chat_history_and_remaining(user_id, 'S&R')
     deletion_warning = get_deletion_warning_for_user(user_id, 'S&R')
-    intro_message = get_intro_message('S&R')
+    intro_message, suggested_questions = get_intro_and_suggested_questions('S&R')
     
     return render_template('index.html',
                          program_display_name="Safety and Risk",
                          program_code="S&R",
                          intro_message=intro_message,
+                         suggested_questions=suggested_questions,
                          chat_history=chat_history,
                          remaining_questions=remaining_quota,
                          quota=quota,
@@ -2073,7 +2147,7 @@ def index_generic(program):
     deletion_warning = get_deletion_warning_for_user(user_id, program)
     
     # Get the intro message for this program
-    intro_message = get_intro_message(program)
+    intro_message, suggested_questions = get_intro_and_suggested_questions(program)
     
     # Load all available chatbots for the sidebar
     all_available_chatbots = []
@@ -2105,6 +2179,12 @@ def index_generic(program):
     try:
         current_chatbot = ChatbotContent.get_by_code(db, program)
         program_display_name = current_chatbot.name if current_chatbot else program
+        if current_chatbot:
+            show_disclaimer = not user_has_accepted_disclaimer(db, user_id, current_chatbot)
+            disclaimer_text = current_chatbot.get_effective_disclaimer()
+        else:
+            show_disclaimer = False
+            disclaimer_text = ""
     finally:
         close_db(db)
         
@@ -2116,9 +2196,43 @@ def index_generic(program):
         remaining_questions=remaining_quota,
                             quota=quota,
         intro_message=intro_message,
+        suggested_questions=suggested_questions,
         current_user=current_user,
-        deletion_warning=deletion_warning
+        deletion_warning=deletion_warning,
+        show_disclaimer=show_disclaimer,
+        disclaimer_text=disclaimer_text
     )
+
+
+@app.route('/accept_disclaimer/<program>', methods=['POST'])
+@login_required
+def accept_disclaimer(program):
+    user_id = current_user.id
+    db = get_db()
+    try:
+        chatbot = ChatbotContent.get_by_code(db, program.upper())
+        if not chatbot:
+            return jsonify({"success": False, "error": "Program not found."}), 404
+
+        user = User.get_by_id(db, user_id)
+
+        db.add(DisclaimerAcceptance(
+            user_id=user_id,
+            user_email=(user.email if user else None),
+            user_last_name=(user.last_name if user else None),
+            chatbot_code=chatbot.code,
+            program_name=chatbot.name,
+            accepted_version=chatbot.disclaimer_version,
+            disclaimer_text_snapshot=chatbot.get_effective_disclaimer(),
+        ))
+        db.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error recording disclaimer acceptance: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Could not record acceptance."}), 500
+    finally:
+        close_db(db)
 
 # Legacy index route - redirect to program selection
 @app.route('/index')
@@ -2173,6 +2287,12 @@ def chat():
         chatbot = ChatbotContent.get_by_code(db, current_program)
         if not chatbot:
             return jsonify({"error": "Program not found."}), 404
+
+        if not user_has_accepted_disclaimer(db, user_id, chatbot):
+            return jsonify({
+                "error": "You must read and accept the disclaimer before using this tool.",
+                "disclaimer_required": True
+            }), 403
         
         quota = chatbot.quota
         logger.info(f"User {user_id} attempting to send message. Program: {current_program}, Quota: {quota}")
@@ -2962,6 +3082,7 @@ def admin():
                               search_term=search_term_param,
                               selected_chatbot_code=chatbot_code_param,
                               selected_user_id=user_id_param,
+                              default_disclaimer_text=DEFAULT_DISCLAIMER_TEXT,
                               pagination={
                                   'total_pages': total_pages,
                                   'current_page': current_page,
@@ -3002,6 +3123,38 @@ def admin_export_data():
             data = all_conversations_flat
             filename_base = 'conversations_export'
             if data: df_columns = list(data[0].keys())
+
+        elif export_type == 'disclaimers':
+            chatbot_filter = request.args.get('chatbot_code')
+            user_filter = request.args.get('user_id')
+
+            q = db.query(DisclaimerAcceptance)
+            if chatbot_filter:
+                q = q.filter(DisclaimerAcceptance.chatbot_code == chatbot_filter.upper())
+            if user_filter:
+                try:
+                    q = q.filter(DisclaimerAcceptance.user_id == int(user_filter))
+                except ValueError:
+                    pass
+            records = q.order_by(DisclaimerAcceptance.accepted_at.desc()).all()
+
+            if not records:
+                flash("No disclaimer acceptance records to export.", "warning")
+                return redirect(url_for('admin'))
+
+            data = [{
+                "user_id": r.user_id,
+                "name": r.user_last_name,
+                "email": r.user_email,
+                "learning_program": r.program_name,
+                "chatbot_code": r.chatbot_code,
+                "disclaimer_version": r.accepted_version,
+                "accepted_at_utc": r.accepted_at.isoformat() if r.accepted_at else None,
+                "disclaimer_text": r.disclaimer_text_snapshot,
+            } for r in records]
+            filename_base = 'disclaimer_acceptances_export'
+            if data:
+                df_columns = list(data[0].keys())
         
         else:
             flash(f"Invalid export type: {export_type}", "danger")
@@ -3196,6 +3349,7 @@ def get_available_chatbots():
             lo_root_ids = [assoc.lo_root_id for assoc in chatbot.lo_root_ids]
             
             chatbot_data = {
+                "id": chatbot.id,
                 "code": chatbot.code,
                 "name": chatbot.name,
                 "display_name": chatbot.name,
@@ -3204,7 +3358,11 @@ def get_available_chatbots():
                 "intro_message": chatbot.intro_message,
                 "lo_root_ids": lo_root_ids,  # Add LO Root IDs for admin display
                 "category": chatbot.category or "standard",
-                "auto_delete_days": chatbot.auto_delete_days  # 👈 NEW: Add auto-delete setting
+                "auto_delete_days": chatbot.auto_delete_days,  # 👈 NEW: Add auto-delete setting
+                "chatbot_mode": normalize_chatbot_mode(chatbot.chatbot_mode),
+                "ai_model": chatbot.ai_model if chatbot.ai_model else "gemini-2.5-flash",
+                "suggested_questions_count": max(1, min(5, int(chatbot.suggested_questions_count or 3))),
+                "suggested_questions": parse_suggested_questions_json(chatbot.suggested_questions_json),
             }
             result.append(chatbot_data)
         return result
@@ -3218,12 +3376,17 @@ def get_deleted_chatbots():
         chatbots = db.query(ChatbotContent).filter(ChatbotContent.is_active == False).all()
         return [
             {
+                "id": chatbot.id,
                 "code": chatbot.code,
                 "name": chatbot.name,
                 "display_name": chatbot.name,
                 "description": chatbot.description or "",
                 "quota": chatbot.quota,
-                "intro_message": chatbot.intro_message
+                "intro_message": chatbot.intro_message,
+                "chatbot_mode": normalize_chatbot_mode(chatbot.chatbot_mode),
+                "ai_model": chatbot.ai_model if chatbot.ai_model else "gemini-2.5-flash",
+                "suggested_questions_count": max(1, min(5, int(chatbot.suggested_questions_count or 3))),
+                "suggested_questions": parse_suggested_questions_json(chatbot.suggested_questions_json),
             } for chatbot in chatbots
         ]
     finally:
@@ -3742,10 +3905,12 @@ def admin_upload():
         is_workstream_flag_raw = request.form.get('is_workstream')
         is_workstream_flag = str(is_workstream_flag_raw).lower() in ['1', 'true', 'on', 'yes']
         workstream_category = (request.form.get('workstream_category') or '').strip()
-        intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.')
+        intro_message = request.form.get('intro_message', 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.')
         # If marked as workstream and intro message is still the default program phrasing, switch it to workstream phrasing
-        if is_workstream_flag and intro_message.strip() == 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.':
-            intro_message = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day.'
+        default_program_intro_old = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day.'
+        default_program_intro_new = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this program per day in {mode}.'
+        if is_workstream_flag and intro_message.strip() in (default_program_intro_old, default_program_intro_new):
+            intro_message = 'Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to this workstream per day in {mode}.'
         default_quota = int(request.form.get('default_quota', 3))
         char_limit = int(request.form.get('char_limit', 50000))
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
@@ -3756,6 +3921,19 @@ def admin_upload():
             logger.warning(f"Invalid chatbot_mode '{chatbot_mode}', falling back to knowledge_retrieval")
             chatbot_mode = 'knowledge_retrieval'
         ai_model = (request.form.get('ai_model') or 'gemini-2.5-flash').strip()
+        disclaimer_text = request.form.get('disclaimer_text', '')
+        disclaimer_text = disclaimer_text.strip() if disclaimer_text is not None else ''
+        disclaimer_text = disclaimer_text or None
+        disclaimer_required = request.form.get('disclaimer_required') is not None
+        suggested_questions_count_raw = request.form.get('suggested_questions_count', '3')
+        try:
+            suggested_questions_count = max(1, min(5, int(suggested_questions_count_raw)))
+        except (TypeError, ValueError):
+            suggested_questions_count = 3
+        suggested_questions_text = request.form.get('suggested_questions_text', '')
+        manual_suggested_questions = [
+            q.strip() for q in (suggested_questions_text or '').splitlines() if q.strip()
+        ]
 
         # Optional Tier 2 plain-phrase guardrails from "Create New Chatbot" form.
         # We build JSON through add_rule_to_json so create/edit paths share
@@ -3886,6 +4064,19 @@ def admin_upload():
         # Normalize newline characters before length check
         final_content = final_content.replace('\r\n', '\n')
         logger.info(f"Normalized final_content length: {len(final_content)} chars")
+        if manual_suggested_questions:
+            suggested_questions_to_store = manual_suggested_questions[:suggested_questions_count]
+        else:
+            temp_chatbot_for_suggestions = type("TempChatbot", (), {
+                "name": display_name,
+                "code": chatbot_code.upper(),
+                "content": final_content,
+                "chatbot_mode": chatbot_mode
+            })()
+            suggested_questions_to_store = generate_suggested_questions_from_content(
+                temp_chatbot_for_suggestions, suggested_questions_count
+            )
+        suggested_questions_json = json.dumps(suggested_questions_to_store, ensure_ascii=False)
 
         # LENGTH CHECK & AUTO-SUMMARIZATION
         # If content exceeds limit and auto-summarize is enabled, try to summarize
@@ -3974,7 +4165,11 @@ def admin_upload():
             auto_delete_days=auto_delete_days,  # 👈 NEW: Auto-delete setting
             chatbot_mode=chatbot_mode,
             ai_model=ai_model,
-            guardrail_rules_json=create_guardrail_rules_json
+            guardrail_rules_json=create_guardrail_rules_json,
+            disclaimer_text=disclaimer_text,
+            disclaimer_required=disclaimer_required,
+            suggested_questions_json=suggested_questions_json,
+            suggested_questions_count=suggested_questions_count
         )
         db.flush()  # Ensure we get the chatbot ID
         
@@ -4043,26 +4238,56 @@ def generate_default_guidelines():
     </ul>
     """
 
-def get_intro_message(program_code):
-    """Get intro message for a program from the database and format placeholders"""
+def format_intro_message_for_chatbot(chatbot):
+    """Format intro text with supported placeholders."""
+    if not chatbot:
+        return None
+    mode_label = get_chatbot_mode_label(getattr(chatbot, "chatbot_mode", None))
+    mode_short = "dialogue" if mode_label == "Dialogue Mode" else "knowledge retrieval"
+    intro_template = chatbot.intro_message or (
+        "Hi, I am the {program} chatbot. I can answer up to {quota} question(s) related to "
+        "this program per day in {mode}."
+    )
+    try:
+        return intro_template.format(
+            program=chatbot.name,
+            quota=chatbot.quota,
+            mode=mode_label,
+            mode_short=mode_short
+        )
+    except Exception:
+        # Backward compatible fallback if template contains unknown placeholders.
+        return intro_template.replace("{program}", chatbot.name).replace("{quota}", str(chatbot.quota))
+
+
+def get_intro_and_suggested_questions(program_code):
+    """Return formatted intro message and effective suggested questions for a chatbot."""
     db = get_db()
     try:
         chatbot = ChatbotContent.get_by_code(db, program_code)
         if not chatbot:
-            close_db(db)
-            return None
-            
-        # Format the intro message with actual program name and quota
-        formatted_message = chatbot.intro_message.format(
-            program=chatbot.name,
-            quota=chatbot.quota
-        )
-        close_db(db)
-        return formatted_message
+            return None, []
+
+        intro_message = format_intro_message_for_chatbot(chatbot)
+        desired_count = max(1, min(5, int(getattr(chatbot, "suggested_questions_count", 3) or 3)))
+        stored_questions = parse_suggested_questions_json(chatbot.suggested_questions_json)
+        effective_questions = stored_questions[:desired_count]
+
+        if not effective_questions:
+            generated = generate_suggested_questions_from_content(chatbot, desired_count)
+            effective_questions = generated[:desired_count]
+            if effective_questions:
+                chatbot.suggested_questions_json = json.dumps(effective_questions, ensure_ascii=False)
+                chatbot.suggested_questions_count = desired_count
+                db.commit()
+
+        return intro_message, effective_questions
     except Exception as e:
+        db.rollback()
+        logger.error(f"Error getting intro/suggested questions for {program_code}: {e}")
+        return None, []
+    finally:
         close_db(db)
-        logger.error(f"Error getting intro message for {program_code}: {e}")
-        return None
 
 @app.route('/admin/delete_chatbot', methods=['POST'])
 @requires_auth
@@ -4253,6 +4478,91 @@ def update_intro_message():
     finally:
         if db: close_db(db)
 
+
+@app.route('/admin/update_suggested_questions', methods=['POST'])
+@requires_auth
+def admin_update_suggested_questions():
+    """Update manually configured suggested questions for a chatbot."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        questions_text = request.form.get('suggested_questions_text', '')
+        count_raw = request.form.get('suggested_questions_count', '3')
+
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+
+        try:
+            question_count = max(1, min(5, int(count_raw)))
+        except (TypeError, ValueError):
+            question_count = 3
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+
+        manual_questions = [q.strip() for q in (questions_text or '').splitlines() if q.strip()]
+        chatbot.suggested_questions_count = question_count
+        chatbot.suggested_questions_json = json.dumps(manual_questions[:question_count], ensure_ascii=False)
+        db.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Suggested questions updated successfully.",
+            "suggested_questions_count": chatbot.suggested_questions_count,
+            "suggested_questions": parse_suggested_questions_json(chatbot.suggested_questions_json)
+        })
+    except Exception as e:
+        if db:
+            db.rollback()
+        logger.error(f"Error updating suggested questions: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db:
+            close_db(db)
+
+
+@app.route('/admin/generate_suggested_questions_defaults', methods=['POST'])
+@requires_auth
+def admin_generate_suggested_questions_defaults():
+    """Generate suggested questions from chatbot content and save them."""
+    db = get_db()
+    try:
+        chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
+        count_raw = request.form.get('suggested_questions_count', '3')
+
+        if not chatbot_code:
+            return jsonify({"success": False, "error": "Chatbot code is required"}), 400
+
+        try:
+            question_count = max(1, min(5, int(count_raw)))
+        except (TypeError, ValueError):
+            question_count = 3
+
+        chatbot = ChatbotContent.get_by_code(db, chatbot_code)
+        if not chatbot:
+            return jsonify({"success": False, "error": f"Chatbot with code '{chatbot_code}' not found"}), 404
+
+        generated_questions = generate_suggested_questions_from_content(chatbot, question_count)
+        chatbot.suggested_questions_count = question_count
+        chatbot.suggested_questions_json = json.dumps(generated_questions[:question_count], ensure_ascii=False)
+        db.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Default suggested questions generated.",
+            "suggested_questions_count": chatbot.suggested_questions_count,
+            "suggested_questions": parse_suggested_questions_json(chatbot.suggested_questions_json)
+        })
+    except Exception as e:
+        if db:
+            db.rollback()
+        logger.error(f"Error generating suggested questions: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if db:
+            close_db(db)
+
 @app.route('/update_quota', methods=['POST'])
 @requires_auth
 def update_quota():
@@ -4352,7 +4662,12 @@ def admin_get_chatbot_content(chatbot_code):
             "tier3_safety_guardrail_prompt": tier3_guardrail_text,
             "chatbot_mode": normalize_chatbot_mode(chatbot.chatbot_mode),
             "ai_model": chatbot.ai_model,
-            "guardrail_rules_json": chatbot.guardrail_rules_json
+            "guardrail_rules_json": chatbot.guardrail_rules_json,
+            "disclaimer_text": chatbot.disclaimer_text,
+            "disclaimer_required": chatbot.disclaimer_required,
+            "disclaimer_version": chatbot.disclaimer_version,
+            "suggested_questions_count": max(1, min(5, int(chatbot.suggested_questions_count or 3))),
+            "suggested_questions": parse_suggested_questions_json(chatbot.suggested_questions_json)
         })
 
     except Exception as e:
@@ -4426,6 +4741,8 @@ def admin_update_chatbot_content():
         ai_model = request.form.get('ai_model')
         if ai_model is not None:
             ai_model = ai_model.strip() or None
+        disclaimer_required_raw = request.form.get('disclaimer_required')
+        disclaimer_text_raw = request.form.get('disclaimer_text')
 
         if not chatbot_code or content is None:
             return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
@@ -4507,6 +4824,14 @@ def admin_update_chatbot_content():
             chatbot.chatbot_mode = chatbot_mode
         if ai_model is not None:
             chatbot.ai_model = ai_model
+        if disclaimer_required_raw is not None:
+            chatbot.disclaimer_required = str(disclaimer_required_raw).lower() in ("true", "1", "yes", "on")
+        if disclaimer_text_raw is not None:
+            disclaimer_text_clean = disclaimer_text_raw.strip()
+            previous_disclaimer_text = chatbot.disclaimer_text or ""
+            if previous_disclaimer_text != disclaimer_text_clean:
+                chatbot.disclaimer_version = (chatbot.disclaimer_version or 1) + 1
+            chatbot.disclaimer_text = disclaimer_text_clean or None
         
         # Handle guardrail rules update (if submitted with this form)
         guardrail_rules_raw = request.form.get('guardrail_rules_json')

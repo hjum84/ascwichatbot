@@ -2660,13 +2660,49 @@ def chat():
                             "\n\n[Response was truncated. Please ask me to continue.]"
                         )
             except Exception as e:
-                logger.error(f"Error getting agent-mode response: {str(e)}")
-                return jsonify({
-                    "reply": "I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment.",
-                    "html_reply": parse_markdown("I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment."),
-                    "remaining_questions": max(0, quota - message_count),
-                    "quota": quota
-                }), 200
+                error_text = str(e)
+                error_lower = error_text.lower()
+                is_location_restriction = (
+                    "user location is not supported" in error_lower or
+                    "failed_precondition" in error_lower
+                )
+                if is_location_restriction:
+                    logger.warning(
+                        f"Agent-mode blocked by location restriction. "
+                        f"Falling back to standard response path. Error: {error_text}"
+                    )
+                    cache_result = "agent_mode_location_fallback"
+                    chatbot_reply = get_cached_response(content_hash, user_message, current_program)
+
+                    if not chatbot_reply:
+                        try:
+                            similar_question = find_similar_question(
+                                user_message, content_hash, current_program
+                            )
+                            if similar_question:
+                                cache_result = "agent_mode_location_fallback_semantic"
+                                chatbot_reply = get_cached_response(
+                                    content_hash, similar_question, current_program
+                                )
+                        except Exception as fallback_search_error:
+                            logger.error(
+                                f"Error during agent-mode location fallback semantic search: "
+                                f"{str(fallback_search_error)}"
+                            )
+
+                    if not chatbot_reply:
+                        chatbot_reply = (
+                            "Dialogue mode is temporarily unavailable from this network location. "
+                            "Please retry in Knowledge Retrieval mode or from a supported network."
+                        )
+                else:
+                    logger.error(f"Error getting agent-mode response: {error_text}")
+                    return jsonify({
+                        "reply": "I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment.",
+                        "html_reply": parse_markdown("I'm currently experiencing high demand and couldn't complete that response. Please try again in a moment."),
+                        "remaining_questions": max(0, quota - message_count),
+                        "quota": quota
+                    }), 200
         else:
             # --- KNOWLEDGE RETRIEVAL MODE (unchanged behavior) -----------------
             chatbot_reply = get_cached_response(content_hash, user_message, current_program)

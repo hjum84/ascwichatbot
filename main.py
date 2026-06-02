@@ -221,6 +221,58 @@ def user_has_accepted_disclaimer(db, user_id, chatbot):
     return rec is not None
 
 
+def build_local_dialogue_fallback_reply(user_message, program_code):
+    """
+    Build a deterministic dialogue-style fallback reply from local curriculum text
+    when API calls are blocked (e.g., region/network restrictions).
+    """
+    content = (program_content.get(program_code) or "").strip()
+    if not content:
+        return (
+            "Let's work through this together. I don't have enough local content loaded "
+            "for this module right now. Could you rephrase your question with a specific "
+            "topic, term, or framework from the training materials?"
+        )
+
+    # Split into meaningful blocks and score by keyword overlap.
+    raw_blocks = [b.strip() for b in re.split(r"\n\s*\n", content) if b.strip()]
+    blocks = [re.sub(r"\s+", " ", b) for b in raw_blocks if len(b.strip()) >= 60]
+    if not blocks:
+        blocks = [re.sub(r"\s+", " ", content[:1200])]
+
+    query_terms = set(re.findall(r"[a-zA-Z0-9']+", (user_message or "").lower()))
+    stop_terms = {
+        "the", "a", "an", "and", "or", "but", "if", "then", "to", "of", "for", "in",
+        "on", "with", "is", "are", "was", "were", "be", "can", "could", "would",
+        "should", "do", "does", "did", "how", "what", "why", "when", "where", "who"
+    }
+    query_terms = {t for t in query_terms if len(t) > 2 and t not in stop_terms}
+
+    def block_score(text):
+        lowered = text.lower()
+        if not query_terms:
+            return 0
+        return sum(1 for t in query_terms if t in lowered)
+
+    ranked = sorted(blocks, key=block_score, reverse=True)
+    selected = [b for b in ranked[:3] if block_score(b) > 0]
+    if not selected:
+        selected = ranked[:2]
+
+    concise_points = []
+    for block in selected:
+        snippet = block[:260].strip()
+        if len(block) > 260:
+            snippet += "..."
+        concise_points.append(f"- {snippet}")
+
+    return (
+        "Great question. Based on this module's training content, here are the key points:\n\n"
+        + "\n".join(concise_points)
+        + "\n\nWhat part should we unpack next — concepts, practical steps, or a scenario walkthrough?"
+    )
+
+
 def get_chatbot_mode_label(mode_value):
     """Human-friendly chatbot mode label for UI placeholders."""
     mode = normalize_chatbot_mode(mode_value)
@@ -2691,9 +2743,9 @@ def chat():
                             )
 
                     if not chatbot_reply:
-                        chatbot_reply = (
-                            "Dialogue mode is temporarily unavailable from this network location. "
-                            "Please retry in Knowledge Retrieval mode or from a supported network."
+                        chatbot_reply = build_local_dialogue_fallback_reply(
+                            user_message,
+                            current_program
                         )
                 else:
                     logger.error(f"Error getting agent-mode response: {error_text}")

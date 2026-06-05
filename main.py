@@ -322,8 +322,20 @@ if USE_VERTEX:
         project=os.getenv("GCP_PROJECT_ID"),
         location=os.getenv("GCP_LOCATION", "us-central1"),
     )
+    # Gemini 3.x models are only served from the Vertex AI "global" endpoint.
+    # Regional endpoints (e.g. us-central1) return a 404 NOT_FOUND for these
+    # models, so we keep a second client pinned to "global" and route Gemini
+    # 3.x calls to it. The 2.5/2.0 models keep using the regional client.
+    gemini_client_global = genai.Client(
+        vertexai=True,
+        project=os.getenv("GCP_PROJECT_ID"),
+        location="global",
+    )
 else:
     gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    # Developer API (API key) mode has no regional restriction, so the same
+    # client handles every model.
+    gemini_client_global = gemini_client
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -2606,7 +2618,14 @@ def chat():
                                 f"Agent-mode model call attempt {attempt}/{max_attempts} "
                                 f"using model '{model_to_use}'"
                             )
-                            model_response = gemini_client.models.generate_content(
+                            # Gemini 3.x is only available on the Vertex AI "global"
+                            # endpoint; route those calls to the global client.
+                            agent_client = (
+                                gemini_client_global
+                                if is_gemini_3_plus_model(model_to_use)
+                                else gemini_client
+                            )
+                            model_response = agent_client.models.generate_content(
                                 model=model_to_use,
                                 contents=prompt_text,
                                 config=build_agent_generation_config(model_to_use)

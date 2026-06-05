@@ -2565,6 +2565,39 @@ def chat():
                     ]
                     return any(marker in lowered for marker in transient_markers)
 
+                def is_gemini_3_plus_model(model_to_use):
+                    # Gemini 3.x family (e.g. gemini-3-flash-preview, gemini-3.5-flash,
+                    # gemini-3.1-flash-lite). These models do NOT use a ".0" suffix.
+                    return "gemini-3" in (model_to_use or "").lower()
+
+                def build_agent_generation_config(model_to_use):
+                    # Gemini 3.x models have "thinking" enabled by default, and the
+                    # thinking tokens are drawn from the same output token budget.
+                    # A 3000-token cap can be fully consumed by thinking, producing
+                    # an empty or MAX_TOKENS-truncated reply. For Gemini 3.x we give
+                    # more headroom and request a lower thinking level so dialogue
+                    # responses come back complete and cost stays controlled.
+                    if is_gemini_3_plus_model(model_to_use):
+                        try:
+                            return genai_types.GenerateContentConfig(
+                                max_output_tokens=8000,
+                                temperature=0.7,
+                                thinking_config=genai_types.ThinkingConfig(
+                                    thinking_level="low"
+                                ),
+                            )
+                        except Exception:
+                            # Older google-genai SDK without thinking_level support:
+                            # still give the extra output headroom.
+                            return genai_types.GenerateContentConfig(
+                                max_output_tokens=8000,
+                                temperature=0.7,
+                            )
+                    return genai_types.GenerateContentConfig(
+                        max_output_tokens=3000,
+                        temperature=0.7,
+                    )
+
                 def call_agent_model_with_retry(prompt_text, model_to_use, max_attempts=3):
                     last_error = None
                     for attempt in range(1, max_attempts + 1):
@@ -2576,10 +2609,7 @@ def chat():
                             model_response = gemini_client.models.generate_content(
                                 model=model_to_use,
                                 contents=prompt_text,
-                                config=genai_types.GenerateContentConfig(
-                                    max_output_tokens=3000,
-                                    temperature=0.7,
-                                )
+                                config=build_agent_generation_config(model_to_use)
                             )
                             return model_response
                         except Exception as model_error:

@@ -49,15 +49,22 @@ FILLER_WORDS = {
 
 CASE_DATA_PATTERNS = [
     # Case numbers / CONNECTIONS references
-    r'(?i)\b(?:case\s*(?:number|#|no\.?|id)|connections\s*(?:id|case|number|#))\s*[:\-]?\s*[\w\-]{4,}',
+    # NOTE: the (?=[\w\-]*\d) lookahead requires the trailing token to contain a
+    # digit, so an actual ID value (e.g. "case #4471") is caught while ordinary
+    # words ("case number format", "case ID field") are not.
+    r'(?i)\b(?:case\s*(?:number|#|no\.?|id)|connections\s*(?:id|case|number|#))\s*[:\-]?\s*(?=[\w\-]*\d)[\w\-]{4,}',
     # Specific address patterns (number + street name)
     r'(?i)\b\d{1,5}\s+(?:west|east|north|south|w\.?|e\.?|n\.?|s\.?)?\s*\d{1,3}(?:st|nd|rd|th)\s+(?:street|st\.?|avenue|ave\.?|place|pl\.?|drive|dr\.?|boulevard|blvd\.?|road|rd\.?)',
     # Full addresses with apartment/apt
     r'(?i)\b\d{1,5}\s+\w+\s+(?:street|avenue|place|drive|boulevard|road)\b.*\b(?:apt|apartment|unit|floor|suite)\b',
     # SCR / State Central Register references
-    r'(?i)\b(?:SCR|state\s+central\s+register)\s*(?:number|#|id|report|referral)?\s*[:\-]?\s*\w{3,}',
+    # NOTE: \b after the acronym group prevents matching "scr" inside ordinary
+    # words such as screen, script, scrutiny, scramble.
+    r'(?i)\b(?:SCR|state\s+central\s+register)\b\s*(?:number|#|id|report|referral)?\s*[:\-]?\s*\w{3,}',
     # FamilyTeamConferencing / FTC case IDs
-    r'(?i)\bFTC\s*(?:case|id|#|number)\s*[:\-]?\s*\w{3,}',
+    # NOTE: the (?=\w*\d) lookahead requires a digit, so an actual ID ("FTC case
+    # 4471") is caught while ordinary phrases ("FTC case study") are not.
+    r'(?i)\bFTC\s*(?:case|id|#|number)\s*[:\-]?\s*(?=\w*\d)\w{3,}',
     # ACS-specific case ID formats (e.g., DCP-2024-XXXXX)
     r'(?i)\b(?:DCP|FPS|FC|JJ)\s*[-/]\s*\d{4}\s*[-/]\s*\d{3,}',
 ]

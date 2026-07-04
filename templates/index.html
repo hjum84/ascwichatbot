@@ -329,8 +329,80 @@
       color: #065f46; font-weight: 700; white-space: nowrap;
     }
     .roleplay-banner .rp-hint {
-      color: #334155; margin-left: auto; text-align: right;
+      color: #64748b; flex-basis: 100%; font-size: 11.5px;
+      margin-left: 17px;
     }
+    /* Banner shifts to the pause (sky) palette while the role-play is paused,
+       matching the existing pause feedback bubble accent. */
+    .roleplay-banner.paused {
+      background: linear-gradient(90deg, #f0f9ff 0%, #f8fafc 100%);
+      border-color: #bae6fd;
+      box-shadow: 0 8px 20px rgba(14, 165, 233, 0.10);
+    }
+    .roleplay-banner.paused .rp-dot { background: #0ea5e9; animation: none; }
+    .roleplay-banner.paused .rp-status { color: #0c4a6e; }
+    .roleplay-banner .rp-dot {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.35);
+      animation: rpDotPulse 2.4s ease-out infinite;
+    }
+    @keyframes rpDotPulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.35); }
+      70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    /* --- Role-play control buttons (no-typing pause/resume/end) --- */
+    .roleplay-banner .rp-actions {
+      display: flex; align-items: center; gap: 6px; margin-left: auto;
+    }
+    .roleplay-banner .rp-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid #a7f3d0;
+      background: #ffffff;
+      color: #047857;
+      font-size: 12px; font-weight: 600; line-height: 1;
+      cursor: pointer; white-space: nowrap;
+      transition: background 120ms ease, border-color 120ms ease,
+                  color 120ms ease, transform 80ms ease;
+    }
+    .roleplay-banner .rp-btn[hidden] { display: none; }
+    .roleplay-banner .rp-btn svg { width: 11px; height: 11px; flex-shrink: 0; }
+    .roleplay-banner .rp-btn:hover { background: #ecfdf5; border-color: #6ee7b7; }
+    .roleplay-banner .rp-btn:active { transform: scale(0.97); }
+    .roleplay-banner .rp-btn:disabled {
+      opacity: 0.45; cursor: default; transform: none;
+    }
+    .roleplay-banner .rp-btn.rp-btn-resume { color: #0369a1; border-color: #bae6fd; }
+    .roleplay-banner .rp-btn.rp-btn-resume:hover { background: #f0f9ff; border-color: #7dd3fc; }
+    .roleplay-banner .rp-btn.rp-btn-end { color: #475569; border-color: #cbd5e1; }
+    .roleplay-banner .rp-btn.rp-btn-end:hover { background: #f8fafc; border-color: #94a3b8; }
+    .roleplay-banner .rp-btn.rp-btn-end.confirming {
+      color: #b91c1c; border-color: #fca5a5; background: #fef2f2;
+    }
+    .roleplay-banner .rp-btn.rp-btn-end.confirming:hover {
+      background: #fee2e2; border-color: #f87171;
+    }
+
+    /* --- Command chips: replace raw "pause"/"continue"/"end role-play"
+           user bubbles with a quiet centered status pill, so control
+           commands never look like in-scene dialogue. --- */
+    .roleplay-command-chip {
+      display: flex; align-items: center; gap: 6px;
+      width: fit-content;
+      margin: 10px auto;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+      font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+    }
+    .roleplay-command-chip svg { width: 10px; height: 10px; flex-shrink: 0; }
+    .roleplay-command-chip.pause { color: #0c4a6e; background: #f0f9ff; border-color: #bae6fd; }
+    .roleplay-command-chip.resume { color: #065f46; background: #ecfdf5; border-color: #a7f3d0; }
+    .roleplay-command-chip.end { color: #7c2d12; background: #fff7ed; border-color: #fed7aa; }
 
     .message.bot.roleplay {
       position: relative;
@@ -446,6 +518,11 @@
     .roleplay-divider.end { color: #334155; }
 
     @media (max-width: 760px) {
+      .roleplay-banner .rp-actions {
+        margin-left: 0;
+        width: 100%;
+      }
+      .roleplay-banner .rp-btn { flex: 1; justify-content: center; }
       .roleplay-banner .rp-hint {
         margin-left: 0;
         width: 100%;
@@ -501,8 +578,22 @@
     </div>
     <div id="roleplayBanner" class="roleplay-banner" role="status">
       <span class="rp-dot"></span>
-      <span class="rp-status">Role-play in progress</span>
-      <span class="rp-hint">Type &ldquo;pause&rdquo; for feedback or &ldquo;end role-play&rdquo; to finish.</span>
+      <span class="rp-status" id="rpStatusText">Role-play in progress</span>
+      <div class="rp-actions" id="rpActions">
+        <button type="button" id="rpPauseBtn" class="rp-btn" aria-label="Pause role-play for feedback">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+          Pause for feedback
+        </button>
+        <button type="button" id="rpResumeBtn" class="rp-btn rp-btn-resume" aria-label="Resume role-play" hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          Resume
+        </button>
+        <button type="button" id="rpEndBtn" class="rp-btn rp-btn-end" aria-label="End role-play and get final feedback">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>
+          <span id="rpEndBtnLabel">End role-play</span>
+        </button>
+      </div>
+      <span class="rp-hint">Typing &ldquo;pause&rdquo; or &ldquo;end role-play&rdquo; still works too.</span>
     </div>
     <div id="chat-box" class="chat-box">
       {% if deletion_warning %}
@@ -576,6 +667,38 @@
   <script>
     const roleplayStorageKey = `roleplay_active_{{ program_code }}`;
     const roleplayActiveFromServer = Number("{{ 1 if session.get('roleplay_active_' ~ program_code) else 0 }}");
+
+    // --- Role-play control commands (no-typing pause/resume/end) ------------
+    // The buttons send the SAME canonical text the backend already matches
+    // exactly (pause_markers / continue_markers / is_roleplay_end_request in
+    // main.py). No backend change: a button click is indistinguishable from a
+    // correctly typed command, which also removes typo risk ("pause the
+    // role play" would not match; the button always sends a matching string).
+    const RP_COMMANDS = {
+      pause:  { text: 'pause',         chipClass: 'pause',  chipLabel: 'Pause requested',
+                icon: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>' },
+      resume: { text: 'continue',      chipClass: 'resume', chipLabel: 'Resuming role-play',
+                icon: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>' },
+      end:    { text: 'end role-play', chipClass: 'end',    chipLabel: 'End requested',
+                icon: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg>' }
+    };
+    // Mirrors of the backend exact-match sets, used only for rendering
+    // historical command messages as chips on page reload.
+    const RP_PAUSE_TEXTS = new Set([
+      'pause', 'pause roleplay', 'pause role-play', 'pause role play',
+      'pause feedback', 'give feedback'
+    ]);
+    const RP_CONTINUE_TEXTS = new Set([
+      'continue', 'please continue', 'go on', 'keep going', 'continue please'
+    ]);
+    const RP_END_TEXTS = new Set([
+      'end roleplay', 'end role-play', 'end role play',
+      'stop roleplay', 'stop role-play', 'stop role play',
+      'finish roleplay', 'finish role-play', 'finish role play'
+    ]);
+    let roleplayPaused = false;
+    let roleplayCommandPending = false;
+    let rpEndConfirmTimer = null;
     const chatBox = document.getElementById('chat-box');
     const userInput = document.getElementById('userInput');
     const inputContainer = document.getElementById('inputContainer');
@@ -829,14 +952,64 @@
         }
     }
 
-    function setRoleplayBanner(active) {
+    function setRoleplayBanner(active, paused = false) {
         const banner = document.getElementById('roleplayBanner');
-        if (banner) banner.classList.toggle('active', !!active);
+        const statusText = document.getElementById('rpStatusText');
+        const pauseBtn = document.getElementById('rpPauseBtn');
+        const resumeBtn = document.getElementById('rpResumeBtn');
+        if (banner) {
+            banner.classList.toggle('active', !!active);
+            banner.classList.toggle('paused', !!active && !!paused);
+        }
+        if (statusText) {
+            statusText.textContent = (active && paused)
+                ? 'Role-play paused'
+                : 'Role-play in progress';
+        }
+        // Paused: offer Resume + End. In progress: offer Pause + End.
+        if (pauseBtn) pauseBtn.hidden = !!paused;
+        if (resumeBtn) resumeBtn.hidden = !paused;
+        resetRpEndConfirm();
         try {
             localStorage.setItem(roleplayStorageKey, active ? '1' : '0');
         } catch (e) {
             // Ignore storage failures (private mode / quota)
         }
+    }
+
+    function setRpButtonsDisabled(disabled) {
+        ['rpPauseBtn', 'rpResumeBtn', 'rpEndBtn'].forEach((id) => {
+            const btn = document.getElementById(id);
+            if (btn) btn.disabled = !!disabled;
+        });
+    }
+
+    function resetRpEndConfirm() {
+        const endBtn = document.getElementById('rpEndBtn');
+        const endLabel = document.getElementById('rpEndBtnLabel');
+        if (rpEndConfirmTimer) {
+            clearTimeout(rpEndConfirmTimer);
+            rpEndConfirmTimer = null;
+        }
+        if (endBtn) endBtn.classList.remove('confirming');
+        if (endLabel) endLabel.textContent = 'End role-play';
+    }
+
+    function buildRoleplayCommandChip(kind) {
+        const config = RP_COMMANDS[kind];
+        if (!config) return null;
+        const chip = document.createElement('div');
+        chip.className = 'roleplay-command-chip ' + config.chipClass;
+        chip.innerHTML = config.icon + '<span></span>';
+        chip.querySelector('span').textContent = config.chipLabel;
+        return chip;
+    }
+
+    function addRoleplayCommandChip(kind) {
+        const chip = buildRoleplayCommandChip(kind);
+        if (!chip) return;
+        chatBox.appendChild(chip);
+        scrollToBottom();
     }
 
     function addRoleplayDivider(labelText, kind = 'start') {
@@ -1023,9 +1196,27 @@
     function sendMessage() {
       const message = userInput.value;
       if (message.trim() === '') return;
-      const userMessageP = addMessage(message, 'user');
       userInput.value = '';
       userInput.style.height = 'auto';
+      dispatchChatMessage(message, null);
+    }
+
+    // Shared request path for typed messages AND role-play control buttons.
+    // commandKind: null (typed message) | 'pause' | 'resume' | 'end'.
+    // Button clicks reuse the exact same /chat POST as typed commands, so all
+    // backend role-play logic (markers, feedback tone, session tagging,
+    // guardrails, quota) behaves identically with zero server-side change.
+    function dispatchChatMessage(message, commandKind) {
+      let userMessageP = null;
+      if (commandKind) {
+          // Render control commands as a quiet centered chip instead of a
+          // user speech bubble, so they never read as in-scene dialogue.
+          addRoleplayCommandChip(commandKind);
+          roleplayCommandPending = true;
+          setRpButtonsDisabled(true);
+      } else {
+          userMessageP = addMessage(message, 'user');
+      }
       const typingIndicator = showTypingIndicator();
       fetch('/chat', {
         method: 'POST',
@@ -1038,8 +1229,18 @@
       .then(data => {
         setTimeout(() => {
           removeTypingIndicator();
+          if (roleplayCommandPending) {
+              roleplayCommandPending = false;
+              setRpButtonsDisabled(false);
+          }
           const banner = document.getElementById('roleplayBanner');
           const wasRoleplayActive = !!(banner && banner.classList.contains('active'));
+          // Paused-state tracking: only when the response actually carries
+          // role-play fields (guardrail-blocked responses do not, and must
+          // not disturb the current paused state).
+          if (Object.prototype.hasOwnProperty.call(data, 'roleplay_active')) {
+              roleplayPaused = (data.roleplay_notice === 'pause');
+          }
           if (data.deletion_info && userMessageP && userMessageP.parentElement) {
               const existingUserNotice = userMessageP.parentElement.querySelector('.deletion-notice');
               if (!existingUserNotice) {
@@ -1087,7 +1288,7 @@
           const nextRoleplayActive = (data.roleplay_notice === 'end')
               ? false
               : (data.roleplay_notice === 'start' || data.roleplay_notice === 'pause' || shouldRenderAsRoleplay);
-          setRoleplayBanner(nextRoleplayActive);
+          setRoleplayBanner(nextRoleplayActive, roleplayPaused);
           
           // Update remaining questions count
           if (data.remaining_questions !== undefined) {
@@ -1098,9 +1299,51 @@
       .catch(error => {
         console.error('Error:', error);
         removeTypingIndicator();
+        if (roleplayCommandPending) {
+            roleplayCommandPending = false;
+            setRpButtonsDisabled(false);
+        }
         addMessage('Error: Could not connect to the server.', 'bot');
       });
     }
+
+    // --- Role-play control button wiring ------------------------------------
+    // Pause and Resume fire immediately. End uses a lightweight two-tap
+    // confirm (the button itself turns into "End - confirm?" for 4 seconds)
+    // because ending triggers the final assessment and closes the session.
+    (function bindRoleplayControlButtons() {
+        const pauseBtn = document.getElementById('rpPauseBtn');
+        const resumeBtn = document.getElementById('rpResumeBtn');
+        const endBtn = document.getElementById('rpEndBtn');
+        const endLabel = document.getElementById('rpEndBtnLabel');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('click', () => {
+                if (roleplayCommandPending) return;
+                resetRpEndConfirm();
+                dispatchChatMessage(RP_COMMANDS.pause.text, 'pause');
+            });
+        }
+        if (resumeBtn) {
+            resumeBtn.addEventListener('click', () => {
+                if (roleplayCommandPending) return;
+                resetRpEndConfirm();
+                dispatchChatMessage(RP_COMMANDS.resume.text, 'resume');
+            });
+        }
+        if (endBtn) {
+            endBtn.addEventListener('click', () => {
+                if (roleplayCommandPending) return;
+                if (!endBtn.classList.contains('confirming')) {
+                    endBtn.classList.add('confirming');
+                    if (endLabel) endLabel.textContent = 'End \u2014 confirm?';
+                    rpEndConfirmTimer = setTimeout(resetRpEndConfirm, 4000);
+                    return;
+                }
+                resetRpEndConfirm();
+                dispatchChatMessage(RP_COMMANDS.end.text, 'end');
+            });
+        }
+    })();
     
     // Initial scroll to bottom and rendering of existing messages
     document.addEventListener('DOMContentLoaded', () => {
@@ -1115,10 +1358,56 @@
 
         // Process existing messages on page load
         const existingMessages = document.querySelectorAll('.message[data-raw]');
+        // Running role-play state while walking history in DOM order, used to
+        // decide whether a user message that matches a command string should
+        // render as a control chip instead of a speech bubble. A command
+        // bubble always precedes the bot reply that carries the state tag, so
+        // the state seen so far is the state the command was issued under.
+        let historyRpActive = false;
+        let historyRpPaused = false;
         existingMessages.forEach(messageDiv => {
             const rawData = messageDiv.getAttribute('data-raw');
             const deletionData = messageDiv.getAttribute('data-deletion-info');
-            
+
+            const isUserMsg = messageDiv.classList.contains('user') ||
+                              messageDiv.getAttribute('data-sender') === 'user';
+            if (isUserMsg && rawData) {
+                try {
+                    const userText = JSON.parse(rawData);
+                    const normalized = String(userText || '').trim().toLowerCase().split(/\s+/).join(' ');
+                    let chipKind = null;
+                    if (historyRpActive && !historyRpPaused && RP_PAUSE_TEXTS.has(normalized)) {
+                        chipKind = 'pause';
+                    } else if (historyRpActive && historyRpPaused && RP_CONTINUE_TEXTS.has(normalized)) {
+                        chipKind = 'resume';
+                    } else if (historyRpActive && RP_END_TEXTS.has(normalized)) {
+                        chipKind = 'end';
+                    }
+                    if (chipKind) {
+                        const chip = buildRoleplayCommandChip(chipKind);
+                        if (chip) {
+                            messageDiv.replaceWith(chip);
+                            return; // Skip normal bubble rendering for this row.
+                        }
+                    }
+                } catch (e) {
+                    // Fall through to normal rendering on parse failure.
+                }
+            }
+            if (!isUserMsg) {
+                const rowState = (messageDiv.getAttribute('data-roleplay-state') || '').toLowerCase();
+                if (rowState === 'start' || rowState === 'active') {
+                    historyRpActive = true;
+                    historyRpPaused = false;
+                } else if (rowState === 'pause') {
+                    historyRpActive = true;
+                    historyRpPaused = true;
+                } else if (rowState === 'end') {
+                    historyRpActive = false;
+                    historyRpPaused = false;
+                }
+            }
+
             if (rawData) {
                 try {
                     const messageText = JSON.parse(rawData);
@@ -1162,7 +1451,12 @@
         const inferredRoleplayActive = applyRoleplayStylesFromStateTags();
         rebuildRoleplayDividersFromHistory();
         const initialRoleplayActive = resolveInitialRoleplayBannerState(inferredRoleplayActive);
-        setRoleplayBanner(initialRoleplayActive);
+        // Restore paused state: if the most recent tagged bot turn is a
+        // pause, the session reloads into the paused banner (Resume + End).
+        const initialRoleplayPaused = initialRoleplayActive &&
+            getLatestBotRoleplayStateFromHistory() === 'pause';
+        roleplayPaused = initialRoleplayPaused;
+        setRoleplayBanner(initialRoleplayActive, initialRoleplayPaused);
         
         // Set initial state for questions remaining indicator
         const initialRemaining = parseInt('{{ remaining_questions }}');

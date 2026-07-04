@@ -8182,8 +8182,8 @@ def get_deletion_warning_for_user(user_id, program_code):
         
         # Calculate warning period (3 days before deletion)
         warning_days = max(3, chatbot.auto_delete_days // 10)
-        deletion_cutoff = datetime.datetime.utcnow() - timedelta(days=chatbot.auto_delete_days)
-        warning_cutoff = datetime.datetime.utcnow() - timedelta(days=chatbot.auto_delete_days - warning_days)
+        deletion_cutoff = datetime.utcnow() - timedelta(days=chatbot.auto_delete_days)
+        warning_cutoff = datetime.utcnow() - timedelta(days=chatbot.auto_delete_days - warning_days)
         
         # Check for conversations that will be deleted soon
         conversations_at_risk = db.query(ChatHistory).filter(
@@ -8197,7 +8197,7 @@ def get_deletion_warning_for_user(user_id, program_code):
         ).count()
         
         if conversations_at_risk > 0:
-            deletion_date = datetime.datetime.utcnow() + timedelta(days=warning_days)
+            deletion_date = datetime.utcnow() + timedelta(days=warning_days)
             return {
                 'count': conversations_at_risk,
                 'deletion_date': deletion_date.strftime('%B %d, %Y'),

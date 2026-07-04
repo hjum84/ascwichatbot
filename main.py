@@ -418,10 +418,11 @@ def enforce_end_response_tone(
         if len(sentences) > 3 else
         "- In your next session, use one reflective statement plus one targeted open-ended question before advancing to advice."
     )
+    strengths_block = "\n".join(strengths_lines)
 
     return (
         "Strengths:\n"
-        f"{'\n'.join(strengths_lines)}\n\n"
+        f"{strengths_block}\n\n"
         "Area of Development:\n"
         f"{area_line}\n\n"
         "Next Step:\n"

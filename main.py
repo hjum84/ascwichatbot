@@ -273,6 +273,39 @@ def is_non_substantive_roleplay_command(message_text):
     )
 
 
+# Role-play control commands (Pause / Resume / End buttons and their typed
+# equivalents) do not consume the daily question quota in Dialogue Mode.
+# The exclusion is text-based on purpose: a control button click sends the
+# exact same canonical text as a typed command, so the two are (by design)
+# indistinguishable and must be treated identically. This flat list mirrors
+# the exact-match sets used elsewhere in this file (pause_markers,
+# continue_markers, is_roleplay_end_request) and the frontend RP_COMMANDS.
+QUOTA_EXEMPT_COMMAND_TEXTS = [
+    # Pause commands
+    "pause", "pause roleplay", "pause role-play", "pause role play",
+    "pause feedback", "give feedback",
+    # Resume / continue commands
+    "continue", "please continue", "go on", "keep going", "continue please",
+    # End commands
+    "end roleplay", "end role-play", "end role play",
+    "stop roleplay", "stop role-play", "stop role play",
+    "finish roleplay", "finish role-play", "finish role play",
+]
+
+
+def is_quota_exempt_command(message_text):
+    """
+    True when the message is a role-play control command (pause / resume /
+    end) that should not count against the daily quota. Empty messages are
+    NOT exempt (is_non_substantive_roleplay_command returns True for empty
+    input, but empty input never reaches quota logic anyway; the guard here
+    is defensive).
+    """
+    if not (message_text or "").strip():
+        return False
+    return is_non_substantive_roleplay_command(message_text)
+
+
 def _extract_actionable_sentences(text_value):
     cleaned = re.sub(
         r'(?im)^\s*(strengths?|area of development|next step|feedback summary|feedback mode)\s*:?\s*',
@@ -2611,12 +2644,18 @@ def set_program(program):
 def get_chat_history_and_remaining(user_id, program_code, limit=50):
     db = get_db()
     try:
-        # Get chat history
+        # Get the most recent exchanges, then display in chronological order.
+        # The previous ASC+LIMIT query returned the oldest rows, which caused
+        # newly saved messages to disappear after refresh once history grew.
         history = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == program_code,
             ChatHistory.is_visible == True
-        ).order_by(ChatHistory.timestamp.asc()).limit(limit).all()
+        ).order_by(
+            ChatHistory.timestamp.desc(),
+            ChatHistory.id.desc()
+        ).limit(limit).all()
+        history.reverse()
         
         result = []
         for h in history:
@@ -2662,7 +2701,7 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
         
         logger.info(f"get_chat_history_and_remaining: Checking quota for user {user_id}, program {program_code}, date range: {today_start_utc} to {today_end_utc}")
         
-        message_count = db.query(ChatHistory).filter(
+        message_count_query = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == program_code,
             ChatHistory.timestamp >= today_start_utc,
@@ -2672,7 +2711,18 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
                 ChatHistory.guardrail_tier == 'passed',
                 ChatHistory.guardrail_tier == 'tier3_model'
             )
-        ).count()
+        )
+        # Keep this count consistent with the /chat quota logic: in Dialogue
+        # Mode, role-play control commands (pause / resume / end) are
+        # quota-exempt and must not count here either, otherwise the
+        # remaining-questions indicator would change on page reload.
+        if chatbot and normalize_chatbot_mode(getattr(chatbot, 'chatbot_mode', None)) == 'dialogue_mode':
+            message_count_query = message_count_query.filter(
+                func.lower(func.trim(ChatHistory.user_message)).notin_(
+                    QUOTA_EXEMPT_COMMAND_TEXTS
+                )
+            )
+        message_count = message_count_query.count()
         
         remaining_questions = max(0, quota - message_count)
         
@@ -2988,6 +3038,16 @@ def chat():
         quota = chatbot.quota
         logger.info(f"User {user_id} attempting to send message. Program: {current_program}, Quota: {quota}")
 
+        # Quota exemption for role-play control commands (Dialogue Mode only).
+        # Knowledge Retrieval Mode is unaffected: there, "pause"/"continue"
+        # are ordinary questions and keep counting exactly as before.
+        chatbot_is_dialogue_mode = (
+            normalize_chatbot_mode(getattr(chatbot, 'chatbot_mode', None)) == 'dialogue_mode'
+        )
+        quota_exempt_command = (
+            chatbot_is_dialogue_mode and is_quota_exempt_command(user_message)
+        )
+
         # Count today's messages for this user and program using UTC consistently
         from datetime import timezone
         today_utc = datetime.now(timezone.utc).date()
@@ -2997,7 +3057,7 @@ def chat():
         logger.info(f"Checking quota for user {user_id}, program {current_program}, date range: {today_start_utc} to {today_end_utc}")
         
         # Use a database transaction to prevent race conditions
-        message_count = db.query(ChatHistory).filter(
+        message_count_query = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == current_program,
             ChatHistory.timestamp >= today_start_utc,
@@ -3007,11 +3067,22 @@ def chat():
                 ChatHistory.guardrail_tier == 'passed',
                 ChatHistory.guardrail_tier == 'tier3_model'
             )
-        ).count()
+        )
+        if chatbot_is_dialogue_mode:
+            # Role-play control commands never count toward quota. Text-based
+            # exclusion (lower + trim) matches how the commands are detected
+            # at send time; past command rows stop counting retroactively,
+            # which is the intended behavior.
+            message_count_query = message_count_query.filter(
+                func.lower(func.trim(ChatHistory.user_message)).notin_(
+                    QUOTA_EXEMPT_COMMAND_TEXTS
+                )
+            )
+        message_count = message_count_query.count()
         
         logger.info(f"Current message count for user {user_id} in program {current_program}: {message_count}/{quota}")
 
-        if message_count >= quota:
+        if message_count >= quota and not quota_exempt_command:
             logger.warning(f"User {user_id} has reached quota limit for {current_program}: {message_count}/{quota}")
             return jsonify({"reply": f"You have reached your daily quota of {quota} questions for the {chatbot.name} program. Please try again tomorrow."}), 200
 
@@ -4024,8 +4095,13 @@ User: Please complete your previous response with a brief conclusion."""
 
         threading.Thread(target=record_smartsheet_async, args=(user_message, chatbot_reply, current_program)).start()
 
-        # Calculate remaining questions after this interaction
-        remaining_questions = max(0, quota - (message_count + 1))
+        # Calculate remaining questions after this interaction. Role-play
+        # control commands (quota-exempt) do not decrement the count;
+        # message_count already excludes past command rows in Dialogue Mode.
+        if quota_exempt_command:
+            remaining_questions = max(0, quota - message_count)
+        else:
+            remaining_questions = max(0, quota - (message_count + 1))
         # UI notice comes from backend state computation only. The frontend
         # should render this notice but never decide role-play state itself.
         roleplay_notice = None

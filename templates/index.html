@@ -811,23 +811,36 @@
       }
     }
 
-    function typeMessage(element, text, speed = 10) {
+    // --- Typewriter speed tuning --------------------------------------------
+    // The typing animation is purely cosmetic: the full reply has already
+    // arrived from the server before it starts. These two constants fully
+    // control the perceived speed.
+    //   TYPEWRITER_TICK_MS  - delay between render ticks (lower = faster).
+    //   TYPEWRITER_MAX_TICKS - long replies auto-accelerate (more characters
+    //     per tick) so ANY reply finishes in about MAX_TICKS * TICK_MS
+    //     milliseconds (~2 seconds with the defaults below), instead of
+    //     taking proportionally longer the longer the reply is.
+    const TYPEWRITER_TICK_MS = 5;
+    const TYPEWRITER_MAX_TICKS = 200;
+
+    function typeMessage(element, text, speed = TYPEWRITER_TICK_MS) {
       return new Promise((resolve) => {
         let i = 0;
-        let typedText = '';
+        // Characters per tick scale with reply length so total duration is
+        // bounded: short replies still "type", long replies flow in quickly.
+        const charsPerTick = Math.max(2, Math.ceil(text.length / TYPEWRITER_MAX_TICKS));
         element.classList.add('typing');
         function type() {
           if (i < text.length) {
-            typedText += text.charAt(i);
+            i = Math.min(i + charsPerTick, text.length);
             // Render Markdown while typing so users see formatted lists/bold
             // immediately instead of raw markers like "**".
-            renderMarkdownIntoElement(element, typedText);
-            i++;
+            renderMarkdownIntoElement(element, text.slice(0, i));
             setTimeout(type, speed);
             scrollToBottom(); // Scroll as message types
           } else {
             element.classList.remove('typing');
-            renderMarkdownIntoElement(element, typedText);
+            renderMarkdownIntoElement(element, text);
             resolve();
           }
         }
@@ -1294,7 +1307,7 @@
           if (data.remaining_questions !== undefined) {
               updateRemainingQuestions(data.remaining_questions, data.quota);
           }
-        }, 500); // Delay for bot "thinking"
+        }, 120); // Brief delay before reply starts (was 500ms; the typing indicator already covers the real wait)
       })
       .catch(error => {
         console.error('Error:', error);

@@ -304,6 +304,154 @@
       height: 8px;
       opacity: 0.7;
     }
+
+    /* --- Role-play session visuals (upgraded visual treatment) --- */
+    .roleplay-banner {
+      display: none;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 10px 16px 4px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: linear-gradient(90deg, #ecfdf5 0%, #f8fafc 100%);
+      border: 1px solid #a7f3d0;
+      box-shadow: 0 8px 20px rgba(16, 185, 129, 0.12);
+      font-size: 12.5px;
+      line-height: 1.4;
+    }
+    .roleplay-banner.active { display: flex; }
+    .roleplay-banner .rp-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #10b981; flex-shrink: 0;
+    }
+    .roleplay-banner .rp-status {
+      color: #065f46; font-weight: 700; white-space: nowrap;
+    }
+    .roleplay-banner .rp-hint {
+      color: #334155; margin-left: auto; text-align: right;
+    }
+
+    .message.bot.roleplay {
+      position: relative;
+      background: linear-gradient(145deg, #f8fffb 0%, #eefcf5 100%);
+      border: 1px solid #bbf7d0;
+      border-left: 5px solid #10b981;
+      box-shadow: 0 10px 24px rgba(15, 118, 110, 0.11);
+      border-radius: 14px;
+      padding: 2px 0;
+      transform-origin: left center;
+      animation: roleplayBubbleIn 160ms ease-out;
+    }
+    .message.bot.roleplay p {
+      color: #0f172a;
+    }
+    .message.bot.roleplay::before {
+      content: 'ROLE-PLAY';
+      display: inline-block;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #065f46;
+      margin: 8px 0 4px 10px;
+      padding: 2px 8px;
+      background: rgba(16, 185, 129, 0.13);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      border-radius: 999px;
+      width: fit-content;
+    }
+    .message.bot.roleplay p hr {
+      border: none;
+      border-top: 1px solid #cbd5e1;
+      margin: 10px 0;
+    }
+    .message.bot.roleplay .rp-coach-block,
+    .message.bot.roleplay .rp-persona-block {
+      border-radius: 10px;
+      padding: 10px 11px;
+      margin: 7px 0;
+    }
+    .message.bot.roleplay .rp-coach-block {
+      background: #f8fafc;
+      border: 1px solid #dbeafe;
+    }
+    .message.bot.roleplay .rp-persona-block {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+    }
+    .message.bot.roleplay .rp-block-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #047857;
+      margin-bottom: 6px;
+    }
+    /* Pause feedback should look distinct from in-character persona */
+    .message.bot.roleplay.roleplay-feedback {
+      background: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 100%);
+      border: 1px solid #cbd5e1;
+      border-left: 5px solid #0ea5e9;
+      box-shadow: 0 10px 24px rgba(14, 165, 233, 0.1);
+    }
+    .message.bot.roleplay.roleplay-feedback::before {
+      content: 'FEEDBACK MODE';
+      color: #0c4a6e;
+      background: rgba(14, 165, 233, 0.12);
+      border: 1px solid rgba(14, 165, 233, 0.35);
+    }
+    .message.bot.roleplay.roleplay-feedback p {
+      color: #0f172a;
+    }
+    .message.bot.roleplay.roleplay-feedback-end {
+      background: linear-gradient(145deg, #fff7ed 0%, #ffedd5 100%);
+      border: 1px solid #fed7aa;
+      border-left: 5px solid #f59e0b;
+      box-shadow: 0 10px 24px rgba(245, 158, 11, 0.14);
+    }
+    .message.bot.roleplay.roleplay-feedback-end::before {
+      content: 'FEEDBACK SUMMARY';
+      color: #9a3412;
+      background: rgba(251, 146, 60, 0.15);
+      border: 1px solid rgba(249, 115, 22, 0.35);
+    }
+    .message.bot.roleplay.roleplay-feedback-end p {
+      color: #7c2d12;
+    }
+    @keyframes roleplayBubbleIn {
+      from { opacity: 0; transform: translateY(4px) scale(0.99); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .roleplay-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 8px;
+      color: #94a3b8;
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .roleplay-divider::before,
+    .roleplay-divider::after {
+      content: '';
+      flex: 1;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .roleplay-divider.start { color: #64748b; }
+    .roleplay-divider.pause { color: #0f766e; }
+    .roleplay-divider.end { color: #334155; }
+
+    @media (max-width: 760px) {
+      .roleplay-banner .rp-hint {
+        margin-left: 0;
+        width: 100%;
+        text-align: left;
+      }
+    }
   </style>
 </head>
 <body>
@@ -351,6 +499,11 @@
         </div>
       </div>
     </div>
+    <div id="roleplayBanner" class="roleplay-banner" role="status">
+      <span class="rp-dot"></span>
+      <span class="rp-status">Role-play in progress</span>
+      <span class="rp-hint">Type &ldquo;pause&rdquo; for feedback or &ldquo;end role-play&rdquo; to finish.</span>
+    </div>
     <div id="chat-box" class="chat-box">
       {% if deletion_warning %}
       <div class="message bot deletion-warning-message" style="background-color: #fff3cd; border-left: 4px solid #ffc107; margin-bottom: 15px;">
@@ -384,9 +537,10 @@
       {# Placeholder for chat history messages - will be populated by JS #}
       {% if chat_history %}
         {% for chat in chat_history %}
-          <div class="message {{ chat.sender }}" 
+          <div class="message {{ chat.sender }}{% if chat.sender == 'bot' and chat.roleplay_state in ['start', 'active', 'pause', 'end'] %} roleplay{% endif %}{% if chat.sender == 'bot' and chat.roleplay_state == 'pause' %} roleplay-feedback{% endif %}{% if chat.sender == 'bot' and chat.roleplay_state == 'end' %} roleplay-feedback-end{% endif %}" 
                data-sender="{{ chat.sender }}" 
                data-raw='{{ chat.message|tojson|safe }}'
+               {% if chat.roleplay_state %}data-roleplay-state="{{ chat.roleplay_state }}"{% endif %}
                {% if chat.deletion_info %}data-deletion-info='{{ chat.deletion_info|tojson|safe }}'{% endif %}></div>
         {% endfor %}
       {% endif %}
@@ -420,6 +574,8 @@
 
   <script id="suggestedQuestionsJson" type="application/json">{{ suggested_questions|tojson|safe }}</script>
   <script>
+    const roleplayStorageKey = `roleplay_active_{{ program_code }}`;
+    const roleplayActiveFromServer = Number("{{ 1 if session.get('roleplay_active_' ~ program_code) else 0 }}");
     const chatBox = document.getElementById('chat-box');
     const userInput = document.getElementById('userInput');
     const inputContainer = document.getElementById('inputContainer');
@@ -673,10 +829,179 @@
         }
     }
 
+    function setRoleplayBanner(active) {
+        const banner = document.getElementById('roleplayBanner');
+        if (banner) banner.classList.toggle('active', !!active);
+        try {
+            localStorage.setItem(roleplayStorageKey, active ? '1' : '0');
+        } catch (e) {
+            // Ignore storage failures (private mode / quota)
+        }
+    }
+
+    function addRoleplayDivider(labelText, kind = 'start') {
+        const divider = buildRoleplayDividerElement(labelText, kind);
+        chatBox.appendChild(divider);
+        scrollToBottom();
+    }
+
+    function buildRoleplayDividerElement(labelText, kind = 'start') {
+        const divider = document.createElement('div');
+        divider.className = 'roleplay-divider';
+        divider.classList.add(kind);
+        divider.textContent = labelText;
+        return divider;
+    }
+
+    function decorateRoleplayStartMessage(paragraphEl) {
+        if (!paragraphEl) return;
+        const html = paragraphEl.innerHTML || '';
+        const hrMatch = /<hr\s*\/?>/i;
+        if (!hrMatch.test(html)) return;
+        const parts = html.split(hrMatch);
+        if (parts.length < 2) return;
+
+        const coachHtml = (parts[0] || '').trim();
+        const personaHtml = parts.slice(1).join('<hr>').trim();
+        if (!coachHtml || !personaHtml) return;
+
+        paragraphEl.innerHTML =
+            '<div class="rp-coach-block">' +
+                '<div class="rp-block-label">Coach setup</div>' +
+                coachHtml +
+            '</div>' +
+            '<div class="rp-persona-block">' +
+                '<div class="rp-block-label">In character</div>' +
+                personaHtml +
+            '</div>';
+    }
+
+    function inferHistoricalRoleplayStyle(messageDiv, paragraphEl) {
+        if (!messageDiv || !paragraphEl) return;
+        if (!messageDiv.classList.contains('bot')) return;
+        if (messageDiv.classList.contains('roleplay')) return;
+
+        const signals = getRoleplayTextSignals(paragraphEl.textContent || '');
+        if (!signals.startShape && !signals.pauseShape && !signals.endShape) return;
+
+        messageDiv.classList.add('roleplay');
+        if (signals.pauseShape && !signals.startShape) {
+            messageDiv.classList.add('roleplay-feedback');
+        } else if (signals.endShape) {
+            messageDiv.classList.add('roleplay-feedback-end');
+        }
+    }
+
+    function initRoleplayStateFromHistory() {
+        if (roleplayActiveFromServer === 1) {
+            setRoleplayBanner(true);
+            return;
+        }
+        // On page load, restore the banner from the last recorded role-play
+        // state: active if the most recent state-tagged message is not 'end'.
+        const tagged = chatBox.querySelectorAll('[data-roleplay-state]');
+        if (tagged.length > 0) {
+            const lastState = tagged[tagged.length - 1].getAttribute('data-roleplay-state');
+            setRoleplayBanner(lastState === 'start' || lastState === 'active' || lastState === 'pause');
+            return;
+        }
+        try {
+            const stored = localStorage.getItem(roleplayStorageKey);
+            if (stored === '1') {
+                setRoleplayBanner(true);
+            }
+        } catch (e) {
+            // Ignore storage failures
+        }
+    }
+
+    function getRoleplayTextSignals(textValue) {
+        const text = (textValue || '').trim();
+        const lower = text.toLowerCase();
+        return {
+            startShape: lower.includes('coach setup') && lower.includes('in character'),
+            pauseShape: lower.includes('would you like to resume the role-play') ||
+                        lower.includes('role-play paused') ||
+                        lower.includes('for your next move'),
+            endShape: lower.includes('role-play ended') ||
+                      lower.includes('role-play has concluded') ||
+                      lower.includes('would you like to continue this scenario later') ||
+                      lower.includes('assessment of the coaching skills'),
+            inCharacterShape: /^["“(]/.test(text) ||
+                              lower.includes('how would you like to respond'),
+        };
+    }
+
+    function applyRoleplayStylesFromStateTags() {
+        const messages = chatBox.querySelectorAll('.message[data-raw]');
+        let active = false;
+        messages.forEach((messageDiv) => {
+            let state = (messageDiv.getAttribute('data-roleplay-state') || '').toLowerCase();
+            const isBot = messageDiv.classList.contains('bot') ||
+                          messageDiv.getAttribute('data-sender') === 'bot';
+            const paragraph = messageDiv.querySelector('p');
+            const signals = getRoleplayTextSignals(paragraph ? paragraph.textContent : '');
+
+            // Fallback inference for old history rows that have no role-play state.
+            if (!state && isBot) {
+                if (!active && signals.startShape) {
+                    state = 'start';
+                    messageDiv.setAttribute('data-roleplay-state', state);
+                } else if (active && signals.pauseShape) {
+                    state = 'pause';
+                    messageDiv.setAttribute('data-roleplay-state', state);
+                } else if (active && signals.endShape) {
+                    state = 'end';
+                    messageDiv.setAttribute('data-roleplay-state', state);
+                } else if (active && signals.inCharacterShape) {
+                    state = 'active';
+                    messageDiv.setAttribute('data-roleplay-state', state);
+                }
+            }
+
+            if (isBot && (state === 'start' || state === 'active' || state === 'pause' || state === 'end' || (!state && active))) {
+                messageDiv.classList.add('roleplay');
+            }
+            if (isBot && state === 'pause') {
+                messageDiv.classList.add('roleplay-feedback');
+            } else if (isBot && state === 'end') {
+                messageDiv.classList.add('roleplay-feedback-end');
+            }
+
+            if (state === 'start' || state === 'active' || state === 'pause') {
+                active = true;
+            } else if (state === 'end') {
+                active = false;
+            }
+        });
+        return active;
+    }
+
+    function rebuildRoleplayDividersFromHistory() {
+        chatBox.querySelectorAll('.roleplay-divider').forEach((divider) => divider.remove());
+        const messages = chatBox.querySelectorAll('.message[data-raw]');
+        messages.forEach((messageDiv) => {
+            const isBot = messageDiv.classList.contains('bot') ||
+                          messageDiv.getAttribute('data-sender') === 'bot';
+            if (!isBot) return;
+            const state = (messageDiv.getAttribute('data-roleplay-state') || '').toLowerCase();
+            if (state === 'start') {
+                const startDivider = buildRoleplayDividerElement('Role-play started', 'start');
+                chatBox.insertBefore(startDivider, messageDiv);
+            } else if (state === 'pause') {
+                const pauseDivider = buildRoleplayDividerElement('Role-play paused for feedback', 'pause');
+                messageDiv.insertAdjacentElement('afterend', pauseDivider);
+            } else if (state === 'end') {
+                const endDivider = buildRoleplayDividerElement('Role-play ended - feedback mode resumed', 'end');
+                messageDiv.insertAdjacentElement('afterend', endDivider);
+            }
+        });
+    }
+
     function sendMessage() {
       const message = userInput.value;
       if (message.trim() === '') return;
-      addMessage(message, 'user');
+      const userMessageP = addMessage(message, 'user');
       userInput.value = '';
       userInput.style.height = 'auto';
       const typingIndicator = showTypingIndicator();
@@ -687,30 +1012,60 @@
         },
         body: JSON.stringify({ message: message }),
       })
-      .then(async (response) => {
-        let data = {};
-        try {
-          data = await response.json();
-        } catch (parseError) {
-          data = {};
-        }
-
-        if (!response.ok) {
-          const error = new Error(data.error || 'Unable to process your request right now.');
-          error.payload = data;
-          error.status = response.status;
-          throw error;
-        }
-
-        return data;
-      })
+      .then(response => response.json())
       .then(data => {
         setTimeout(() => {
           removeTypingIndicator();
-          const botMessageP = addMessage("", 'bot', true); // Add as HTML, initially empty
+          const banner = document.getElementById('roleplayBanner');
+          const wasRoleplayActive = !!(banner && banner.classList.contains('active'));
+          if (data.deletion_info && userMessageP && userMessageP.parentElement) {
+              const existingUserNotice = userMessageP.parentElement.querySelector('.deletion-notice');
+              if (!existingUserNotice) {
+                  const userDeletionNotice = createDeletionNotice(data.deletion_info);
+                  if (userDeletionNotice) {
+                      userMessageP.parentElement.appendChild(userDeletionNotice);
+                  }
+              }
+          }
+
+          // Role-play lifecycle: divider on start (before the bot's first
+          // in-character message), banner state, and bubble styling.
+          if (data.roleplay_notice === 'start') {
+              addRoleplayDivider('Role-play started', 'start');
+          }
+          let shouldRenderAsRoleplay = !!data.roleplay_active;
+          if (!shouldRenderAsRoleplay && wasRoleplayActive && data.roleplay_notice !== 'end') {
+              shouldRenderAsRoleplay = true;
+          }
+          if (data.roleplay_notice === 'start') {
+              shouldRenderAsRoleplay = true;
+          }
+          if (data.roleplay_notice === 'end') {
+              shouldRenderAsRoleplay = false;
+          }
+
+          let botSender = shouldRenderAsRoleplay ? 'bot roleplay' : 'bot';
+          if (data.roleplay_notice === 'pause') {
+              botSender = 'bot roleplay roleplay-feedback';
+          } else if (data.roleplay_notice === 'end') {
+              botSender = 'bot roleplay roleplay-feedback-end';
+          }
+          const botMessageP = addMessage("", botSender, true, data.deletion_info); // Add as HTML, initially empty
           typeMessage(botMessageP, data.reply || "Sorry, I couldn't process that.").then(() => {
+              if (data.roleplay_notice === 'start') {
+                  decorateRoleplayStartMessage(botMessageP);
+              }
+              if (data.roleplay_notice === 'end') {
+                  addRoleplayDivider('Role-play ended - feedback mode resumed', 'end');
+              } else if (data.roleplay_notice === 'pause') {
+                  addRoleplayDivider('Role-play paused for feedback', 'pause');
+              }
               scrollToBottom(); // Final scroll after typing is complete
           });
+          const nextRoleplayActive = (data.roleplay_notice === 'end')
+              ? false
+              : (data.roleplay_notice === 'start' || data.roleplay_notice === 'pause' || shouldRenderAsRoleplay);
+          setRoleplayBanner(nextRoleplayActive);
           
           // Update remaining questions count
           if (data.remaining_questions !== undefined) {
@@ -721,24 +1076,13 @@
       .catch(error => {
         console.error('Error:', error);
         removeTypingIndicator();
-
-        if (error && error.status === 403 && error.payload && error.payload.disclaimer_required) {
-          addMessage(error.payload.error || 'Please accept the disclaimer before chatting.', 'bot');
-          setTimeout(() => {
-            window.location.reload();
-          }, 700);
-          return;
-        }
-
-        const fallbackMessage = (error && error.message) ?
-          error.message :
-          'Error: Could not connect to the server.';
-        addMessage(fallbackMessage, 'bot');
+        addMessage('Error: Could not connect to the server.', 'bot');
       });
     }
     
     // Initial scroll to bottom and rendering of existing messages
     document.addEventListener('DOMContentLoaded', () => {
+        initRoleplayStateFromHistory();
         // Process intro message with Markdown
         const introMessageElement = document.getElementById('intro-message');
         const introContent = introMessageElement.getAttribute('data-content');
@@ -771,6 +1115,11 @@
                     if (!messageDiv.querySelector('p')) {
                         messageDiv.appendChild(p);
                     }
+                    if (messageDiv.classList.contains('roleplay') &&
+                        messageDiv.getAttribute('data-roleplay-state') === 'start') {
+                        decorateRoleplayStartMessage(p);
+                    }
+                    inferHistoricalRoleplayStyle(messageDiv, p);
                 } catch (e) {
                     console.error('Error parsing message data:', e);
                 }
@@ -789,6 +1138,11 @@
                 }
             }
         });
+        const inferredRoleplayActive = applyRoleplayStylesFromStateTags();
+        rebuildRoleplayDividersFromHistory();
+        if (roleplayActiveFromServer === 1 || inferredRoleplayActive) {
+            setRoleplayBanner(true);
+        }
         
         // Set initial state for questions remaining indicator
         const initialRemaining = parseInt('{{ remaining_questions }}');
@@ -824,6 +1178,8 @@
             .then(data => {
                 if (data.success) {
                     chatBox.innerHTML = ''; // Clear visually
+                    try { localStorage.removeItem(roleplayStorageKey); } catch (e) {}
+                    setRoleplayBanner(false);
                     // Re-add welcome message with Markdown processing
                     const welcomeMessage = '{{ intro_message|safe }}';
                     addMessage(welcomeMessage, 'bot system-welcome-message', true);

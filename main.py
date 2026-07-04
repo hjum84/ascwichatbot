@@ -32,6 +32,7 @@ from werkzeug.utils import secure_filename
 import sys
 import site
 import hashlib
+import uuid
 from functools import lru_cache
 import numpy as np
 from threading import Lock
@@ -99,6 +100,539 @@ TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT = (
 )
 TIER3_SAFETY_GUARDRAIL_START_MARKER = "[[TIER3_SAFETY_GUARDRAIL_PROMPT_START]]"
 TIER3_SAFETY_GUARDRAIL_END_MARKER = "[[TIER3_SAFETY_GUARDRAIL_PROMPT_END]]"
+
+# Injected into every chat prompt (both Knowledge Retrieval and Dialogue
+# Mode). Purpose: when the model reproduces enumerated material from the
+# curriculum (numbered error lists, process steps, self-evaluation
+# questions), the reproduction must match the source exactly -- same count,
+# order, and wording -- and should carry the module/handout/page references
+# the content provides, so users can locate the material in their Learner
+# Guide. This protects the tool's core value claim: answers a user can
+# verify against the training materials.
+CONTENT_FIDELITY_PROMPT = (
+    "CONTENT FIDELITY AND REFERENCES:\n"
+    "1. When reproducing an enumerated list from the content (e.g., numbered errors, process steps, self-evaluation questions), keep the same item count, order, and headings as the content. Do not merge, drop, add, or renumber items, and never state a count that differs from the content.\n"
+    "2. When reproducing enumerated questions or criteria, preserve every element of the original wording (e.g., do not shorten 'truth, relevance, fairness, completeness, significance, and sufficiency' to a partial list).\n"
+    "3. When the content provides module, topic, handout, or page references (e.g., 'M2 - Topic 5B, pages 55-58'), include them so the user can locate the material in their guide.\n"
+    "4. If the content presents the same material in more than one place or format, use the most complete version, and briefly note the additional items when another version adds something (e.g., a handout pitfall not present in the numbered list).\n"
+    "5. Keep content-based material clearly separate from your own illustrative examples or applications; never present your own examples as if they come from the content."
+)
+
+# --- Role-play session tracking (Dialogue Mode) -------------------------------
+# The model signals role-play lifecycle with hidden markers at the very start
+# of its reply: [[RP:START]] when a new role-play begins, [[RP:END]] when it
+# permanently ends. The backend strips the markers before the reply is saved
+# or shown, tags each exchange with a roleplay_session_id/state, and derives
+# "is a role-play active?" from the database -- so state survives page
+# reloads and device switches, and natural-language start/stop works in any
+# phrasing. While a role-play is active, Dialogue Mode retrieves the FULL
+# transcript of that role-play (not just the recent 20-exchange window), so
+# the scenario, roles, and case facts can never fall out of the model's
+# memory mid-scene. Non-role-play dialogue keeps the 20-exchange window;
+# Knowledge Retrieval Mode remains stateless. Everything fails open: if the
+# model omits a marker, behavior degrades gracefully to the existing
+# window-plus-anchor mechanism.
+ROLEPLAY_START_MARKER = "[[RP:START]]"
+ROLEPLAY_END_MARKER = "[[RP:END]]"
+# Character budget for the full role-play transcript in the dynamic prompt.
+# In-character turns are short (2-5 sentences per the dialogue rules), so a
+# typical session stays far below this; the guard only matters for extreme
+# sessions, where we keep the opening plus the most recent turns.
+MAX_ROLEPLAY_TRANSCRIPT_CHARS = 100000
+
+
+def extract_roleplay_marker(reply_text):
+    """
+    Detect and strip role-play lifecycle markers from a model reply.
+    Returns (clean_text, event) where event is 'start', 'end', or None.
+    Markers are only honored at the start of the reply, but any stray
+    occurrences elsewhere are stripped defensively so they can never be
+    shown to the user.
+    """
+    text_value = (reply_text or "")
+    stripped = text_value.lstrip()
+    event = None
+    if stripped.startswith(ROLEPLAY_START_MARKER):
+        event = "start"
+        stripped = stripped[len(ROLEPLAY_START_MARKER):].lstrip()
+    elif stripped.startswith(ROLEPLAY_END_MARKER):
+        event = "end"
+        stripped = stripped[len(ROLEPLAY_END_MARKER):].lstrip()
+    # Defensive cleanup of any stray markers anywhere in the text.
+    stripped = stripped.replace(ROLEPLAY_START_MARKER, "").replace(ROLEPLAY_END_MARKER, "")
+    return stripped, event
+
+
+def normalize_roleplay_start_reply(reply_text):
+    """
+    Make the first role-play turn visually separable in the UI by ensuring
+    a clear split between coach setup and in-character content.
+    """
+    text_value = (reply_text or "").strip()
+    if not text_value:
+        return text_value
+
+    # If the model already provided explicit labels, keep it as-is.
+    if re.search(r'(?im)^\s*(#{1,4}\s*)?(coach setup|in character)\s*:?', text_value):
+        return text_value
+
+    split_match = re.search(r'\n\s*(\(|["“])', text_value)
+    if split_match:
+        split_idx = split_match.start()
+        coach_part = text_value[:split_idx].strip()
+        persona_part = text_value[split_idx:].strip()
+        if coach_part and persona_part:
+            return (
+                "### Coach setup\n"
+                f"{coach_part}\n\n"
+                "---\n\n"
+                "### In character\n"
+                f"{persona_part}"
+            )
+
+    return f"### In character\n{text_value}"
+
+
+def is_roleplay_start_request(normalized_user_message):
+    """
+    Heuristic fallback when the model forgets [[RP:START]].
+    """
+    text_value = (normalized_user_message or "").strip()
+    if not text_value:
+        return False
+    start_markers = [
+        "roleplay",
+        "role-play",
+        "role play",
+        "practice scenario",
+        "let's practice",
+        "lets practice",
+        "can we practice",
+        "can we role",
+    ]
+    return any(marker in text_value for marker in start_markers)
+
+
+def is_roleplay_end_request(normalized_user_message):
+    text_value = (normalized_user_message or "").strip()
+    if not text_value:
+        return False
+    end_markers = {
+        "end roleplay",
+        "end role-play",
+        "end role play",
+        "stop roleplay",
+        "stop role-play",
+        "stop role play",
+        "finish roleplay",
+        "finish role-play",
+        "finish role play",
+    }
+    return text_value in end_markers
+
+
+def parse_session_roleplay_started_at(raw_value):
+    """
+    Parse role-play session start timestamp stored in Flask session.
+    Returns naive UTC datetime or None.
+    """
+    if not raw_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw_value))
+        if parsed.tzinfo is not None:
+            return parsed.replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return None
+
+
+def is_non_substantive_roleplay_command(message_text):
+    normalized = " ".join((message_text or "").strip().lower().split())
+    if not normalized:
+        return True
+    pause_markers = {
+        "pause",
+        "pause roleplay",
+        "pause role-play",
+        "pause role play",
+        "pause feedback",
+        "give feedback"
+    }
+    continue_markers = {
+        "continue",
+        "please continue",
+        "go on",
+        "keep going",
+        "continue please"
+    }
+    return (
+        normalized in pause_markers or
+        normalized in continue_markers or
+        is_roleplay_end_request(normalized)
+    )
+
+
+def _extract_actionable_sentences(text_value):
+    cleaned = re.sub(
+        r'(?im)^\s*(strengths?|area of development|next step|feedback summary|feedback mode)\s*:?\s*',
+        '',
+        text_value or ''
+    )
+    cleaned = re.sub(r'(?im)^\s*[-*]\s*', '', cleaned)
+    chunks = re.split(r'(?<=[.!?])\s+|\n+', cleaned)
+    filtered = []
+    for chunk in chunks:
+        sentence = (chunk or '').strip()
+        if not sentence:
+            continue
+        if re.search(r'(?i)\b(strengths?|area of development|next step)\b', sentence):
+            continue
+        filtered.append(sentence)
+    return filtered
+
+
+def _build_pause_reuse_snippet(pause_feedback_text):
+    if not pause_feedback_text:
+        return None
+    lines = [line.strip() for line in (pause_feedback_text or "").splitlines() if line.strip()]
+    for line in lines:
+        lower = line.lower()
+        if "role-play is paused" in lower:
+            continue
+        if "whenever you are ready" in lower:
+            continue
+        if "resume in character" in lower:
+            continue
+        return line
+    return None
+
+
+def enforce_pause_response_tone(reply_text, has_substantive_user_turn=False):
+    """
+    Pause feedback must be tactical (3-5 lines), not a final evaluation.
+    """
+    if not has_substantive_user_turn:
+        return (
+            "Role-play is paused.\n"
+            "I cannot evaluate performance yet because no substantive in-scene coaching move has occurred in this current session.\n"
+            "To resume, make one concrete next-turn move (for example, one open-ended coaching question tied to the worker's immediate friction point).\n"
+            "Whenever you are ready, let me know and I will resume in character from this exact point."
+        )
+
+    text_value = (reply_text or "").strip()
+    completion_like = re.search(
+        r'(?i)\b(concluded|completed|complete|finished|ended|has ended|has concluded)\b',
+        text_value
+    )
+    if completion_like:
+        text_value = re.sub(
+            r'(?i)\b(concluded|completed|complete|finished|ended|has ended|has concluded)\b',
+            'paused',
+            text_value
+        )
+
+    actionable = _extract_actionable_sentences(text_value)
+    if not actionable:
+        actionable = [
+            "Stay with the worker's immediate friction point and ask one targeted open-ended question.",
+            "Aim for one short turn that advances the conversation by clarifying what is known versus assumed."
+        ]
+
+    body_lines = actionable[:3]
+    if len(body_lines) < 2:
+        body_lines.append(
+            "Use one concise reflective statement, then one focused question to move the dialogue forward."
+        )
+
+    lines = ["Role-play is paused."] + body_lines + [
+        "Whenever you are ready, let me know and I will resume in character from this exact point."
+    ]
+    # Enforce 3-5 lines exactly.
+    if len(lines) > 5:
+        lines = [lines[0]] + lines[1:4] + [lines[-1]]
+    return "\n".join(lines)
+
+
+def enforce_end_response_tone(
+    reply_text,
+    has_substantive_user_turn=False,
+    pause_feedback_text=None,
+    immediate_after_pause=False
+):
+    """
+    End feedback must be grounded in current session and structured.
+    """
+    text_value = (reply_text or "").strip()
+    if not has_substantive_user_turn:
+        return (
+            "Strengths:\n"
+            "- The role-play setup and role assignment were clear, which created a usable practice frame.\n\n"
+            "Area of Development:\n"
+            "- No substantive in-scene coaching turn occurred before ending, so performance evidence is limited in this session.\n\n"
+            "Next Step:\n"
+            "- Start a new role-play and complete at least one full coaching exchange before ending to generate evaluable evidence."
+        )
+
+    if not text_value:
+        return (
+            "Strengths:\n"
+            "- You maintained the role-play structure and completed the session boundary cleanly.\n"
+            "- You stayed engaged in the scenario context rather than moving off-topic.\n\n"
+            "Area of Development:\n"
+            "- Make your coaching moves more explicit and evidence-based so the worker's decision path becomes easier to evaluate.\n\n"
+            "Next Step:\n"
+            "- In your next session, use one explicit reflective statement plus one targeted open-ended question before ending."
+        )
+
+    headings_ok = all(
+        re.search(pattern, text_value, re.IGNORECASE | re.MULTILINE)
+        for pattern in [r'^\s*Strengths\s*:', r'^\s*Area of Development\s*:', r'^\s*Next Step\s*:']
+    )
+    if headings_ok:
+        parsed_payload = _parse_end_feedback_text_to_payload(text_value)
+        is_valid_payload, _, normalized_payload = validate_end_feedback_payload(parsed_payload)
+        if is_valid_payload and normalized_payload:
+            return format_end_feedback_payload(normalized_payload)
+
+    sentences = _extract_actionable_sentences(text_value)
+    pause_reuse = _build_pause_reuse_snippet(pause_feedback_text)
+
+    strengths_lines = []
+    if immediate_after_pause and pause_reuse:
+        strengths_lines.append(f"- Building from the pause checkpoint: {pause_reuse}")
+    if sentences:
+        strengths_lines.append(f"- {sentences[0]}")
+    if len(sentences) > 1:
+        strengths_lines.append(f"- {sentences[1]}")
+    if not strengths_lines:
+        strengths_lines = ["- You maintained engagement with the scenario and attempted to keep the conversation task-focused."]
+
+    area_line = (
+        f"- {sentences[2]}"
+        if len(sentences) > 2 else
+        "- Strengthen consistency by tying each coaching move to one immediate objective in the worker's next turn."
+    )
+    next_step_line = (
+        f"- {sentences[3]}"
+        if len(sentences) > 3 else
+        "- In your next session, use one reflective statement plus one targeted open-ended question before advancing to advice."
+    )
+
+    return (
+        "Strengths:\n"
+        f"{'\n'.join(strengths_lines)}\n\n"
+        "Area of Development:\n"
+        f"{area_line}\n\n"
+        "Next Step:\n"
+        f"{next_step_line}"
+    )
+
+
+def _extract_json_object(text_value):
+    """
+    Best-effort extraction of the first JSON object from model output.
+    """
+    raw = (text_value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("```"):
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'\s*```$', '', raw)
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(raw[idx:])
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            continue
+    return None
+
+
+def _sentence_count(text_value):
+    text = (text_value or "").strip()
+    if not text:
+        return 0
+    parts = re.findall(r'[^.!?]+[.!?]', text)
+    if parts:
+        return len(parts)
+    # Fallback: treat non-empty fragment as one sentence.
+    return 1
+
+
+def _normalize_feedback_items(value):
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        lines = [line.strip(" -*\t") for line in value.splitlines() if line.strip()]
+        return [line for line in lines if line]
+    return []
+
+
+def _parse_end_feedback_text_to_payload(text_value):
+    text = (text_value or "").strip()
+    if not text:
+        return {}
+
+    pattern = re.compile(
+        r'(?is)Strengths\s*:\s*(.*?)\s*Area of Development\s*:\s*(.*?)\s*Next Step\s*:\s*(.*)\Z'
+    )
+    match = pattern.search(text)
+    if not match:
+        return {}
+
+    strengths_block, area_block, next_block = match.groups()
+
+    def block_to_items(block_text):
+        lines = []
+        for raw in (block_text or "").splitlines():
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(("-", "*")):
+                lines.append(stripped[1:].strip())
+            elif lines:
+                lines[-1] = f"{lines[-1]} {stripped}".strip()
+            else:
+                lines.append(stripped)
+        return [line for line in lines if line]
+
+    next_items = block_to_items(next_block)
+    next_step = next_items[0] if next_items else (next_block or "").strip()
+    return {
+        "strengths": block_to_items(strengths_block),
+        "area_of_development": block_to_items(area_block),
+        "next_step": next_step
+    }
+
+
+def validate_end_feedback_payload(payload):
+    """
+    Validate structured end-session feedback payload against strict rules.
+    Returns (is_valid, issues, normalized_payload).
+    """
+    issues = []
+    if not isinstance(payload, dict):
+        return False, ["payload is not a JSON object"], None
+
+    strengths = _normalize_feedback_items(payload.get("strengths"))
+    area = _normalize_feedback_items(payload.get("area_of_development"))
+    next_step = (payload.get("next_step") or "").strip()
+
+    normalized = {
+        "strengths": strengths,
+        "area_of_development": area,
+        "next_step": next_step
+    }
+
+    if not (1 <= len(strengths) <= 2):
+        issues.append("strengths must contain 1-2 bullets")
+    if not (1 <= len(area) <= 2):
+        issues.append("area_of_development must contain 1-2 bullets")
+    if not next_step:
+        issues.append("next_step must be non-empty")
+
+    # Evidence + content connection checks (heuristic but strict enough).
+    evidence_markers = [
+        "you said", "you asked", "you responded", "you used",
+        "when you", "your question", "your statement", "\"", "'"
+    ]
+    content_markers = [
+        "module", "framework", "skill", "model", "principle", "domain", "topic"
+    ]
+
+    def has_evidence_and_content(item_text):
+        low = item_text.lower()
+        has_evidence = any(marker in low for marker in evidence_markers)
+        has_content = any(marker in low for marker in content_markers)
+        return has_evidence and has_content
+
+    for idx, item in enumerate(strengths):
+        sc = _sentence_count(item)
+        if sc < 2 or sc > 4:
+            issues.append(f"strengths[{idx}] must be 2-4 sentences")
+        if not has_evidence_and_content(item):
+            issues.append(f"strengths[{idx}] must include evidence + content connection")
+
+    praise_markers = [
+        "great", "excellent", "strong", "well done", "effectively",
+        "successfully", "good job", "impressive"
+    ]
+    for idx, item in enumerate(area):
+        sc = _sentence_count(item)
+        if sc < 2 or sc > 4:
+            issues.append(f"area_of_development[{idx}] must be 2-4 sentences")
+        if not has_evidence_and_content(item):
+            issues.append(f"area_of_development[{idx}] must include evidence + content connection")
+        low = item.lower()
+        if any(marker in low for marker in praise_markers):
+            issues.append(f"area_of_development[{idx}] contains praise language")
+
+    ns_low = next_step.lower()
+    if next_step:
+        sc = _sentence_count(next_step)
+        if sc < 2 or sc > 4:
+            issues.append("next_step must be 2-4 sentences")
+        past_eval_markers = [
+            "you demonstrated", "you successfully", "you effectively",
+            "you did", "you kept", "you showed"
+        ]
+        if any(marker in ns_low for marker in past_eval_markers):
+            issues.append("next_step must not evaluate past performance")
+        future_markers = ["next", "future", "use", "apply", "start", "practice", "consider", "try"]
+        if not any(marker in ns_low for marker in future_markers):
+            issues.append("next_step should contain a concrete forward action")
+
+    return len(issues) == 0, issues, normalized
+
+
+def format_end_feedback_payload(payload):
+    strengths = payload.get("strengths") or []
+    area = payload.get("area_of_development") or []
+    next_step = (payload.get("next_step") or "").strip()
+
+    strengths_block = "\n".join([f"- {item}" for item in strengths]) if strengths else "- (No strengths provided.)"
+    area_block = "\n".join([f"- {item}" for item in area]) if area else "- (No development area provided.)"
+    next_step_block = f"- {next_step}" if next_step else "- (No next step provided.)"
+
+    return (
+        "Strengths:\n"
+        f"{strengths_block}\n\n"
+        "Area of Development:\n"
+        f"{area_block}\n\n"
+        "Next Step:\n"
+        f"{next_step_block}"
+    )
+
+
+def get_active_roleplay_session(db, user_id, program_code):
+    """
+    Return the active role-play session id for this user+program, or None.
+    Derived from the database: the most recent visible exchange that carries
+    a roleplay_state determines the current state ('end' means no active
+    role-play). Clearing the chat (is_visible=False) therefore also ends any
+    active role-play, which matches user expectations.
+    """
+    # If the model/runtime does not have role-play columns yet, fail open.
+    if not hasattr(ChatHistory, "roleplay_state") or not hasattr(ChatHistory, "roleplay_session_id"):
+        return None
+    try:
+        latest = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code,
+            ChatHistory.is_visible == True,
+            ChatHistory.roleplay_state.isnot(None)
+        ).order_by(ChatHistory.timestamp.desc()).first()
+        if latest and latest.roleplay_state in ("start", "active", "pause"):
+            return latest.roleplay_session_id
+    except Exception as state_error:
+        # Fail open: if the columns are missing (migration not yet run) or
+        # the query fails, behave exactly as before this feature existed.
+        logger.warning(f"Role-play state lookup failed (fail-open): {state_error}")
+    return None
 
 
 def split_guidelines_and_tier3_prompt(guidelines_text):
@@ -336,6 +870,118 @@ else:
     # Developer API (API key) mode has no regional restriction, so the same
     # client handles every model.
     gemini_client_global = gemini_client
+
+# --- Dialogue-mode context caching -------------------------------------------
+# The static portion of every Dialogue Mode prompt (role + guidelines +
+# program CONTENT, ~197K characters for SUPCORE) is identical across turns but
+# was being re-sent raw on every model call. Explicit Gemini context caching
+# uploads that static block once per (program, model, content-version); each
+# subsequent call references the cache by name and only transmits the dynamic
+# part (conversation history + new user message). This reduces both per-turn
+# input cost (cached tokens are billed at a steep discount) and
+# time-to-first-token latency, which is the delay users feel most.
+#
+# Design constraints honored here:
+# - Fail-open: any cache error falls back to the original full-prompt call,
+#   so behavior is preserved exactly whenever caching is unavailable (e.g.
+#   content below the model's minimum cacheable token count, or an SDK/API
+#   error). Users can never be blocked by the cache layer.
+# - Cache key includes a hash of the full static prompt, so admin edits to
+#   the system prompt, guardrails, or uploaded content automatically produce
+#   a fresh cache instead of serving stale instructions.
+# - Caches are model-specific; the fallback model resolves its own cache.
+# - Kill switch: set DIALOGUE_CONTEXT_CACHE_ENABLED=false on Render to turn
+#   the whole layer off without a code change.
+_dialogue_context_cache_registry = {}
+_dialogue_context_cache_lock = threading.Lock()
+DIALOGUE_CONTEXT_CACHE_ENABLED = (
+    os.getenv("DIALOGUE_CONTEXT_CACHE_ENABLED", "true").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+DIALOGUE_CONTEXT_CACHE_TTL_SECONDS = int(
+    os.getenv("DIALOGUE_CONTEXT_CACHE_TTL_SECONDS", "3600")
+)
+# After a creation failure, do not re-attempt creation for this long. This
+# avoids paying a failed-creation round trip on every user turn for content
+# that is not cacheable (e.g. too small).
+_DIALOGUE_CACHE_FAILURE_COOLDOWN_SECONDS = 600
+# Treat the local registry entry as expired slightly before the server-side
+# TTL, so we never hand out a cache name that is about to be evicted mid-call.
+_DIALOGUE_CACHE_EXPIRY_SAFETY_MARGIN_SECONDS = 120
+
+
+def invalidate_dialogue_context_cache(program_code, model_name, static_prompt_hash):
+    """Drop a registry entry so the next call re-creates (or skips) the cache."""
+    cache_key = (program_code, model_name, static_prompt_hash)
+    with _dialogue_context_cache_lock:
+        _dialogue_context_cache_registry.pop(cache_key, None)
+
+
+def get_or_create_dialogue_context_cache(client, model_name, program_code, static_prompt_text):
+    """
+    Return (cache_name, static_prompt_hash) for the given static prompt.
+
+    cache_name is None whenever caching is disabled or unavailable; in that
+    case the caller must send the legacy full prompt, which reproduces the
+    pre-caching behavior exactly.
+    """
+    static_prompt_hash = hashlib.sha256(
+        static_prompt_text.encode("utf-8")
+    ).hexdigest()[:16]
+
+    if not DIALOGUE_CONTEXT_CACHE_ENABLED:
+        return None, static_prompt_hash
+
+    cache_key = (program_code, model_name, static_prompt_hash)
+    now = time.time()
+
+    with _dialogue_context_cache_lock:
+        entry = _dialogue_context_cache_registry.get(cache_key)
+        if entry:
+            if entry.get("failed_until", 0) > now:
+                return None, static_prompt_hash
+            if entry.get("expires_at", 0) > now:
+                return entry["cache_name"], static_prompt_hash
+
+    try:
+        cache = client.caches.create(
+            model=model_name,
+            config=genai_types.CreateCachedContentConfig(
+                system_instruction=static_prompt_text,
+                ttl=f"{DIALOGUE_CONTEXT_CACHE_TTL_SECONDS}s",
+                display_name=f"dialogue-{program_code}-{static_prompt_hash}",
+            ),
+        )
+        with _dialogue_context_cache_lock:
+            _dialogue_context_cache_registry[cache_key] = {
+                "cache_name": cache.name,
+                "expires_at": (
+                    now
+                    + DIALOGUE_CONTEXT_CACHE_TTL_SECONDS
+                    - _DIALOGUE_CACHE_EXPIRY_SAFETY_MARGIN_SECONDS
+                ),
+            }
+        logger.info(
+            "Created dialogue context cache '%s' (program=%s, model=%s)",
+            cache.name, program_code, model_name
+        )
+        return cache.name, static_prompt_hash
+    except Exception as cache_error:
+        # Typical non-fatal causes: content below the model's minimum
+        # cacheable token count, a model without caching support, or a
+        # transient API error. Fall back to full-prompt calls and skip
+        # re-attempting creation for a cooldown period.
+        logger.warning(
+            "Dialogue context cache unavailable (program=%s, model=%s): %s. "
+            "Falling back to full prompt.",
+            program_code, model_name, str(cache_error)
+        )
+        with _dialogue_context_cache_lock:
+            _dialogue_context_cache_registry[cache_key] = {
+                "failed_until": now + _DIALOGUE_CACHE_FAILURE_COOLDOWN_SECONDS
+            }
+        return None, static_prompt_hash
+
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -1113,6 +1759,7 @@ def get_cached_response(content_hash, user_message, chatbot_code):
                 f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
                 f"{system_prompt_role_text}\n\n"
                 f"IMPORTANT GUIDELINES:\n{system_prompt_guidelines_text}\n\n"
+                f"{CONTENT_FIDELITY_PROMPT}\n\n"
                 f"{tier3_guardrail_text}\n\n"
                 f"RESPONSE APPROACH:\n"
                 f"- Answer questions directly related to the provided content\n"
@@ -1141,6 +1788,7 @@ def get_cached_response(content_hash, user_message, chatbot_code):
                 f"You are an expert assistant for the '{program_display_name}' program. Your primary role is to provide helpful information based on the provided content.\n\n"
                 f"{system_prompt_role_fallback}\n\n"
                 f"IMPORTANT GUIDELINES:\n{default_guidelines}\n\n"
+                f"{CONTENT_FIDELITY_PROMPT}\n\n"
                 f"{TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT}\n\n"
                 f"RESPONSE APPROACH:\n"
                 f"- Answer questions directly related to the provided content\n"
@@ -1974,11 +2622,17 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
             # Get deletion info for this chat
             deletion_info = get_chat_deletion_info(h.timestamp, program_code)
             
+            # Role-play state for frontend styling ('start'/'active'/'end' or
+            # None). getattr keeps this working if the migration has not yet
+            # been applied.
+            rp_state = getattr(h, 'roleplay_state', None)
+
             # Add user message
             user_msg = {
                 'message': h.user_message,
                 'sender': 'user',
-                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M'),
+                'roleplay_state': rp_state
             }
             if deletion_info:
                 user_msg['deletion_info'] = deletion_info
@@ -1988,7 +2642,8 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
             bot_msg = {
                 'message': h.bot_message,
                 'sender': 'bot',
-                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M')
+                'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M'),
+                'roleplay_state': rp_state
             }
             if deletion_info:
                 bot_msg['deletion_info'] = deletion_info
@@ -2292,6 +2947,22 @@ def chat():
     user_id = current_user.id
     user_message = request.json.get('message')
     current_program = session.get('current_program')
+    roleplay_session_key = f"roleplay_active_{(current_program or '').upper()}"
+    roleplay_session_id_key = f"roleplay_session_id_{(current_program or '').upper()}"
+    roleplay_started_at_key = f"roleplay_started_at_{(current_program or '').upper()}"
+    roleplay_last_action_key = f"roleplay_last_action_{(current_program or '').upper()}"
+    roleplay_last_pause_feedback_key = f"roleplay_last_pause_feedback_{(current_program or '').upper()}"
+    roleplay_active_from_session = bool(session.get(roleplay_session_key, False))
+    roleplay_session_id_from_session = session.get(roleplay_session_id_key)
+    roleplay_started_at_from_session = parse_session_roleplay_started_at(
+        session.get(roleplay_started_at_key)
+    )
+    roleplay_last_action_from_session = (session.get(roleplay_last_action_key) or "").strip().lower()
+    roleplay_last_pause_feedback = session.get(roleplay_last_pause_feedback_key)
+    roleplay_columns_available = (
+        hasattr(ChatHistory, "roleplay_state") and
+        hasattr(ChatHistory, "roleplay_session_id")
+    )
 
     if not user_message:
         return jsonify({"error": "Message is required"}), 400
@@ -2446,6 +3117,29 @@ def chat():
         chatbot_mode = normalize_chatbot_mode(getattr(chatbot, 'chatbot_mode', None))
         is_dialogue_mode = chatbot_mode == 'dialogue_mode'
 
+        # Role-play tracking defaults. Only the Dialogue Mode branch ever sets
+        # these; Knowledge Retrieval Mode remains stateless and untagged.
+        roleplay_event = None
+        roleplay_session_for_record = None
+        roleplay_state_for_record = None
+        roleplay_active_after = False
+        active_roleplay_session_id = None
+        has_substantive_user_turn = False
+        normalized_user_message = " ".join((user_message or "").strip().lower().split())
+        pause_markers = {
+            "pause",
+            "pause roleplay",
+            "pause role-play",
+            "pause role play",
+            "pause feedback",
+            "give feedback"
+        }
+        is_pause_command = normalized_user_message in pause_markers
+        is_end_command = is_roleplay_end_request(normalized_user_message)
+        is_end_immediately_after_pause = (
+            is_end_command and roleplay_last_action_from_session == "pause"
+        )
+
         if is_dialogue_mode:
             # --- DIALOGUE MODE ---------------------------------------------------
             # The agent needs to remember earlier turns to engage in meaningful
@@ -2460,13 +3154,95 @@ def chat():
                     f"building conversation history"
                 )
 
-                # Step 1: Retrieve conversation history from database
-                recent_history = db.query(ChatHistory).filter(
-                    ChatHistory.user_id == user_id,
-                    ChatHistory.program_code == current_program,
-                    ChatHistory.is_visible == True
-                ).order_by(ChatHistory.timestamp.desc()).limit(20).all()
-                recent_history = list(reversed(recent_history))
+                # Step 1: Determine role-play state, then retrieve history.
+                # If a role-play is active, retrieve the FULL transcript of
+                # that role-play session (bounded by a character budget) so the
+                # scenario, roles, and case facts never fall out of memory
+                # mid-scene. Otherwise, use the recent 20-exchange window.
+                # Guardrail-blocked exchanges carry no role-play tag and are
+                # therefore never re-sent to the model, preserving the
+                # data-privacy guarantee that blocked content stays local.
+                active_roleplay_session_id = get_active_roleplay_session(
+                    db, user_id, current_program
+                )
+                if not active_roleplay_session_id and roleplay_active_from_session:
+                    # DB/session mismatch fallback (e.g., role-play columns not
+                    # available yet): keep role-play UI active server-side.
+                    active_roleplay_session_id = roleplay_session_id_from_session or "__session_fallback__"
+                roleplay_transcript_trimmed = False
+                if (
+                    roleplay_columns_available and
+                    active_roleplay_session_id and
+                    active_roleplay_session_id != "__session_fallback__"
+                ):
+                    roleplay_records = db.query(ChatHistory).filter(
+                        ChatHistory.user_id == user_id,
+                        ChatHistory.program_code == current_program,
+                        ChatHistory.is_visible == True,
+                        ChatHistory.roleplay_session_id == active_roleplay_session_id
+                    ).order_by(ChatHistory.timestamp.asc()).all()
+                    # Character-budget guard: keep the opening 3 exchanges plus
+                    # as many of the most recent as fit. In-character turns are
+                    # short, so trimming should be rare.
+                    total_chars = sum(
+                        len(r.user_message or "") + len(r.bot_message or "")
+                        for r in roleplay_records
+                    )
+                    if total_chars > MAX_ROLEPLAY_TRANSCRIPT_CHARS and len(roleplay_records) > 6:
+                        head = roleplay_records[:3]
+                        tail = []
+                        budget = MAX_ROLEPLAY_TRANSCRIPT_CHARS - sum(
+                            len(r.user_message or "") + len(r.bot_message or "") for r in head
+                        )
+                        for r in reversed(roleplay_records[3:]):
+                            r_len = len(r.user_message or "") + len(r.bot_message or "")
+                            if budget - r_len < 0:
+                                break
+                            tail.append(r)
+                            budget -= r_len
+                        tail.reverse()
+                        recent_history = head + tail
+                        roleplay_transcript_trimmed = True
+                    else:
+                        recent_history = roleplay_records
+                elif active_roleplay_session_id and roleplay_started_at_from_session:
+                    # Column-missing/session-fallback path: keep role-play
+                    # strictly scoped to the current session window.
+                    recent_history = db.query(ChatHistory).filter(
+                        ChatHistory.user_id == user_id,
+                        ChatHistory.program_code == current_program,
+                        ChatHistory.is_visible == True,
+                        ChatHistory.timestamp >= roleplay_started_at_from_session
+                    ).order_by(ChatHistory.timestamp.asc()).all()
+                else:
+                    recent_history = db.query(ChatHistory).filter(
+                        ChatHistory.user_id == user_id,
+                        ChatHistory.program_code == current_program,
+                        ChatHistory.is_visible == True
+                    ).order_by(ChatHistory.timestamp.desc()).limit(20).all()
+                    recent_history = list(reversed(recent_history))
+
+                # Step 1b: Anchor the session opening (non-role-play path only;
+                # an active role-play already has full transcript recall).
+                # The rolling 20-exchange window drops the earliest turns of a
+                # long practice session, which is exactly where scenarios and
+                # role assignments are established. When the window is full,
+                # also fetch the first few visible exchanges of this session
+                # (visibility resets when the user clears the chat) and carry
+                # them as a pinned SESSION OPENING block. Later user
+                # corrections still take precedence per the Dialogue Mode rules.
+                session_anchor_records = []
+                if not active_roleplay_session_id and len(recent_history) >= 20:
+                    earliest_history = db.query(ChatHistory).filter(
+                        ChatHistory.user_id == user_id,
+                        ChatHistory.program_code == current_program,
+                        ChatHistory.is_visible == True
+                    ).order_by(ChatHistory.timestamp.asc()).limit(3).all()
+                    recent_record_ids = {record.id for record in recent_history}
+                    session_anchor_records = [
+                        record for record in earliest_history
+                        if record.id not in recent_record_ids
+                    ]
 
                 # Step 2: Format as conversation messages
                 conversation_messages = []
@@ -2489,7 +3265,6 @@ def chat():
                 # If the user asks to "continue", force continuation behavior
                 # so the model extends the prior assistant answer instead of
                 # restarting from scratch.
-                normalized_user_message = (user_message or "").strip().lower()
                 continue_markers = {
                     "continue",
                     "please continue",
@@ -2510,15 +3285,64 @@ def chat():
                 # Dialogue mode is expected to support guided role-play/practice.
                 # This explicit block prevents model refusals for allowed
                 # educational simulation while preserving safety boundaries.
+                # Sections B-E below address tester feedback (May 2026 pilot
+                # sessions): simulated staff capitulating too quickly and using
+                # curriculum language, role-assignment corrections restarting
+                # the scenario, information overload after brief user replies,
+                # question stacking, and per-turn meta-commentary/praise.
                 dialogue_mode_behavior = (
                     "DIALOGUE MODE BEHAVIOR:\n"
+                    "\n"
+                    "A. CORE RULES\n"
                     "1. You are in Dialogue Mode. Interactive coaching and role-play are allowed.\n"
                     "2. If the user asks to role-play, actively simulate a realistic practice scenario step by step.\n"
-                    "3. Stay grounded in the provided program content and cite key framework elements when relevant.\n"
-                    "4. Ask concise follow-up questions during role-play to keep the interaction dynamic.\n"
-                    "5. Do not provide real-case clinical/safety determinations or supervisory decisions. "
+                    "3. Stay grounded in the provided program content. When answering direct content questions, cite key framework elements. During in-character role-play, apply the content silently; do not name framework terms through the character's mouth.\n"
+                    "4. Do not provide real-case clinical/safety determinations or supervisory decisions. "
                     "If asked for those, redirect to agency policy and supervisor consultation.\n"
-                    "6. Do not refuse role-play solely because it is a simulation; only refuse when it violates the safety constraint above."
+                    "5. Do not refuse role-play solely because it is a simulation; only refuse when it violates the safety constraint above.\n"
+                    "\n"
+                    "B. ROLE-PLAY CHARACTER REALISM\n"
+                    "1. When playing a staff member (caseworker, supervisee, etc.), speak only in plain, everyday workplace language that fits that character's role and experience level. The character must NOT use curriculum terminology, framework names, training vocabulary, or model-specific phrases (e.g., a caseworker would not say 'coaching mindset', 'holding environment', or 'Principles of Partnership'). Direct-service staff have not taken the supervisor's training.\n"
+                    "2. The character changes gradually and only in response to the user's demonstrated skill. Do not have the character reflect deeply, name their own thinking errors, or arrive at insight on their own. If the user's coaching move is weak, vague, or skips a step, the character stays stuck, deflects, gives a partial response, or pushes back - realistically, not theatrically.\n"
+                    "3. Never let the character coach themselves or volunteer the 'right answer'. Insight must be earned by the user across multiple turns, not granted after one good question.\n"
+                    "4. Sustain realistic resistance. Real staff rarely resolve deep concerns in a single conversation; partial agreement, lingering doubt, and 'I'll think about it' are appropriate outcomes.\n"
+                    "5. Default character difficulty is a realistic novice-to-emerging staff member. If the user requests a difficulty level (novice, emerging, or advanced staff), play that level consistently. Do not spontaneously escalate the character's maturity or self-awareness mid-scenario.\n"
+                    "6. If the user states their practice area or role (e.g., child protection, preventive, foster care, youth justice), tailor the scenario, character, and case details to that practice area. If the practice area is unknown and would change the scenario meaningfully, ask once during scenario setup.\n"
+                    "\n"
+                    "C. ROLE ASSIGNMENT STABILITY\n"
+                    "1. The user chooses who plays which role. The user does not have to play the supervisor - they may take any role (worker, supervisor, parent, foster parent, etc.) and assign you the rest. When the user assigns roles (e.g., 'you play the worker, I play the supervisor'), restate the assignment in one short line, then follow it exactly.\n"
+                    "2. If the user corrects the role assignment mid-scenario, comply exactly in your very next turn. Keep the same scenario, characters, and progress - do NOT restart, reset, or re-introduce the scene. Confirm the switch in one short line and continue from where the conversation left off.\n"
+                    "3. Never swap roles on your own. Only change roles when the user explicitly asks.\n"
+                    "\n"
+                    "D. CONVERSATION STYLE DURING ROLE-PLAY AND COACHING DIALOGUE\n"
+                    "1. Keep in-character turns short - typically 2 to 5 sentences - and roughly proportional to the length of the user's message. Do not deliver framework expositions inside a role-play turn.\n"
+                    "2. Ask at most ONE question per turn. Never stack multiple questions; wait for the user's answer before asking the next.\n"
+                    "3. Stay in character during role-play. Do not add per-turn meta-commentary, do not narrate which coaching step the user should perform next (e.g., 'How would you like to Clarify the Focus?'), and do not evaluate the user's moves mid-scene. Let the user drive the process. NEVER ask during a role-play whether the user wants to continue, pause, or stop - the interface already tells them they can pause or end at any time, and asking breaks the persona. The only exception: after a user-requested pause and your feedback, you may end with one short line asking whether to resume.\n"
+                    "4. Reserve longer, framework-grounded explanations for when the user asks a direct content question or explicitly requests explanation or feedback.\n"
+                    "5. Role-play is user-initiated. Do NOT end content answers with an offer or invitation to role-play, and do not propose practice scenarios unprompted. Answer the question and stop. Begin a role-play only when the user asks for one (e.g., 'let's role-play', 'can we practice', 'give me a scenario'); when they do, start it immediately without requiring any particular phrasing. If the user explicitly asks how to practice, briefly explain that they can start a role-play at any time by describing the scenario and who plays which role.\n"
+                    "6. On the FIRST turn of a new role-play, clearly separate setup from persona in this exact structure:\n"
+                    "   - a short section labeled 'Coach setup' (scenario + role assignment)\n"
+                    "   - then a divider line '---'\n"
+                    "   - then a section labeled 'In character' containing only in-character dialogue.\n"
+                    "   From the second role-play turn onward, stay only in character unless the user asks to pause.\n"
+                    "\n"
+                    "E. FEEDBACK AND PRAISE\n"
+                    "1. Provide skills feedback when the user asks for it or when a role-play concludes - not continuously during the scene.\n"
+                    "2. Keep praise infrequent, specific, and earned. Avoid superlatives ('perfect', 'textbook', 'sophisticated') and avoid praising routine moves. Name concretely what worked, what to strengthen, and one next step.\n"
+                    "3. When evaluating the user's skills, distinguish skill types and levels accurately per the program content (e.g., recognize both simple and complex/advanced reflections). Acknowledge advanced skills the user actually demonstrates; do not default to recommending only basic techniques.\n"
+                    "4. END SESSION objective: provide a strategic, macro-level evaluation of the user's overall supervisory performance across the entire current role-play session.\n"
+                    "5. Evidence + Content Connection rule: every evaluative point must explicitly link (a) one concrete observed user move (short quote or concise paraphrase) with (b) one relevant concept/target skill/framework from the training content. Never evaluate without evidence.\n"
+                    "6. Length rule: keep each bullet concise and highly readable, about 2 to 4 sentences; avoid long paragraphs and excessive sub-bullets.\n"
+                    "7. Use exactly these headings in this order for end-session output: Strengths, Area of Development, Next Step.\n"
+                    "8. Strengths: include 1 to 2 specific, effective behavioral patterns or dialogue choices the user applied; each bullet must weave evidence + content connection.\n"
+                    "9. Area of Development: include 1 to 2 systemic improvement areas or blind spots; each bullet must weave evidence + content connection. Strictly no praise, compliments, mitigating language, or positive reinforcement in this section.\n"
+                    "10. Next Step: recommend exactly one concrete forward-looking action/tool/framework for future practice (2 to 4 sentences). Do not evaluate, praise, or reference past performance in this section.\n"
+                    "\n"
+                    "F. ROLE-PLAY SESSION MARKERS (SYSTEM PROTOCOL - INVISIBLE TO THE USER)\n"
+                    "1. When your reply begins a NEW role-play scenario (your first in-character turn), output the exact token [[RP:START]] at the very beginning of your reply, before any other text.\n"
+                    "2. When the role-play permanently ends in this reply (the user asked to end or stop the role-play and you are delivering the closing assessment), output the exact token [[RP:END]] at the very beginning of your reply.\n"
+                    "3. Output no marker in any other situation. A pause is NOT an end: when the user says 'pause', step out of character, give brief feedback, and offer to resume - with no marker.\n"
+                    "4. Never mention, explain, or discuss these markers, and never place them anywhere except the very start of a reply. The system removes them before the user sees your reply."
                 )
                 if chatbot and chatbot.system_prompt_role and chatbot.system_prompt_guidelines:
                     clean_guidelines_text, tier3_guardrail_text = split_guidelines_and_tier3_prompt(
@@ -2528,6 +3352,7 @@ def chat():
                         f"{chatbot.system_prompt_role}\n\n"
                         f"{dialogue_mode_behavior}\n\n"
                         f"IMPORTANT GUIDELINES:\n{clean_guidelines_text}\n\n"
+                        f"{CONTENT_FIDELITY_PROMPT}\n\n"
                         f"{tier3_guardrail_text}\n\n"
                         f"CONTENT:\n{program_content.get(current_program, '')}"
                     )
@@ -2542,6 +3367,7 @@ def chat():
                         f"3. Be concise but thorough in your responses\n"
                         f"4. Maintain a professional and helpful tone\n"
                         f"5. If asked about something not covered in the content, do not make assumptions\n\n"
+                        f"{CONTENT_FIDELITY_PROMPT}\n\n"
                         f"{TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT}\n\n"
                         f"CONTENT:\n{program_content.get(current_program, '')}"
                     )
@@ -2554,8 +3380,141 @@ def chat():
                     role_label = "User" if msg["role"] == "user" else "Assistant"
                     history_text += f"{role_label}: {msg['content']}\n\n"
 
-                full_prompt = (
-                    f"{system_prompt}\n\n"
+                # Step 3b: Build the pinned session-opening block (see Step 1b).
+                # It precedes the recent history so the scenario frame set at
+                # the start of the session stays visible to the model even
+                # after those turns have rolled out of the recent window.
+                session_anchor_text = ""
+                if session_anchor_records:
+                    anchor_transcript = ""
+                    for record in session_anchor_records:
+                        if record.user_message:
+                            anchor_transcript += f"User: {record.user_message}\n\n"
+                        if record.bot_message:
+                            anchor_transcript += f"Assistant: {record.bot_message}\n\n"
+                    if anchor_transcript:
+                        session_anchor_text = (
+                            "SESSION OPENING (pinned):\n"
+                            "The exchanges below are from the beginning of this same "
+                            "conversation. They may establish the active scenario, role "
+                            "assignments, case facts, or difficulty level. Keep honoring "
+                            "them unless the user explicitly changed them later in the "
+                            "conversation -- later user corrections always take precedence.\n\n"
+                            f"{anchor_transcript}"
+                            "(Some intermediate exchanges are omitted. The most recent "
+                            "exchanges follow below.)\n\n"
+                        )
+
+                # Pause/end feedback must evaluate only the current role-play
+                # turns. If there is no substantive in-scene user coaching move
+                # yet, force neutral guidance (no praise/evaluation).
+                has_substantive_user_turn = False
+                for record in recent_history:
+                    user_turn = (record.user_message or "").strip()
+                    if not user_turn or is_non_substantive_roleplay_command(user_turn):
+                        continue
+                    normalized_turn = " ".join(user_turn.lower().split())
+                    if is_roleplay_start_request(normalized_turn):
+                        # Initial "let's role-play" setup prompt is not a
+                        # substantive in-scene coaching move.
+                        continue
+                    record_state = (getattr(record, "roleplay_state", None) or "").lower()
+                    if roleplay_columns_available:
+                        if record_state in ("active", "pause", "end"):
+                            has_substantive_user_turn = True
+                            break
+                        # If state is missing/empty but we are in an active
+                        # role-play timeline, treat meaningful user text as
+                        # substantive rather than forcing false negatives.
+                        if active_roleplay_session_id and record_state == "":
+                            has_substantive_user_turn = True
+                            break
+                    else:
+                        # Column-missing fallback: rely on session-scoped
+                        # history window + command filtering.
+                        has_substantive_user_turn = True
+                        break
+
+                # The prompt is split into a STATIC part (system_prompt: role,
+                # dialogue behavior, guidelines, guardrail text, and the full
+                # program CONTENT block) and a DYNAMIC part (pinned session
+                # opening + recent history + the new user turn). The static
+                # part is identical on every turn, so it is served from a
+                # Gemini context cache when available and only the dynamic
+                # part is transmitted per call. When no cache is available the
+                # two parts are concatenated into the same single prompt that
+                # was sent before this change.
+                # During an active role-play, tell the model explicitly that
+                # the transcript is the complete session so far, so it treats
+                # the opening scenario and role assignments as fully in effect.
+                roleplay_status_text = ""
+                if active_roleplay_session_id:
+                    omission_note = (
+                        " (some middle exchanges were omitted for length; the opening and the most recent exchanges are included)"
+                        if roleplay_transcript_trimmed else ""
+                    )
+                    roleplay_status_text = (
+                        f"ACTIVE ROLE-PLAY: A role-play is currently in progress. "
+                        f"The conversation history below is the complete role-play session so far{omission_note}. "
+                        f"Honor the scenario, role assignments, and case facts established in it.\n\n"
+                    )
+
+                pause_context_safety_text = ""
+                if is_pause_command:
+                    pause_context_safety_text = (
+                        "PAUSE FEEDBACK RULES (STRICT):\n"
+                        "- Output 3 to 5 lines only.\n"
+                        "- Provide tactical, immediate next-turn guidance only.\n"
+                        "- Focus on the current conversational friction point and one actionable hook.\n"
+                        "- Do NOT produce macro-level evaluation sections.\n"
+                        "- Do NOT output section headers like Strengths, Area of Development, or Next Step.\n"
+                    )
+                    if not has_substantive_user_turn:
+                        pause_context_safety_text += (
+                            "- In this case, avoid any performance praise and keep feedback neutral.\n"
+                        )
+                    pause_context_safety_text += "\n"
+
+                end_context_safety_text = ""
+                if is_end_command:
+                    end_context_safety_text = (
+                        "END SESSION (Post-Session Feedback) - STRICT REQUIREMENTS:\n"
+                        "Objective:\n"
+                        "- Provide a strategic, macro-level evaluation of the user's overall competencies across this full current session.\n"
+                        "Core directives:\n"
+                        "- Evidence + Content Connection is mandatory for every evaluative point.\n"
+                        "- Never evaluate without referencing what the user actually did/said.\n"
+                        "- Keep each bullet concise (2 to 4 sentences), readable, and not overly granular.\n"
+                        "Required format and constraints:\n"
+                        "Strengths:\n"
+                        "- Include 1 to 2 effective behavioral patterns/dialogue choices.\n"
+                        "- Each bullet must combine evidence + content connection.\n"
+                        "Area of Development:\n"
+                        "- Include 1 to 2 systemic improvement areas/blind spots.\n"
+                        "- Each bullet must combine evidence + content connection.\n"
+                        "- Strictly no praise, compliments, mitigating words, or positive reinforcement.\n"
+                        "Next Step:\n"
+                        "- Recommend exactly 1 concrete forward-looking action/tool/framework.\n"
+                        "- Strictly no evaluation/praise or past-performance commentary in this section.\n"
+                    )
+                    if not has_substantive_user_turn:
+                        end_context_safety_text += (
+                            "- No substantive in-scene move occurred: use the same required headings but keep feedback neutral and evidence-limited.\n"
+                        )
+                    if is_end_immediately_after_pause and roleplay_last_pause_feedback:
+                        pause_reuse_context = (roleplay_last_pause_feedback or "")[:1200]
+                        end_context_safety_text += (
+                            "- This end command came immediately after pause. Reuse the pause context below and output final summary only "
+                            "(do not duplicate long tactical pause coaching).\n\n"
+                            f"PAUSE FEEDBACK CONTEXT:\n{pause_reuse_context}\n"
+                        )
+                    end_context_safety_text += "\n"
+
+                dialogue_dynamic_prompt = (
+                    f"{roleplay_status_text}"
+                    f"{pause_context_safety_text}"
+                    f"{end_context_safety_text}"
+                    f"{session_anchor_text}"
                     f"CONVERSATION HISTORY:\n{history_text}"
                     f"User: {effective_user_message}"
                 )
@@ -2582,13 +3541,16 @@ def chat():
                     # gemini-3.1-flash-lite). These models do NOT use a ".0" suffix.
                     return "gemini-3" in (model_to_use or "").lower()
 
-                def build_agent_generation_config(model_to_use):
+                def build_agent_generation_config(model_to_use, cached_content=None):
                     # Gemini 3.x models have "thinking" enabled by default, and the
                     # thinking tokens are drawn from the same output token budget.
                     # A 3000-token cap can be fully consumed by thinking, producing
                     # an empty or MAX_TOKENS-truncated reply. For Gemini 3.x we give
                     # more headroom and request a lower thinking level so dialogue
                     # responses come back complete and cost stays controlled.
+                    # cached_content, when provided, points the call at the
+                    # Gemini context cache holding the static prompt block; it
+                    # is None on the uncached (legacy full-prompt) path.
                     if is_gemini_3_plus_model(model_to_use):
                         try:
                             return genai_types.GenerateContentConfig(
@@ -2597,6 +3559,7 @@ def chat():
                                 thinking_config=genai_types.ThinkingConfig(
                                     thinking_level="low"
                                 ),
+                                cached_content=cached_content,
                             )
                         except Exception:
                             # Older google-genai SDK without thinking_level support:
@@ -2604,36 +3567,83 @@ def chat():
                             return genai_types.GenerateContentConfig(
                                 max_output_tokens=8000,
                                 temperature=0.7,
+                                cached_content=cached_content,
                             )
                     return genai_types.GenerateContentConfig(
                         max_output_tokens=3000,
                         temperature=0.7,
+                        cached_content=cached_content,
                     )
 
-                def call_agent_model_with_retry(prompt_text, model_to_use, max_attempts=3):
+                def call_agent_model_with_retry(dynamic_prompt_text, model_to_use, max_attempts=3):
+                    """
+                    Call the model with the static prompt served from a Gemini
+                    context cache when available; otherwise send the legacy
+                    single full prompt (identical to pre-caching behavior).
+                    The cache is resolved per model because caches are
+                    model-specific, so the fallback model gets its own cache.
+                    Cache failures never surface to the user: any error on the
+                    cached path triggers an immediate uncached retry.
+                    """
                     last_error = None
                     for attempt in range(1, max_attempts + 1):
+                        # Gemini 3.x is only available on the Vertex AI "global"
+                        # endpoint; route those calls to the global client.
+                        agent_client = (
+                            gemini_client_global
+                            if is_gemini_3_plus_model(model_to_use)
+                            else gemini_client
+                        )
+                        cache_name, static_prompt_hash = get_or_create_dialogue_context_cache(
+                            agent_client, model_to_use, current_program, system_prompt
+                        )
                         try:
                             logger.info(
                                 f"Agent-mode model call attempt {attempt}/{max_attempts} "
-                                f"using model '{model_to_use}'"
+                                f"using model '{model_to_use}' "
+                                f"(context cache: {'on' if cache_name else 'off'})"
                             )
-                            # Gemini 3.x is only available on the Vertex AI "global"
-                            # endpoint; route those calls to the global client.
-                            agent_client = (
-                                gemini_client_global
-                                if is_gemini_3_plus_model(model_to_use)
-                                else gemini_client
-                            )
-                            model_response = agent_client.models.generate_content(
-                                model=model_to_use,
-                                contents=prompt_text,
-                                config=build_agent_generation_config(model_to_use)
-                            )
+                            if cache_name:
+                                model_response = agent_client.models.generate_content(
+                                    model=model_to_use,
+                                    contents=dynamic_prompt_text,
+                                    config=build_agent_generation_config(
+                                        model_to_use, cached_content=cache_name
+                                    )
+                                )
+                            else:
+                                model_response = agent_client.models.generate_content(
+                                    model=model_to_use,
+                                    contents=f"{system_prompt}\n\n{dynamic_prompt_text}",
+                                    config=build_agent_generation_config(model_to_use)
+                                )
                             return model_response
                         except Exception as model_error:
                             last_error = model_error
                             error_text = str(model_error)
+                            if cache_name and not is_transient_model_error(error_text):
+                                # A cache reference can go stale (server-side
+                                # expiry or eviction) and fail the call with a
+                                # non-transient error. Invalidate it and retry
+                                # once without the cache before giving up, so
+                                # a cache problem can never block a user.
+                                logger.warning(
+                                    f"Agent-mode call with context cache failed "
+                                    f"non-transiently ({error_text}). Invalidating "
+                                    f"cache and retrying uncached."
+                                )
+                                invalidate_dialogue_context_cache(
+                                    current_program, model_to_use, static_prompt_hash
+                                )
+                                try:
+                                    return agent_client.models.generate_content(
+                                        model=model_to_use,
+                                        contents=f"{system_prompt}\n\n{dynamic_prompt_text}",
+                                        config=build_agent_generation_config(model_to_use)
+                                    )
+                                except Exception as uncached_error:
+                                    last_error = uncached_error
+                                    error_text = str(uncached_error)
                             if attempt < max_attempts and is_transient_model_error(error_text):
                                 backoff_seconds = attempt
                                 logger.warning(
@@ -2643,12 +3653,12 @@ def chat():
                                 )
                                 time.sleep(backoff_seconds)
                                 continue
-                            raise
+                            raise last_error
                     if last_error:
                         raise last_error
 
                 try:
-                    response = call_agent_model_with_retry(full_prompt, model_name, max_attempts=3)
+                    response = call_agent_model_with_retry(dialogue_dynamic_prompt, model_name, max_attempts=3)
                 except Exception as primary_model_error:
                     primary_error_text = str(primary_model_error)
                     can_try_fallback = (
@@ -2660,11 +3670,141 @@ def chat():
                             f"Primary agent model '{model_name}' unavailable: {primary_error_text}. "
                             f"Falling back to '{fallback_model_name}'."
                         )
-                        response = call_agent_model_with_retry(full_prompt, fallback_model_name, max_attempts=2)
+                        response = call_agent_model_with_retry(dialogue_dynamic_prompt, fallback_model_name, max_attempts=2)
                     else:
                         raise
 
                 chatbot_reply = (response.text or "").strip()
+
+                # Role-play lifecycle: detect and strip hidden markers, then
+                # compute this exchange's session tag and the post-reply state.
+                chatbot_reply, roleplay_event = extract_roleplay_marker(chatbot_reply)
+                if roleplay_event == "start":
+                    # A new role-play begins (also supersedes any prior active
+                    # session, e.g. the user started a fresh scenario).
+                    roleplay_session_for_record = uuid.uuid4().hex
+                    roleplay_state_for_record = "start"
+                    roleplay_active_after = True
+                    chatbot_reply = normalize_roleplay_start_reply(chatbot_reply)
+                elif (roleplay_event == "end" or is_end_command):
+                    resolved_end_session_id = (
+                        active_roleplay_session_id or roleplay_session_id_from_session
+                    )
+                    roleplay_session_for_record = (
+                        None if resolved_end_session_id == "__session_fallback__"
+                        else resolved_end_session_id
+                    )
+                    roleplay_state_for_record = "end"
+                    roleplay_active_after = False
+                    if roleplay_event != "end":
+                        roleplay_event = "end"
+
+                    if has_substantive_user_turn:
+                        try:
+                            pause_reuse_line = ""
+                            if is_end_immediately_after_pause and roleplay_last_pause_feedback:
+                                pause_line = _build_pause_reuse_snippet(roleplay_last_pause_feedback)
+                                if pause_line:
+                                    pause_reuse_line = f"\nPause checkpoint to reuse: {pause_line}\n"
+
+                            structured_end_prompt = (
+                                "Return ONLY valid JSON (no markdown, no code fences) with this exact schema:\n"
+                                "{\n"
+                                "  \"strengths\": [\"...\", \"...\"],\n"
+                                "  \"area_of_development\": [\"...\"],\n"
+                                "  \"next_step\": \"...\"\n"
+                                "}\n\n"
+                                "Rules:\n"
+                                "- strengths: 1-2 bullets, each 2-4 sentences, each must include (a) evidence from user dialogue and "
+                                "(b) explicit content/framework connection.\n"
+                                "- area_of_development: 1-2 bullets, each 2-4 sentences, each must include evidence + content connection, "
+                                "and must contain no praise/compliments.\n"
+                                "- next_step: exactly 1 action-focused item, 2-4 sentences, future-oriented only, no past-performance evaluation.\n"
+                                "- Use only evidence from THIS current role-play session transcript.\n"
+                                "- Keep wording concise and readable.\n"
+                                f"{pause_reuse_line}"
+                                f"SESSION TRANSCRIPT:\n{history_text}User: {effective_user_message}\n"
+                            )
+
+                            structured_response = call_agent_model_with_retry(
+                                structured_end_prompt,
+                                model_name,
+                                max_attempts=2
+                            )
+                            structured_payload = _extract_json_object(getattr(structured_response, "text", ""))
+                            is_valid_payload, payload_issues, normalized_payload = validate_end_feedback_payload(structured_payload)
+
+                            if not is_valid_payload:
+                                repair_prompt = (
+                                    "Fix the JSON payload below to satisfy ALL validation errors. "
+                                    "Return ONLY corrected JSON object, no prose.\n\n"
+                                    f"Validation errors: {', '.join(payload_issues)}\n"
+                                    f"Original payload: {json.dumps(structured_payload or {}, ensure_ascii=False)}\n"
+                                )
+                                repaired_response = call_agent_model_with_retry(
+                                    repair_prompt,
+                                    model_name,
+                                    max_attempts=1
+                                )
+                                repaired_payload = _extract_json_object(getattr(repaired_response, "text", ""))
+                                is_valid_payload, payload_issues, normalized_payload = validate_end_feedback_payload(repaired_payload)
+
+                            if is_valid_payload and normalized_payload:
+                                chatbot_reply = format_end_feedback_payload(normalized_payload)
+                            else:
+                                logger.warning(
+                                    "Structured end feedback validation failed; using fallback formatter. Issues: %s",
+                                    payload_issues
+                                )
+                        except Exception as structured_end_error:
+                            logger.warning(
+                                "Structured end feedback generation failed; falling back. Error: %s",
+                                str(structured_end_error)
+                            )
+
+                    chatbot_reply = enforce_end_response_tone(
+                        chatbot_reply,
+                        has_substantive_user_turn=has_substantive_user_turn,
+                        pause_feedback_text=roleplay_last_pause_feedback,
+                        immediate_after_pause=is_end_immediately_after_pause
+                    )
+                elif is_pause_command and active_roleplay_session_id:
+                    roleplay_session_for_record = (
+                        None if active_roleplay_session_id == "__session_fallback__"
+                        else active_roleplay_session_id
+                    )
+                    roleplay_state_for_record = (
+                        None if active_roleplay_session_id == "__session_fallback__"
+                        else "pause"
+                    )
+                    roleplay_active_after = True
+                    chatbot_reply = enforce_pause_response_tone(
+                        chatbot_reply,
+                        has_substantive_user_turn=has_substantive_user_turn
+                    )
+                elif (not active_roleplay_session_id and is_roleplay_start_request(normalized_user_message)):
+                    # Fallback start detection when the model forgets to emit
+                    # [[RP:START]] but the user clearly requested role-play.
+                    roleplay_session_for_record = uuid.uuid4().hex
+                    roleplay_state_for_record = "start"
+                    roleplay_active_after = True
+                    roleplay_event = "start"
+                    chatbot_reply = normalize_roleplay_start_reply(chatbot_reply)
+                elif active_roleplay_session_id:
+                    roleplay_session_for_record = (
+                        None if active_roleplay_session_id == "__session_fallback__"
+                        else active_roleplay_session_id
+                    )
+                    roleplay_state_for_record = (
+                        None if active_roleplay_session_id == "__session_fallback__"
+                        else "active"
+                    )
+                    roleplay_active_after = True
+                else:
+                    roleplay_event = None
+                    roleplay_session_for_record = None
+                    roleplay_state_for_record = None
+                    roleplay_active_after = False
                 if not chatbot_reply:
                     chatbot_reply = (
                         "I'm having trouble generating a response right now. "
@@ -2680,10 +3820,10 @@ def chat():
                         f"Agent-mode response was truncated due to token limit for "
                         f"question: {user_message[:50]}..."
                     )
+                    # The completion prompt extends the same dynamic block, so
+                    # it reuses the identical static prompt (and its cache).
                     completion_prompt = (
-                        f"{system_prompt}\n\n"
-                        f"CONVERSATION HISTORY:\n{history_text}"
-                        f"User: {effective_user_message}\n"
+                        f"{dialogue_dynamic_prompt}\n"
                         f"Assistant: {chatbot_reply}\n"
                         f"User: Continue the previous response from the exact cutoff point. "
                         f"Do not restart. Finish with a concise, complete ending."
@@ -2766,6 +3906,7 @@ def chat():
                         system_prompt = (
                             f"{chatbot.system_prompt_role}\n\n"
                             f"IMPORTANT GUIDELINES:\n{clean_guidelines_text}\n\n"
+                            f"{CONTENT_FIDELITY_PROMPT}\n\n"
                             f"{tier3_guardrail_text}\n\n"
                             f"CONTENT:\n{program_content.get(current_program, '')}"
                         )
@@ -2778,6 +3919,8 @@ IMPORTANT GUIDELINES:
 3. Be concise but thorough in your responses
 4. Maintain a professional and helpful tone
 5. If asked about something not covered in the content, do not make assumptions
+
+{CONTENT_FIDELITY_PROMPT}
 
 {TIER3_SAFETY_GUARDRAIL_DEFAULT_PROMPT}
 
@@ -2833,6 +3976,12 @@ User: Please complete your previous response with a brief conclusion."""
         total_time = time.time() - start_time
         logger.info(f"Cache performance: {cache_result} in {total_time:.3f} seconds (mode={chatbot_mode})")
 
+        # Defensive cleanup: role-play markers must never reach the user,
+        # regardless of which path produced the reply (including completion
+        # continuations and Knowledge Retrieval mode).
+        if ROLEPLAY_START_MARKER in (chatbot_reply or "") or ROLEPLAY_END_MARKER in (chatbot_reply or ""):
+            chatbot_reply = chatbot_reply.replace(ROLEPLAY_START_MARKER, "").replace(ROLEPLAY_END_MARKER, "").strip()
+
         # Parse markdown in the response
         html_reply = parse_markdown(chatbot_reply)
 
@@ -2840,15 +3989,20 @@ User: Please complete your previous response with a brief conclusion."""
         guardrail_tier, guardrail_rule_name = get_guardrail_metadata_for_chat_record(
             chatbot_reply=chatbot_reply
         )
-        chat_entry = ChatHistory(
-            user_id=user_id,
-            program_code=current_program,
-            user_message=user_message,
-            bot_message=chatbot_reply,
-            guardrail_tier=guardrail_tier,
-            guardrail_rule_name=guardrail_rule_name,
-            timestamp=datetime.now(timezone.utc).replace(tzinfo=None)  # Store as UTC without timezone info
-        )
+        chat_entry_kwargs = {
+            "user_id": user_id,
+            "program_code": current_program,
+            "user_message": user_message,
+            "bot_message": chatbot_reply,
+            "guardrail_tier": guardrail_tier,
+            "guardrail_rule_name": guardrail_rule_name,
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),  # Store as UTC without timezone info
+        }
+        if hasattr(ChatHistory, "roleplay_session_id"):
+            chat_entry_kwargs["roleplay_session_id"] = roleplay_session_for_record
+        if hasattr(ChatHistory, "roleplay_state"):
+            chat_entry_kwargs["roleplay_state"] = roleplay_state_for_record
+        chat_entry = ChatHistory(**chat_entry_kwargs)
         db.add(chat_entry)
         db.commit()
         
@@ -2865,6 +4019,39 @@ User: Please complete your previous response with a brief conclusion."""
 
         # Calculate remaining questions after this interaction
         remaining_questions = max(0, quota - (message_count + 1))
+        # UI notice comes from backend state computation only. The frontend
+        # should render this notice but never decide role-play state itself.
+        roleplay_notice = None
+        if roleplay_event == "start":
+            roleplay_notice = "start"
+        elif roleplay_event == "end":
+            roleplay_notice = "end"
+        elif roleplay_active_after and is_pause_command:
+            roleplay_notice = "pause"
+
+        # Include per-message auto-delete metadata so new bubbles show the
+        # deletion badge immediately without requiring a page refresh.
+        deletion_info = get_chat_deletion_info(chat_entry.timestamp, current_program)
+        session[roleplay_session_key] = bool(roleplay_active_after)
+        if roleplay_event == "start" and roleplay_session_for_record:
+            session[roleplay_session_id_key] = roleplay_session_for_record
+            session[roleplay_started_at_key] = chat_entry.timestamp.isoformat()
+            session[roleplay_last_action_key] = "start"
+            session.pop(roleplay_last_pause_feedback_key, None)
+        elif roleplay_event == "end":
+            session.pop(roleplay_session_id_key, None)
+            session.pop(roleplay_started_at_key, None)
+            session[roleplay_last_action_key] = "end"
+            session.pop(roleplay_last_pause_feedback_key, None)
+        elif roleplay_active_after and roleplay_session_for_record:
+            session[roleplay_session_id_key] = roleplay_session_for_record
+            if not session.get(roleplay_started_at_key):
+                session[roleplay_started_at_key] = chat_entry.timestamp.isoformat()
+            if roleplay_notice == "pause":
+                session[roleplay_last_action_key] = "pause"
+                session[roleplay_last_pause_feedback_key] = chatbot_reply[:2000]
+            else:
+                session[roleplay_last_action_key] = "active"
         
         logger.info(f"Interaction complete. User {user_id} has {remaining_questions} questions remaining for {current_program}")
 
@@ -2872,7 +4059,11 @@ User: Please complete your previous response with a brief conclusion."""
             "reply": chatbot_reply,
             "html_reply": html_reply,
             "remaining_questions": remaining_questions,
-            "quota": quota
+            "quota": quota,
+            "roleplay_active": roleplay_active_after,
+            "roleplay_event": roleplay_event,
+            "roleplay_notice": roleplay_notice,
+            "deletion_info": deletion_info
         })
 
     except Exception as e:
@@ -2890,6 +4081,12 @@ def clear_chat_history():
     # Prefer explicit request payload; fallback to session for robustness.
     data = request.get_json(silent=True) or {}
     program_code = (data.get('program') or session.get('current_program') or "").strip().upper()
+    if program_code:
+        session.pop(f"roleplay_active_{program_code}", None)
+        session.pop(f"roleplay_session_id_{program_code}", None)
+        session.pop(f"roleplay_started_at_{program_code}", None)
+        session.pop(f"roleplay_last_action_{program_code}", None)
+        session.pop(f"roleplay_last_pause_feedback_{program_code}", None)
 
     if not program_code:
         logger.error("Program code not provided in clear_chat_history request.")
@@ -7034,7 +8231,7 @@ def get_chat_deletion_info(chat_timestamp, program_code):
         days_until_deletion = (deletion_date - datetime.utcnow()).days
         
         return {
-            'deletion_date': deletion_date,
+            'deletion_date': deletion_date.strftime('%Y-%m-%d'),
             'days_until_deletion': days_until_deletion,
             'auto_delete_days': chatbot.auto_delete_days
         }

@@ -558,6 +558,41 @@ class ChatHistory(Base):
 Base.metadata.create_all(bind=engine)
 
 
+def ensure_chat_history_roleplay_columns():
+    """
+    Add role-play metadata columns for existing databases.
+    Safe no-op when columns already exist.
+    """
+    inspector = inspect(engine)
+    try:
+        existing_columns = {col["name"] for col in inspector.get_columns("chat_history")}
+    except Exception:
+        return
+
+    statements = []
+    needs_session_index = False
+    if "roleplay_session_id" not in existing_columns:
+        statements.append("ALTER TABLE chat_history ADD COLUMN roleplay_session_id VARCHAR(64)")
+        needs_session_index = True
+    if "roleplay_state" not in existing_columns:
+        statements.append("ALTER TABLE chat_history ADD COLUMN roleplay_state VARCHAR(16)")
+
+    if not statements and "roleplay_session_id" in existing_columns:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        # Keep lookup fast in long-running dialogue mode role-play sessions.
+        if needs_session_index or "roleplay_session_id" in existing_columns:
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_history_roleplay_session_id "
+                    "ON chat_history (roleplay_session_id)"
+                )
+            )
+
+
 def ensure_chat_history_guardrail_columns():
     """
     Add guardrail metadata columns for existing databases.
@@ -583,6 +618,7 @@ def ensure_chat_history_guardrail_columns():
             connection.execute(text(statement))
 
 
+ensure_chat_history_roleplay_columns()
 ensure_chat_history_guardrail_columns()
 
 # Database session management

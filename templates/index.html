@@ -892,41 +892,59 @@
         }
     }
 
-    function initRoleplayStateFromHistory() {
+    function getLatestBotRoleplayStateFromHistory() {
+        const tagged = Array.from(chatBox.querySelectorAll('.message[data-roleplay-state]'))
+            .filter((messageDiv) => {
+                return messageDiv.classList.contains('bot') ||
+                       messageDiv.getAttribute('data-sender') === 'bot';
+            });
+        if (!tagged.length) return '';
+        return (tagged[tagged.length - 1].getAttribute('data-roleplay-state') || '').toLowerCase();
+    }
+
+    function resolveInitialRoleplayBannerState(inferredRoleplayActive) {
+        const latestTaggedState = getLatestBotRoleplayStateFromHistory();
+        if (latestTaggedState) {
+            return latestTaggedState === 'start' ||
+                   latestTaggedState === 'active' ||
+                   latestTaggedState === 'pause';
+        }
+
+        if (typeof inferredRoleplayActive === 'boolean') {
+            return inferredRoleplayActive;
+        }
+
         if (roleplayActiveFromServer === 1) {
-            setRoleplayBanner(true);
-            return;
+            return true;
         }
-        // On page load, restore the banner from the last recorded role-play
-        // state: active if the most recent state-tagged message is not 'end'.
-        const tagged = chatBox.querySelectorAll('[data-roleplay-state]');
-        if (tagged.length > 0) {
-            const lastState = tagged[tagged.length - 1].getAttribute('data-roleplay-state');
-            setRoleplayBanner(lastState === 'start' || lastState === 'active' || lastState === 'pause');
-            return;
-        }
+
         try {
-            const stored = localStorage.getItem(roleplayStorageKey);
-            if (stored === '1') {
-                setRoleplayBanner(true);
-            }
+            return localStorage.getItem(roleplayStorageKey) === '1';
         } catch (e) {
-            // Ignore storage failures
+            return false;
         }
     }
 
     function getRoleplayTextSignals(textValue) {
         const text = (textValue || '').trim();
         const lower = text.toLowerCase();
+        const hasStructuredEndHeadings =
+            lower.includes('strengths:') &&
+            lower.includes('area of development:') &&
+            lower.includes('next step:');
         return {
             startShape: lower.includes('coach setup') && lower.includes('in character'),
             pauseShape: lower.includes('would you like to resume the role-play') ||
                         lower.includes('role-play paused') ||
+                        lower.includes('role-play is paused') ||
+                        lower.includes('resume in character from this exact point') ||
                         lower.includes('for your next move'),
             endShape: lower.includes('role-play ended') ||
+                      lower.includes('feedback mode resumed') ||
                       lower.includes('role-play has concluded') ||
                       lower.includes('would you like to continue this scenario later') ||
-                      lower.includes('assessment of the coaching skills'),
+                      lower.includes('assessment of the coaching skills') ||
+                      hasStructuredEndHeadings,
             inCharacterShape: /^["“(]/.test(text) ||
                               lower.includes('how would you like to respond'),
         };
@@ -942,16 +960,20 @@
             const paragraph = messageDiv.querySelector('p');
             const signals = getRoleplayTextSignals(paragraph ? paragraph.textContent : '');
 
+            if (isBot) {
+                messageDiv.classList.remove('roleplay', 'roleplay-feedback', 'roleplay-feedback-end');
+            }
+
             // Fallback inference for old history rows that have no role-play state.
             if (!state && isBot) {
                 if (!active && signals.startShape) {
                     state = 'start';
                     messageDiv.setAttribute('data-roleplay-state', state);
+                } else if (signals.endShape) {
+                    state = 'end';
+                    messageDiv.setAttribute('data-roleplay-state', state);
                 } else if (active && signals.pauseShape) {
                     state = 'pause';
-                    messageDiv.setAttribute('data-roleplay-state', state);
-                } else if (active && signals.endShape) {
-                    state = 'end';
                     messageDiv.setAttribute('data-roleplay-state', state);
                 } else if (active && signals.inCharacterShape) {
                     state = 'active';
@@ -1082,7 +1104,6 @@
     
     // Initial scroll to bottom and rendering of existing messages
     document.addEventListener('DOMContentLoaded', () => {
-        initRoleplayStateFromHistory();
         // Process intro message with Markdown
         const introMessageElement = document.getElementById('intro-message');
         const introContent = introMessageElement.getAttribute('data-content');
@@ -1140,9 +1161,8 @@
         });
         const inferredRoleplayActive = applyRoleplayStylesFromStateTags();
         rebuildRoleplayDividersFromHistory();
-        if (roleplayActiveFromServer === 1 || inferredRoleplayActive) {
-            setRoleplayBanner(true);
-        }
+        const initialRoleplayActive = resolveInitialRoleplayBannerState(inferredRoleplayActive);
+        setRoleplayBanner(initialRoleplayActive);
         
         // Set initial state for questions remaining indicator
         const initialRemaining = parseInt('{{ remaining_questions }}');

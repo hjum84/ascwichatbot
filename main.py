@@ -3166,9 +3166,15 @@ def chat():
                 active_roleplay_session_id = get_active_roleplay_session(
                     db, user_id, current_program
                 )
-                if not active_roleplay_session_id and roleplay_active_from_session:
-                    # DB/session mismatch fallback (e.g., role-play columns not
-                    # available yet): keep role-play UI active server-side.
+                if (
+                    not active_roleplay_session_id and
+                    roleplay_active_from_session and
+                    not roleplay_columns_available
+                ):
+                    # Session-only fallback is safe only when DB role-play
+                    # columns are unavailable. If columns are available, DB is
+                    # the source of truth and stale session flags must not
+                    # reactivate role-play state.
                     active_roleplay_session_id = roleplay_session_id_from_session or "__session_fallback__"
                 roleplay_transcript_trimmed = False
                 if (

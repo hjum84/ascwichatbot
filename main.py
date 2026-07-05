@@ -321,6 +321,20 @@ def _extract_actionable_sentences(text_value):
             continue
         if re.search(r'(?i)\b(strengths?|area of development|next step)\b', sentence):
             continue
+        # Drop in-character artifacts that can leak from role-play persona
+        # output: stage directions like "(I lean forward...)" / "*smiles*"
+        # and lines that are entirely quoted character dialogue. Both callers
+        # (pause and end fallback) already have safe defaults when this
+        # filter leaves the list empty.
+        if re.match(r'^\s*[\(\*]', sentence):
+            continue
+        stripped_sentence = sentence.strip()
+        if (
+            len(stripped_sentence) >= 2 and
+            stripped_sentence[0] in ('"', '\u201c') and
+            stripped_sentence[-1] in ('"', '\u201d')
+        ):
+            continue
         filtered.append(sentence)
     return filtered
 
@@ -562,10 +576,10 @@ def validate_end_feedback_payload(payload):
         "next_step": next_step
     }
 
-    if not (1 <= len(strengths) <= 2):
-        issues.append("strengths must contain 1-2 bullets")
-    if not (1 <= len(area) <= 2):
-        issues.append("area_of_development must contain 1-2 bullets")
+    if not (1 <= len(strengths) <= 3):
+        issues.append("strengths must contain 1-3 bullets")
+    if not (1 <= len(area) <= 3):
+        issues.append("area_of_development must contain 1-3 bullets")
     if not next_step:
         issues.append("next_step must be non-empty")
 
@@ -3412,8 +3426,8 @@ def chat():
                     "5. Evidence + Content Connection rule: every evaluative point must explicitly link (a) one concrete observed user move (short quote or concise paraphrase) with (b) one relevant concept/target skill/framework from the training content. Never evaluate without evidence.\n"
                     "6. Length rule: keep each bullet concise and highly readable, about 2 to 4 sentences; avoid long paragraphs and excessive sub-bullets.\n"
                     "7. Use exactly these headings in this order for end-session output: Strengths, Area of Development, Next Step.\n"
-                    "8. Strengths: include 1 to 2 specific, effective behavioral patterns or dialogue choices the user applied; each bullet must weave evidence + content connection.\n"
-                    "9. Area of Development: include 1 to 2 systemic improvement areas or blind spots; each bullet must weave evidence + content connection. Strictly no praise, compliments, mitigating language, or positive reinforcement in this section.\n"
+                    "8. Strengths: include 1 to 3 specific, effective behavioral patterns or dialogue choices the user applied; each bullet must weave evidence + content connection. Add a 2nd or 3rd bullet ONLY when it is supported by distinct evidence from this session; never pad to fill the count.\n"
+                    "9. Area of Development: include 1 to 3 systemic improvement areas or blind spots; each bullet must weave evidence + content connection. Add a 2nd or 3rd bullet ONLY when it is supported by distinct evidence from this session; never pad to fill the count. Strictly no praise, compliments, mitigating language, or positive reinforcement in this section.\n"
                     "10. Next Step: recommend exactly one concrete forward-looking action/tool/framework for future practice (2 to 4 sentences). Do not evaluate, praise, or reference past performance in this section.\n"
                     "\n"
                     "F. ROLE-PLAY SESSION MARKERS (SYSTEM PROTOCOL - INVISIBLE TO THE USER)\n"
@@ -3531,16 +3545,51 @@ def chat():
                         " (some middle exchanges were omitted for length; the opening and the most recent exchanges are included)"
                         if roleplay_transcript_trimmed else ""
                     )
-                    roleplay_status_text = (
-                        f"ACTIVE ROLE-PLAY: A role-play is currently in progress. "
-                        f"The conversation history below is the complete role-play session so far{omission_note}. "
-                        f"Honor the scenario, role assignments, and case facts established in it.\n\n"
-                    )
+                    if is_pause_command:
+                        # Pause turn: neutralize the "honor role assignments"
+                        # pressure so the model can exit the persona cleanly
+                        # before the PAUSE FEEDBACK RULES below take over.
+                        roleplay_status_text = (
+                            f"ROLE-PLAY PAUSED: A role-play session exists in the history below, "
+                            f"but it is paused for feedback in this turn. "
+                            f"Do NOT speak as any in-scene character in this turn. "
+                            f"The conversation history below is the complete role-play session so far{omission_note}.\n\n"
+                        )
+                    elif (
+                        roleplay_last_action_from_session == "pause"
+                        and not is_end_command
+                    ):
+                        # First turn after a pause: force re-entry into the
+                        # assigned in-scene persona so the neutral observer
+                        # tone from the pause feedback does not leak forward.
+                        # The session flag flips to "active" after this turn,
+                        # so this branch fires exactly once per pause.
+                        roleplay_status_text = (
+                            f"RESUMING ROLE-PLAY: The role-play was paused for feedback and the user "
+                            f"is now resuming. Return to your assigned in-scene character IMMEDIATELY "
+                            f"in this turn. Do NOT continue as the coaching observer, do NOT summarize "
+                            f"the pause feedback, and do NOT re-introduce the scene. Continue the scene "
+                            f"from the exact point before the pause. "
+                            f"The conversation history below is the complete role-play session so far{omission_note}. "
+                            f"Honor the scenario, role assignments, and case facts established in it.\n\n"
+                        )
+                    else:
+                        roleplay_status_text = (
+                            f"ACTIVE ROLE-PLAY: A role-play is currently in progress. "
+                            f"The conversation history below is the complete role-play session so far{omission_note}. "
+                            f"Honor the scenario, role assignments, and case facts established in it.\n\n"
+                        )
 
                 pause_context_safety_text = ""
                 if is_pause_command:
                     pause_context_safety_text = (
                         "PAUSE FEEDBACK RULES (STRICT):\n"
+                        "- STEP OUT OF CHARACTER NOW. Stop speaking as ANY in-scene character, "
+                        "whatever role you were assigned in this role-play (worker, supervisor, "
+                        "parent, foster parent, or any other). Respond only as a neutral coaching "
+                        "observer describing the scene in third person.\n"
+                        "- Do NOT write in-character dialogue lines, quoted speech, or stage "
+                        "directions (e.g., parenthetical actions such as '(I lean forward)').\n"
                         "- Output 3 to 5 lines only.\n"
                         "- Provide tactical, immediate next-turn guidance only.\n"
                         "- Focus on the current conversational friction point and one actionable hook.\n"
@@ -3557,6 +3606,11 @@ def chat():
                 if is_end_command:
                     end_context_safety_text = (
                         "END SESSION (Post-Session Feedback) - STRICT REQUIREMENTS:\n"
+                        "Persona:\n"
+                        "- STEP OUT OF CHARACTER NOW. Stop speaking as ANY in-scene character, "
+                        "whatever role you were assigned in this role-play. Write the evaluation "
+                        "only as a neutral coaching evaluator; no in-character dialogue, no quoted "
+                        "speech delivered as the character, no stage directions.\n"
                         "Objective:\n"
                         "- Provide a strategic, macro-level evaluation of the user's overall competencies across this full current session.\n"
                         "Core directives:\n"
@@ -3565,10 +3619,12 @@ def chat():
                         "- Keep each bullet concise (2 to 4 sentences), readable, and not overly granular.\n"
                         "Required format and constraints:\n"
                         "Strengths:\n"
-                        "- Include 1 to 2 effective behavioral patterns/dialogue choices.\n"
+                        "- Include 1 to 3 effective behavioral patterns/dialogue choices.\n"
+                        "- Add a 2nd or 3rd bullet ONLY when it is supported by distinct evidence; never pad.\n"
                         "- Each bullet must combine evidence + content connection.\n"
                         "Area of Development:\n"
-                        "- Include 1 to 2 systemic improvement areas/blind spots.\n"
+                        "- Include 1 to 3 systemic improvement areas/blind spots.\n"
+                        "- Add a 2nd or 3rd bullet ONLY when it is supported by distinct evidence; never pad.\n"
                         "- Each bullet must combine evidence + content connection.\n"
                         "- Strictly no praise, compliments, mitigating words, or positive reinforcement.\n"
                         "Next Step:\n"
@@ -3793,10 +3849,12 @@ def chat():
                                 "  \"next_step\": \"...\"\n"
                                 "}\n\n"
                                 "Rules:\n"
-                                "- strengths: 1-2 bullets, each 2-4 sentences, each must include (a) evidence from user dialogue and "
-                                "(b) explicit content/framework connection.\n"
-                                "- area_of_development: 1-2 bullets, each 2-4 sentences, each must include evidence + content connection, "
-                                "and must contain no praise/compliments.\n"
+                                "- strengths: 1-3 bullets, each 2-4 sentences, each must include (a) evidence from user dialogue and "
+                                "(b) explicit content/framework connection. Add a 2nd or 3rd bullet ONLY when supported by "
+                                "distinct evidence from the transcript; never pad to reach 3.\n"
+                                "- area_of_development: 1-3 bullets, each 2-4 sentences, each must include evidence + content connection, "
+                                "and must contain no praise/compliments. Add a 2nd or 3rd bullet ONLY when supported by "
+                                "distinct evidence from the transcript; never pad to reach 3.\n"
                                 "- next_step: exactly 1 action-focused item, 2-4 sentences, future-oriented only, no past-performance evaluation.\n"
                                 "- Use only evidence from THIS current role-play session transcript.\n"
                                 "- Keep wording concise and readable.\n"

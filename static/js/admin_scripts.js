@@ -652,6 +652,19 @@ document.addEventListener('DOMContentLoaded', function() {
             modalTitle.textContent = 'Edit Content for ' + chatbotDisplayName;
             contentTextarea.value = 'Loading content...';
             hiddenChatbotNameInput.value = chatbotCode;
+
+            // Reset any stale preview state left over from a previous edit
+            // session (this chatbot or another one). Without this, an old
+            // combined file preview stays populated and could be submitted
+            // by Save — including into a DIFFERENT chatbot than the one it
+            // was generated for.
+            const stalePreviewSection = document.getElementById('edit-preview-section');
+            if (stalePreviewSection) stalePreviewSection.style.display = 'none';
+            const staleCombinedPreview = document.getElementById('edit-combined-preview');
+            if (staleCombinedPreview) staleCombinedPreview.value = '';
+            const currentContentTabBtn = document.getElementById('current-content-tab');
+            if (currentContentTabBtn) currentContentTabBtn.click();
+
             editContentModal.show();
 
             console.log("Fetching content for chatbot:", chatbotCode);
@@ -723,7 +736,17 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateCharCount() {
         const content = document.getElementById('chatbotContentTextarea').value;
         const count = content.length;
-        document.getElementById('currentCharCount').textContent = count.toLocaleString();
+        const counterEl = document.getElementById('currentCharCount');
+        counterEl.textContent = count.toLocaleString();
+        // Color the live counter against the configured limit so headroom
+        // (or overflow) is visible BEFORE Save is clicked.
+        const limitInput = document.getElementById('editCharLimit');
+        const limit = limitInput ? parseInt(limitInput.value) : NaN;
+        if (!isNaN(limit)) {
+            counterEl.style.color = count > limit ? '#dc3545'
+                : (count > limit * 0.95 ? '#fd7e14' : '');
+            counterEl.style.fontWeight = count > limit ? 'bold' : '';
+        }
     }
 
     // Add character count update on input
@@ -758,8 +781,18 @@ document.addEventListener('DOMContentLoaded', function() {
         // Log what content we're using
         console.log("Save button clicked for chatbot:", chatbotCode);
         
-        // Case 1: Using preview content if available and visible
-        if (editPreviewSection && editPreviewSection.style.display !== 'none' && 
+        // Case 1: Use the combined preview ONLY when the user is actually
+        // looking at it — i.e., the Upload New Files tab is the active tab
+        // AND the preview section is shown. Checking style.display alone was
+        // a bug: after switching back to the Current Content tab, the preview
+        // section keeps display:block inside the hidden tab pane, so Save
+        // silently submitted the stale (longer) combined preview instead of
+        // the textarea content the user was viewing.
+        const uploadFilesPanel = document.getElementById('upload-files-panel');
+        const previewIsVisibleToUser = editPreviewSection &&
+            editPreviewSection.style.display !== 'none' &&
+            uploadFilesPanel && uploadFilesPanel.classList.contains('active');
+        if (previewIsVisibleToUser &&
             editCombinedPreview && editCombinedPreview.value) {
             newContent = editCombinedPreview.value;
             console.log("Using edited content from preview tab, length:", newContent.length);
@@ -894,7 +927,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     // Add event handlers for the action buttons
                     statusMsg.querySelector('.increase-limit-btn').addEventListener('click', function() {
-                        const newLimit = Math.min(parseInt(charLimit) + 10000, 200000);
+                        const newLimit = Math.min(parseInt(charLimit) + 10000, 250000);
                         document.getElementById('editCharLimit').value = newLimit;
                         document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
                         statusMsg.remove();
@@ -939,7 +972,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add event listener for the edit increase limit button
     document.getElementById('edit-increase-limit-btn').addEventListener('click', function() {
         const currentLimit = parseInt(document.getElementById('editCharLimit').value);
-        const newLimit = Math.min(currentLimit + 10000, 200000);
+        const newLimit = Math.min(currentLimit + 10000, 250000);
         document.getElementById('editCharLimit').value = newLimit;
         document.getElementById('charLimitDisplay').textContent = newLimit.toLocaleString();
         bootstrap.Modal.getInstance(document.getElementById('editWarningModal')).hide();
@@ -2172,7 +2205,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const charLimitInput = document.getElementById('char_limit');
         
         // 최대 100,000까지 10,000씩 증가
-        const newLimit = Math.min(currentLimit + 10000, 200000);
+        const newLimit = Math.min(currentLimit + 10000, 250000);
         
         // 입력 필드와 표시 값 모두 업데이트
         charLimitInput.value = newLimit;
@@ -2414,22 +2447,39 @@ document.addEventListener('DOMContentLoaded', function() {
         const searchTerm = document.getElementById('searchConvoInput').value.trim();
         const chatbotCode = document.getElementById('chatbotConvoFilter').value;
         const userId = document.getElementById('userConvoFilter').value;
-        
-        // Build the URL with the filter parameters
-        let url = '/admin?';
-        if (searchTerm) url += `search_term=${encodeURIComponent(searchTerm)}&`;
-        if (chatbotCode) url += `chatbot_code=${encodeURIComponent(chatbotCode)}&`;
-        if (userId) url += `user_id=${encodeURIComponent(userId)}&`;
-        
-        // Set the hash to ensure we go to the right tab
-        url += '#data-mgmt-content-convo-logs';
-        
-        // Navigate to the filtered URL
-        window.location.href = url;
+
+        const currentParams = new URLSearchParams(window.location.search);
+        const perPage = currentParams.get('per_page') || '10';
+        const params = new URLSearchParams();
+
+        // Always reset to page 1 when filters change.
+        params.set('page', '1');
+        params.set('per_page', perPage);
+
+        if (searchTerm) params.set('search_term', searchTerm);
+        if (chatbotCode) params.set('chatbot_code', chatbotCode);
+        if (userId) params.set('user_id', userId);
+
+        window.location.href = `/admin?${params.toString()}#data-mgmt-content-convo-logs`;
     }
-    
-    // Setup event listeners for Enter key on search input
+
+    function clearConvoFilters() {
+        const currentParams = new URLSearchParams(window.location.search);
+        const perPage = currentParams.get('per_page') || '10';
+        window.location.href = `/admin?page=1&per_page=${encodeURIComponent(perPage)}#data-mgmt-content-convo-logs`;
+    }
+
+    // Keep compatibility with inline handlers if stale HTML is cached.
+    window.applyConvoFilters = applyConvoFilters;
+    window.clearConvoFilters = clearConvoFilters;
+
+    // Setup event listeners for conversation log filters.
     const searchInput = document.getElementById('searchConvoInput');
+    const chatbotConvoFilter = document.getElementById('chatbotConvoFilter');
+    const userConvoFilter = document.getElementById('userConvoFilter');
+    const applyConvoFiltersBtn = document.getElementById('applyConvoFiltersBtn');
+    const clearConvoFiltersBtn = document.getElementById('clearConvoFiltersBtn');
+
     if (searchInput) {
         searchInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
@@ -2437,6 +2487,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    if (chatbotConvoFilter) chatbotConvoFilter.addEventListener('change', applyConvoFilters);
+    if (userConvoFilter) userConvoFilter.addEventListener('change', applyConvoFilters);
+    if (applyConvoFiltersBtn) applyConvoFiltersBtn.addEventListener('click', applyConvoFilters);
+    if (clearConvoFiltersBtn) clearConvoFiltersBtn.addEventListener('click', clearConvoFilters);
 
     // Select All checkbox functionality
     const selectAllCheckbox = document.getElementById('selectAllUsers');
@@ -3457,6 +3511,142 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+
+
+    // =============================================
+    // EDIT CONTENT MODAL — EDITOR TOOLBAR
+    // Find-in-content, fullscreen toggle, download/load .txt round-trip.
+    // Entirely additive; every element is null-guarded so this block is
+    // inert if the toolbar markup is absent from the page.
+    // =============================================
+    (function initEditContentToolbar() {
+        const textarea = document.getElementById('chatbotContentTextarea');
+        if (!textarea) return;
+
+        // ---- Find in content ----
+        const searchInput = document.getElementById('contentSearchInput');
+        const searchPrevBtn = document.getElementById('contentSearchPrev');
+        const searchNextBtn = document.getElementById('contentSearchNext');
+        const searchCounter = document.getElementById('contentSearchCount');
+        let matchPositions = [];
+        let matchIndex = -1;
+
+        function collectMatches() {
+            matchPositions = [];
+            matchIndex = -1;
+            const term = (searchInput && searchInput.value) || '';
+            if (!term) { updateSearchCounter(); return; }
+            const haystack = textarea.value.toLowerCase();
+            const needle = term.toLowerCase();
+            let pos = haystack.indexOf(needle);
+            while (pos !== -1) {
+                matchPositions.push(pos);
+                pos = haystack.indexOf(needle, pos + needle.length);
+            }
+            updateSearchCounter();
+        }
+
+        function updateSearchCounter() {
+            if (!searchCounter) return;
+            if (!searchInput || !searchInput.value) { searchCounter.textContent = ''; return; }
+            searchCounter.textContent = matchPositions.length
+                ? ((matchIndex >= 0 ? matchIndex + 1 : 1) + ' of ' + matchPositions.length)
+                : 'No matches';
+        }
+
+        function jumpToMatch(direction) {
+            if (!searchInput || !searchInput.value) return;
+            if (!matchPositions.length) collectMatches();
+            if (!matchPositions.length) { updateSearchCounter(); return; }
+            matchIndex = (matchIndex + direction + matchPositions.length) % matchPositions.length;
+            const start = matchPositions[matchIndex];
+            const end = start + searchInput.value.length;
+            textarea.focus();
+            textarea.setSelectionRange(start, end);
+            // Approximate scroll: jump to the match's proportional position,
+            // biased slightly upward so the match is not at the very top edge.
+            const proportion = start / Math.max(1, textarea.value.length);
+            textarea.scrollTop = Math.max(0,
+                proportion * (textarea.scrollHeight - textarea.clientHeight)
+                - textarea.clientHeight * 0.2);
+            updateSearchCounter();
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', collectMatches);
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    jumpToMatch(e.shiftKey ? -1 : 1);
+                }
+            });
+        }
+        if (searchNextBtn) searchNextBtn.addEventListener('click', function() { jumpToMatch(1); });
+        if (searchPrevBtn) searchPrevBtn.addEventListener('click', function() { jumpToMatch(-1); });
+        // Invalidate cached match positions whenever the content changes.
+        textarea.addEventListener('input', function() {
+            matchPositions = [];
+            matchIndex = -1;
+            updateSearchCounter();
+        });
+
+        // ---- Fullscreen toggle ----
+        const fullscreenBtn = document.getElementById('contentFullscreenBtn');
+        if (fullscreenBtn) {
+            fullscreenBtn.addEventListener('click', function() {
+                const dialog = document.querySelector('#editContentModal .modal-dialog');
+                if (!dialog) return;
+                const isFull = dialog.classList.toggle('modal-fullscreen');
+                textarea.style.height = isFull ? 'calc(100vh - 380px)' : '';
+                this.innerHTML = isFull
+                    ? '<i class="bi bi-fullscreen-exit"></i> Exit Full Screen'
+                    : '<i class="bi bi-arrows-fullscreen"></i> Full Screen';
+            });
+        }
+
+        // ---- Download current editor content as .txt ----
+        const downloadBtn = document.getElementById('contentDownloadBtn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', function() {
+                const code = document.getElementById('editChatbotNameInput');
+                const filename = ((code && code.value) || 'chatbot') + '_content.txt';
+                const blob = new Blob([textarea.value], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        // ---- Load an edited .txt back into the editor ----
+        const loadBtn = document.getElementById('contentLoadTxtBtn');
+        const loadInput = document.getElementById('contentLoadTxtInput');
+        if (loadBtn && loadInput) {
+            loadBtn.addEventListener('click', function() { loadInput.click(); });
+            loadInput.addEventListener('change', function() {
+                const file = this.files && this.files[0];
+                if (!file) { return; }
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    if (!confirm('Replace the current editor content with the contents of "'
+                        + file.name + '"?\n\nNothing is saved to the chatbot until you click Save Changes.')) {
+                        return;
+                    }
+                    textarea.value = e.target.result;
+                    updateCharCount();
+                    matchPositions = [];
+                    matchIndex = -1;
+                    updateSearchCounter();
+                };
+                reader.readAsText(file);
+                this.value = ''; // allow re-selecting the same file later
+            });
+        }
+    })();
 
 }); // End of first DOMContentLoaded
 

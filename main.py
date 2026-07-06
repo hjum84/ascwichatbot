@@ -4379,39 +4379,94 @@ def export_page():
     # Add admin page to the routes available from export page
     return render_template('export.html', show_admin_link=True)
 
-def get_paired_conversations(db, page=1, per_page=10):
-    # 최신순 정렬
-    history_query = db.query(ChatHistory).order_by(ChatHistory.timestamp.desc())
+def get_paired_conversations(
+    db,
+    page=1,
+    per_page=10,
+    search_term=None,
+    chatbot_code=None,
+    user_id=None
+):
+    # Server-side filtering must happen BEFORE pagination so filters remain
+    # accurate across large datasets.
+    page = max(1, int(page or 1))
+    per_page = max(1, min(int(per_page or 10), 100))
+
+    normalized_search = (search_term or "").strip()
+    normalized_chatbot_code = (chatbot_code or "").strip().upper()
+    normalized_user_id = (str(user_id).strip() if user_id is not None else "")
+
+    history_query = db.query(ChatHistory)
+
+    if normalized_search:
+        like_term = f"%{normalized_search}%"
+        history_query = history_query.filter(
+            or_(
+                ChatHistory.user_message.ilike(like_term),
+                ChatHistory.bot_message.ilike(like_term)
+            )
+        )
+
+    if normalized_chatbot_code:
+        history_query = history_query.filter(
+            func.upper(ChatHistory.program_code) == normalized_chatbot_code
+        )
+
+    if normalized_user_id:
+        try:
+            history_query = history_query.filter(ChatHistory.user_id == int(normalized_user_id))
+        except ValueError:
+            # Invalid user id in URL means no results.
+            history_query = history_query.filter(ChatHistory.user_id == -1)
+
     total_count = history_query.count()
-    total_pages = (total_count + per_page - 1) // per_page
-    offset = (page - 1) * per_page
-    history = history_query.offset(offset).limit(per_page * 10).all()
-    paired_conversations = []
-    
-    # 각 대화 기록을 처리
-    for i in range(min(len(history), per_page)):
-        current_msg = history[i]
-        user_obj = db.query(User).filter(User.id == current_msg.user_id).first()
-        chatbot_obj = db.query(ChatbotContent).filter(ChatbotContent.code == current_msg.program_code).first()
-        
-        user_name = user_obj.last_name if user_obj else 'Unknown'
-        user_email = user_obj.email if user_obj else 'Unknown'
-        chatbot_name_display = chatbot_obj.name if chatbot_obj else current_msg.program_code
-        
-        pair_data = {
-            'user_id': current_msg.user_id,  # Include user_id for filtering
-            'user_timestamp': current_msg.timestamp if current_msg.timestamp else 'N/A',
-            'user_name': user_name,
-            'user_email': user_email,
-            'chatbot_name': chatbot_name_display,
-            'user_message': current_msg.user_message,
-            'bot_timestamp': current_msg.timestamp if current_msg.timestamp else 'N/A',
-            'bot_message': current_msg.bot_message
+    total_pages = max(1, (total_count + per_page - 1) // per_page)
+    current_page = min(page, total_pages)
+    offset = (current_page - 1) * per_page
+
+    history = history_query.order_by(
+        ChatHistory.timestamp.desc(),
+        ChatHistory.id.desc()
+    ).offset(offset).limit(per_page).all()
+
+    user_ids = sorted({row.user_id for row in history if row.user_id is not None})
+    users_by_id = {}
+    if user_ids:
+        users_by_id = {
+            user.id: user
+            for user in db.query(User).filter(User.id.in_(user_ids)).all()
         }
-        
-        paired_conversations.append(pair_data)
-        
-    return paired_conversations, total_pages, page
+
+    program_codes = sorted({
+        (row.program_code or "").upper()
+        for row in history
+        if row.program_code
+    })
+    chatbots_by_code = {}
+    if program_codes:
+        chatbots_by_code = {
+            (chatbot.code or "").upper(): chatbot
+            for chatbot in db.query(ChatbotContent).filter(
+                func.upper(ChatbotContent.code).in_(program_codes)
+            ).all()
+        }
+
+    paired_conversations = []
+    for row in history:
+        user_obj = users_by_id.get(row.user_id)
+        chatbot_obj = chatbots_by_code.get((row.program_code or "").upper())
+        paired_conversations.append({
+            'user_id': row.user_id,
+            'user_timestamp': row.timestamp if row.timestamp else 'N/A',
+            'user_name': user_obj.last_name if user_obj else 'Unknown',
+            'user_email': user_obj.email if user_obj else 'Unknown',
+            'chatbot_name': chatbot_obj.name if chatbot_obj else row.program_code,
+            'user_message': row.user_message,
+            'bot_timestamp': row.timestamp if row.timestamp else 'N/A',
+            'bot_message': row.bot_message
+        })
+
+    return paired_conversations, total_pages, current_page, total_count
 
 @app.route('/admin')
 @requires_auth
@@ -4427,13 +4482,21 @@ def admin():
         # For Data Management Tab - User List
         users_list = get_all_users() 
 
-        # Get pagination parameters
+        # Get pagination/filter parameters
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
+        search_term_param = (request.args.get('search_term') or "").strip()
+        chatbot_code_param = (request.args.get('chatbot_code') or "").strip()
+        user_id_param = (request.args.get('user_id') or "").strip()
 
         # For Data Management Tab - Paired Conversation Logs
-        paired_conversations_log, total_pages, current_page = get_paired_conversations(
-            db, page=page, per_page=per_page
+        paired_conversations_log, total_pages, current_page, total_filtered_count = get_paired_conversations(
+            db,
+            page=page,
+            per_page=per_page,
+            search_term=search_term_param,
+            chatbot_code=chatbot_code_param,
+            user_id=user_id_param
         )
 
         conversation_stats_overall = get_conversation_statistics() # General stats
@@ -4443,39 +4506,6 @@ def admin():
         message = request.args.get('message')
         message_type = request.args.get('message_type', 'info')
         
-        # Search/filter parameters from URL for conversation logs
-        search_term_param = request.args.get('search_term', None)
-        chatbot_code_param = request.args.get('chatbot_code', None)
-        user_id_param = request.args.get('user_id', None)
-
-        # If search parameters are present, filter the conversations
-        if search_term_param or chatbot_code_param or user_id_param:
-            temp_filtered_convos = []
-            for p_conv in paired_conversations_log:
-                match_search = True
-                if search_term_param and not (search_term_param.lower() in p_conv['user_message'].lower() or search_term_param.lower() in p_conv['bot_message'].lower()):
-                    match_search = False
-                
-                match_chatbot = True
-                if chatbot_code_param:
-                    is_correct_chatbot = False
-                    for cb in available_chatbots:
-                        if cb['code'] == chatbot_code_param and p_conv['chatbot_name'] == cb['name']:
-                            is_correct_chatbot = True
-                            break
-                    if not is_correct_chatbot:
-                         match_chatbot = False
-                
-                match_user = True
-                if user_id_param:
-                    # Match by user ID
-                    if str(p_conv['user_id']) != str(user_id_param):
-                        match_user = False
-
-                if match_search and match_chatbot and match_user:
-                    temp_filtered_convos.append(p_conv)
-            paired_conversations_log = temp_filtered_convos
-            
         return render_template('admin.html', 
                               available_chatbots=available_chatbots, 
                               deleted_chatbots=deleted_chatbots,
@@ -4494,6 +4524,7 @@ def admin():
                               selected_user_id=user_id_param,
                               default_disclaimer_text=DEFAULT_DISCLAIMER_TEXT,
                               pagination={
+                                  'total_count': total_filtered_count,
                                   'total_pages': total_pages,
                                   'current_page': current_page,
                                   'per_page': per_page
@@ -5074,6 +5105,10 @@ def admin_preview_upload():
         
         # For edit modal scenario or direct summarization
         current_content_text = request.form.get('current_content', '')
+        # Normalize browser CRLF line endings so preview character counts match
+        # what the admin editor displays (see note in the update endpoints).
+        if current_content_text:
+            current_content_text = current_content_text.replace('\r\n', '\n').replace('\r', '\n')
         if current_content_text:
             logger.info(f"Current content provided with length: {len(current_content_text)}")
             
@@ -6095,7 +6130,17 @@ def update_chatbot_content():
         # Accept both chatbot_code and chatbot_name for compatibility
         chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
         content = request.form.get('content')
-        
+
+        # Normalize line endings BEFORE the length check. Browsers convert
+        # every "\n" in a textarea to "\r\n" when serializing multipart form
+        # data, which inflates the received content by one character per line
+        # (~5,300 chars for the SUPCORE knowledge base). Without this, the
+        # server rejects content the editor correctly showed as under the
+        # limit, and stray "\r" characters get stored and sent to the AI
+        # model. The create/upload flow already normalizes this way.
+        if content is not None:
+            content = content.replace('\r\n', '\n').replace('\r', '\n')
+
         if not chatbot_code or content is None:
             return jsonify({"success": False, "error": "Chatbot code and content are required"}), 400
             
@@ -6138,6 +6183,17 @@ def admin_update_chatbot_content():
         # Accept both chatbot_code and chatbot_name for compatibility
         chatbot_code = request.form.get('chatbot_code') or request.form.get('chatbot_name')
         content = request.form.get('content')
+
+        # Normalize line endings BEFORE the length check. Browsers convert
+        # every "\n" in a textarea to "\r\n" when serializing multipart form
+        # data, which inflates the received content by one character per line
+        # (~5,300 chars for the SUPCORE knowledge base). Without this, the
+        # server rejects content the editor correctly showed as under the
+        # limit, and stray "\r" characters get stored and sent to the AI
+        # model. The create/upload flow already normalizes this way.
+        if content is not None:
+            content = content.replace('\r\n', '\n').replace('\r', '\n')
+
         auto_summarize = request.form.get('auto_summarize', 'true').lower() == 'true'
         system_prompt_guidelines = request.form.get('system_prompt_guidelines')
         tier3_safety_guardrail_prompt = request.form.get('tier3_safety_guardrail_prompt')

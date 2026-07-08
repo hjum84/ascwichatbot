@@ -1114,12 +1114,21 @@
     function getRoleplayTextSignals(textValue) {
         const text = (textValue || '').trim();
         const lower = text.toLowerCase();
+        const hasCoachSetup = lower.includes('coach setup');
+        // Historical start messages are not perfectly uniform. Some older rows
+        // have "Coach setup" + persona speech but omit an explicit
+        // "In character" label, so include structural cues as valid start
+        // shape signals.
+        const hasPersonaCueAfterSetup =
+            lower.includes('in character') ||
+            text.includes('---') ||
+            /\n\s*[\(\"\u201c]/.test(text);
         const hasStructuredEndHeadings =
             lower.includes('strengths:') &&
             lower.includes('area of development:') &&
             lower.includes('next step:');
         return {
-            startShape: lower.includes('coach setup') && lower.includes('in character'),
+            startShape: hasCoachSetup && hasPersonaCueAfterSetup,
             pauseShape: lower.includes('would you like to resume the role-play') ||
                         lower.includes('role-play paused') ||
                         lower.includes('role-play is paused') ||
@@ -1206,6 +1215,16 @@
             } else if (state === 'end') {
                 const endDivider = buildRoleplayDividerElement('Role-play ended - feedback mode resumed', 'end');
                 messageDiv.insertAdjacentElement('afterend', endDivider);
+            }
+        });
+    }
+
+    function applyHistoricalStartBlockDecoration() {
+        const startMessages = chatBox.querySelectorAll('.message.bot[data-roleplay-state="start"]');
+        startMessages.forEach((messageDiv) => {
+            const paragraph = messageDiv.querySelector('p');
+            if (paragraph) {
+                decorateRoleplayStartMessage(paragraph);
             }
         });
     }
@@ -1466,6 +1485,7 @@
             }
         });
         const inferredRoleplayActive = applyRoleplayStylesFromStateTags();
+        applyHistoricalStartBlockDecoration();
         rebuildRoleplayDividersFromHistory();
         const initialRoleplayActive = resolveInitialRoleplayBannerState(inferredRoleplayActive);
         // Restore paused state: if the most recent tagged bot turn is a

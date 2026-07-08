@@ -420,7 +420,8 @@ def _classify_end_feedback_sentences(sentences):
     positive_pattern = re.compile(
         r"(?i)\b(great|excellent|strong|well done|effective|effectively|success|"
         r"successfully|clear|specific|thoughtful|solid|breakthrough|good move|"
-        r"good job|helpful|aligned|grounded)\b"
+        r"good job|helpful|aligned|grounded|reframed|shifted|validated|"
+        r"maintained|guided|focused|clarified|modeled|demonstrated)\b"
     )
     development_pattern = re.compile(
         r"(?i)\b(area of development|development area|improve|improvement|could|should|needs to|need to|"
@@ -621,9 +622,9 @@ def enforce_end_response_tone(
                     has_verified_next_quote = True
                     break
             if not has_verified_next_quote:
-                guarded_payload["next_step"] = ""
+                guarded_payload["next_step"] = _sanitize_feedback_item_after_quote_removal(next_step_text)
                 logger.warning(
-                    "End feedback fallback: dropped next_step text with unverifiable quoted evidence."
+                    "End feedback fallback: sanitized next_step by removing unverifiable quoted evidence."
                 )
         if dropped:
             logger.warning(
@@ -642,8 +643,8 @@ def enforce_end_response_tone(
     strengths_candidates, area_candidates, next_candidates = _classify_end_feedback_sentences(sentences)
 
     fallback_payload = {
-        "strengths": strengths_candidates[:2],
-        "area_of_development": area_candidates[:2],
+        "strengths": strengths_candidates[:3],
+        "area_of_development": area_candidates[:3],
         "next_step": (
             next_candidates[0]
             if next_candidates else
@@ -893,6 +894,35 @@ def _extract_quoted_spans(bullet_text):
     return spans
 
 
+def _replace_long_quotes_with_placeholder(text_value, placeholder="that statement"):
+    """
+    Replace substantial quoted spans with a neutral placeholder.
+    Used to salvage otherwise-useful bullets when quoted evidence fails
+    deterministic verification.
+    """
+    text = text_value or ""
+    double_quote_pattern = r'["\u201c][^"\u201d]{%d,}["\u201d]' % MIN_VERIFIABLE_QUOTE_CHARS
+    single_quote_pattern = (
+        r"'((?:[^']|'(?=[a-zA-Z])){%d,}?)'(?=[^a-zA-Z]|$)" % MIN_VERIFIABLE_QUOTE_CHARS
+    )
+    text = re.sub(double_quote_pattern, placeholder, text)
+    text = re.sub(single_quote_pattern, placeholder, text)
+    return text
+
+
+def _sanitize_feedback_item_after_quote_removal(item_text):
+    sanitized = _replace_long_quotes_with_placeholder(item_text, placeholder="that statement")
+    sanitized = re.sub(
+        r"\bthat statement(?:\s+that statement)+\b",
+        "that statement",
+        sanitized,
+        flags=re.IGNORECASE
+    )
+    sanitized = re.sub(r"\s+([,.;:])", r"\1", sanitized)
+    sanitized = re.sub(r"\s{2,}", " ", sanitized).strip(" -\t")
+    return sanitized
+
+
 def drop_feedback_bullets_with_unverifiable_quotes(payload, user_turns_text):
     """
     Deterministic anti-hallucination guard for session feedback.
@@ -915,6 +945,7 @@ def drop_feedback_bullets_with_unverifiable_quotes(payload, user_turns_text):
         return payload, 0
     normalized_user_text = _normalize_quote_text(user_turns_text)
     dropped_count = 0
+    salvaged_count = 0
     for section_key in ("strengths", "area_of_development"):
         items = _normalize_feedback_items(payload.get(section_key))
         kept_items = []
@@ -928,10 +959,23 @@ def drop_feedback_bullets_with_unverifiable_quotes(payload, user_turns_text):
                         any_verified = True
                         break
                 if not any_verified:
+                    # Preserve useful analytical content while removing
+                    # unverifiable quoted evidence instead of hard-dropping
+                    # the full bullet.
+                    sanitized_item = _sanitize_feedback_item_after_quote_removal(item)
+                    if sanitized_item:
+                        kept_items.append(sanitized_item)
+                        salvaged_count += 1
+                        continue
                     dropped_count += 1
                     continue
             kept_items.append(item)
         payload[section_key] = kept_items
+    if salvaged_count:
+        logger.warning(
+            "End feedback quote guard: salvaged %d bullet(s) by removing unverifiable quoted spans.",
+            salvaged_count
+        )
     return payload, dropped_count
 
 

@@ -419,7 +419,9 @@ def _classify_end_feedback_sentences(sentences):
     development_pattern = re.compile(
         r"(?i)\b(area of development|development area|improve|improvement|could|should|needs to|need to|"
         r"watch for|risk|missed|unclear|instead|avoid|tighten|more consistent|"
-        r"struggled|gap|blind spot|strengthen)\b"
+        r"struggled|gap|blind spot|strengthen|"
+        r"pressured|pressure[ds]?|premature|contradicts?|bypass(?:ed|es)?|"
+        r"short-circuit|demanded|demanding|forcing)\b"
     )
     next_pattern = re.compile(
         r"(?i)\b(next step|next session|going forward|from now on|"
@@ -447,11 +449,15 @@ def _classify_end_feedback_sentences(sentences):
             strengths.append(text)
             continue
 
-        # Neutral sentence fallback: prefer Strengths first, then Area.
-        if not strengths:
-            strengths.append(text)
-        else:
-            area.append(text)
+        # Neutral sentence fallback: route to Area, NEVER to Strengths.
+        # A sentence with no positive cue carries no evidence of being a
+        # strength, and criticism phrased without a lexical cue (e.g.
+        # "The user pressured the worker for a definitive verdict ...")
+        # must not end up labeled as one - that mislabeling is the exact
+        # failure this classifier exists to prevent. Area of Development
+        # reads correctly for critique, advice, and neutral description
+        # alike, so it is the only safe default bucket.
+        area.append(text)
 
     return strengths, area, next_steps
 

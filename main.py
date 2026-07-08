@@ -382,6 +382,12 @@ def _extract_actionable_sentences(text_value):
             stripped_sentence[-1] in ('"', '\u201d')
         ):
             continue
+        # Drop quoted-fragment artifacts (odd count of double-quote chars).
+        # These fragments appear when the model leaks in-character speech into
+        # pause/end responses and sentence splitting cuts through quoted text.
+        quote_count = stripped_sentence.count('"') + stripped_sentence.count('\u201c') + stripped_sentence.count('\u201d')
+        if quote_count % 2 == 1:
+            continue
         filtered.append(sentence)
     return filtered
 
@@ -425,7 +431,10 @@ def _classify_end_feedback_sentences(sentences):
     )
     next_pattern = re.compile(
         r"(?i)\b(next step|next session|going forward|from now on|"
-        r"in your next|future|practice|start by|try|consider|plan to|use one|ask|review)\b"
+        r"in your next|future|start by|plan to)\b"
+    )
+    past_eval_pattern = re.compile(
+        r"(?i)\b(you demonstrated|you successfully|you effectively|you did|you kept|you showed)\b"
     )
 
     for sentence in (sentences or []):
@@ -442,7 +451,7 @@ def _classify_end_feedback_sentences(sentences):
         if development_pattern.search(text):
             area.append(text)
             continue
-        if next_pattern.search(text):
+        if next_pattern.search(text) and not past_eval_pattern.search(text):
             next_steps.append(text)
             continue
         if positive_pattern.search(text):
@@ -598,6 +607,24 @@ def enforce_end_response_tone(
         guarded_payload, dropped = drop_feedback_bullets_with_unverifiable_quotes(
             guarded_payload, user_turns_text
         )
+        # Apply the same deterministic quote check to next_step as well.
+        # Without this, a fabricated quote can survive if it appears only in
+        # next_step while strengths/area bullets are dropped.
+        next_step_text = (guarded_payload.get("next_step") or "").strip()
+        next_spans = _extract_quoted_spans(next_step_text)
+        if next_spans:
+            normalized_user_text = _normalize_quote_text(user_turns_text)
+            has_verified_next_quote = False
+            for span in next_spans:
+                candidate = span.strip(" .!?,;:")
+                if candidate and candidate in normalized_user_text:
+                    has_verified_next_quote = True
+                    break
+            if not has_verified_next_quote:
+                guarded_payload["next_step"] = ""
+                logger.warning(
+                    "End feedback fallback: dropped next_step text with unverifiable quoted evidence."
+                )
         if dropped:
             logger.warning(
                 "End feedback fallback: dropped %d bullet(s) with unverifiable quotes.",
@@ -619,11 +646,8 @@ def enforce_end_response_tone(
         "area_of_development": area_candidates[:2],
         "next_step": (
             next_candidates[0]
-            if next_candidates else (
-                sentences[2]
-                if len(sentences) > 2 else
-                "In your next session, use one reflective statement plus one targeted open-ended question before advancing to advice."
-            )
+            if next_candidates else
+            "In your next session, use one reflective statement plus one targeted open-ended question before advancing to advice."
         )
     }
     fallback_payload = _apply_quote_guard(fallback_payload)

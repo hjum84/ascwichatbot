@@ -1158,10 +1158,14 @@
                 } else if (signals.endShape) {
                     state = 'end';
                     messageDiv.setAttribute('data-roleplay-state', state);
-                } else if (active && signals.pauseShape) {
+                // Do not require an "active" chain for old rows. Historical
+                // windows can be truncated (start turn omitted), so pause/end
+                // feedback and in-character turns must still keep role-play
+                // skin even when the current slice does not include "start".
+                } else if (signals.pauseShape) {
                     state = 'pause';
                     messageDiv.setAttribute('data-roleplay-state', state);
-                } else if (active && signals.inCharacterShape) {
+                } else if (signals.inCharacterShape) {
                     state = 'active';
                     messageDiv.setAttribute('data-roleplay-state', state);
                 }

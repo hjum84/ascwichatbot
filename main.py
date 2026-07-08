@@ -3021,20 +3021,23 @@ def set_program(program):
         return redirect(url_for('program_select'))
 
 # Helper: fetch chat history for a user and program and calculate remaining questions
-def get_chat_history_and_remaining(user_id, program_code, limit=50):
+def get_chat_history_and_remaining(user_id, program_code, limit=None):
     db = get_db()
     try:
         # Get the most recent exchanges, then display in chronological order.
         # The previous ASC+LIMIT query returned the oldest rows, which caused
         # newly saved messages to disappear after refresh once history grew.
-        history = db.query(ChatHistory).filter(
+        history_query = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == program_code,
             ChatHistory.is_visible == True
         ).order_by(
             ChatHistory.timestamp.desc(),
             ChatHistory.id.desc()
-        ).limit(limit).all()
+        )
+        if isinstance(limit, int) and limit > 0:
+            history_query = history_query.limit(limit)
+        history = history_query.all()
         history.reverse()
         
         result = []

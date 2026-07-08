@@ -354,9 +354,28 @@ def _extract_actionable_sentences(text_value):
     cleaned = re.sub(r'(?im)^\s*[-*]\s*', '', cleaned)
     chunks = re.split(r'(?<=[.!?])\s+|\n+', cleaned)
     filtered = []
+    # Track quotation state ACROSS chunks. Sentence splitting cuts through
+    # long quoted in-character dialogue, producing middle fragments that
+    # contain zero quote characters themselves (e.g. leaked persona speech:
+    # '"It moved faster, fine. Once she realized ... my time. But yesterday
+    # ... make them?"' splits so that only the first and last fragments carry
+    # a quote char). A per-chunk odd-count check alone lets those middle
+    # fragments through and they get echoed back as "coaching" lines. The
+    # inside_quote flag carries the open/closed state forward so every
+    # fragment that BEGINS inside an unterminated quote is dropped.
+    inside_quote = False
+    quote_chars = ('"', '\u201c', '\u201d')
     for chunk in chunks:
         sentence = (chunk or '').strip()
         if not sentence:
+            continue
+        local_quote_count = sum(sentence.count(c) for c in quote_chars)
+        started_inside_quote = inside_quote
+        if local_quote_count % 2 == 1:
+            inside_quote = not inside_quote
+        if started_inside_quote:
+            # Entire fragment sits inside a quote opened by an earlier
+            # fragment: it is leaked character dialogue, never coaching text.
             continue
         if re.search(r'(?i)\b(strengths?|area of development|next step)\b', sentence):
             continue
@@ -382,11 +401,12 @@ def _extract_actionable_sentences(text_value):
             stripped_sentence[-1] in ('"', '\u201d')
         ):
             continue
-        # Drop quoted-fragment artifacts (odd count of double-quote chars).
-        # These fragments appear when the model leaks in-character speech into
-        # pause/end responses and sentence splitting cuts through quoted text.
-        quote_count = stripped_sentence.count('"') + stripped_sentence.count('\u201c') + stripped_sentence.count('\u201d')
-        if quote_count % 2 == 1:
+        # Drop quoted-fragment artifacts (odd count of double-quote chars):
+        # a fragment that OPENS a quote it does not close (e.g. '"It moved
+        # faster, fine.') is the leading edge of leaked in-character speech.
+        # Fragments that begin inside an already-open quote were dropped
+        # above via inside_quote tracking.
+        if local_quote_count % 2 == 1:
             continue
         filtered.append(sentence)
     return filtered
@@ -469,6 +489,103 @@ def _classify_end_feedback_sentences(sentences):
         # alike, so it is the only safe default bucket.
         area.append(text)
 
+    return strengths, area, next_steps
+
+
+def _split_into_bullets(text_value):
+    """
+    Split freeform feedback text into whole bullets WITHOUT breaking each
+    bullet into individual sentences. Used only by the heading-less fallback
+    path. A bullet is either an explicit '- '/'* ' list item or, absent any
+    list markers, a blank-line-separated paragraph. This preserves each
+    multi-sentence point as one unit so it can be classified and displayed
+    intact (the old sentence-level split is what fragmented single points
+    into several mislabeled lines).
+    """
+    text = (text_value or "").strip()
+    if not text:
+        return []
+    # Drop any residual section headings so they are not treated as bullets.
+    text = re.sub(
+        r'(?im)^\s*(strengths?|area of development|next step|feedback summary|feedback mode)\s*:?\s*$',
+        '',
+        text
+    )
+    lines = text.splitlines()
+    has_markers = any(re.match(r'^\s*[-*]\s+', ln) for ln in lines)
+    bullets = []
+    if has_markers:
+        current = None
+        for ln in lines:
+            stripped = ln.strip()
+            if not stripped:
+                continue
+            if re.match(r'^\s*[-*]\s+', ln):
+                if current is not None:
+                    bullets.append(current.strip())
+                current = re.sub(r'^\s*[-*]\s+', '', ln).strip()
+            elif current is not None:
+                current = f"{current} {stripped}".strip()
+            else:
+                current = stripped
+        if current is not None:
+            bullets.append(current.strip())
+    else:
+        # No list markers: split on blank lines into paragraphs.
+        for para in re.split(r'\n\s*\n', text):
+            para = " ".join(seg.strip() for seg in para.splitlines() if seg.strip()).strip()
+            if para:
+                bullets.append(para)
+    return [b for b in bullets if b]
+
+
+def _classify_end_feedback_bullets(bullets):
+    """
+    Route whole bullets (not sentences) into strengths / development /
+    next-step buckets. Used only when the model failed to emit headings, so
+    there is no author-supplied placement to preserve. No count cap is applied
+    here; callers keep as many bullets as the model produced.
+    """
+    strengths = []
+    area = []
+    next_steps = []
+    positive_pattern = re.compile(
+        r"(?i)\b(great|excellent|strong|well done|effective|effectively|success|"
+        r"successfully|clear|specific|thoughtful|solid|breakthrough|good move|"
+        r"good job|helpful|aligned|grounded|reframed|shifted|validated|"
+        r"maintained|guided|focused|clarified|modeled|demonstrated|leveraged|"
+        r"utilized|skillfully)\b"
+    )
+    development_pattern = re.compile(
+        r"(?i)\b(area of development|development area|improve|improvement|could have|should have|needs to|need to|"
+        r"watch for|risk|missed|unclear|instead of|avoid|tighten|more consistent|"
+        r"struggled|gap|blind spot|opportunity to|allowed .* to maintain|"
+        r"pressured|premature|contradicts?|bypass(?:ed|es)?|"
+        r"short-circuit|left .* implicit|rather than)\b"
+    )
+    next_pattern = re.compile(
+        r"(?i)\b(next step|next session|going forward|from now on|"
+        r"in your next|for future|start by|plan to)\b"
+    )
+    for bullet in (bullets or []):
+        text = (bullet or "").strip()
+        if not text:
+            continue
+        if next_pattern.search(text):
+            next_steps.append(text)
+            continue
+        # Development cues take precedence over incidental positive words:
+        # a critique bullet ("There was an opportunity to more explicitly
+        # connect ... effectively") contains positive vocabulary but is still
+        # a development point.
+        if development_pattern.search(text):
+            area.append(text)
+            continue
+        if positive_pattern.search(text):
+            strengths.append(text)
+            continue
+        # Neutral bullet with no cue: default to Area (never invent praise).
+        area.append(text)
     return strengths, area, next_steps
 
 
@@ -564,11 +681,20 @@ def enforce_end_response_tone(
     has_substantive_user_turn=False,
     pause_feedback_text=None,
     immediate_after_pause=False,
-    user_turns_text=None
+    user_turns_text=None,
+    transcript_text=None
 ):
     """
     End feedback must be grounded in current session and structured.
+
+    transcript_text, when provided, is the full session transcript (user AND
+    AI/character turns) and is the preferred corpus for verifying quoted
+    evidence: feedback legitimately quotes the character's own lines (e.g.
+    what the worker said in-scene), and verifying only against user turns
+    falsely flags those real quotes as fabricated and mangles the bullets.
+    user_turns_text is kept as a fallback corpus for backward compatibility.
     """
+    verification_text = transcript_text if (transcript_text or "").strip() else user_turns_text
     text_value = (reply_text or "").strip()
     if not has_substantive_user_turn:
         return (
@@ -603,10 +729,10 @@ def enforce_end_response_tone(
             "area_of_development": _normalize_feedback_items(payload.get("area_of_development")),
             "next_step": (payload.get("next_step") or "").strip()
         }
-        if not (user_turns_text or "").strip():
+        if not (verification_text or "").strip():
             return guarded_payload
         guarded_payload, dropped = drop_feedback_bullets_with_unverifiable_quotes(
-            guarded_payload, user_turns_text
+            guarded_payload, verification_text
         )
         # Apply the same deterministic quote check to next_step as well.
         # Without this, a fabricated quote can survive if it appears only in
@@ -614,11 +740,11 @@ def enforce_end_response_tone(
         next_step_text = (guarded_payload.get("next_step") or "").strip()
         next_spans = _extract_quoted_spans(next_step_text)
         if next_spans:
-            normalized_user_text = _normalize_quote_text(user_turns_text)
+            normalized_corpus = _normalize_quote_text(verification_text)
             has_verified_next_quote = False
             for span in next_spans:
                 candidate = span.strip(" .!?,;:")
-                if candidate and candidate in normalized_user_text:
+                if candidate and candidate in normalized_corpus:
                     has_verified_next_quote = True
                     break
             if not has_verified_next_quote:
@@ -633,18 +759,46 @@ def enforce_end_response_tone(
             )
         return guarded_payload
 
+    # PRIMARY PATH: when the model already produced the three headings, trust
+    # ITS section placement. The model reads the whole session in context and
+    # decides — from meaning, not keywords — what is a strength vs a
+    # development area. We do NOT re-bucket its bullets with a lexical
+    # classifier (that classifier looks at a few surface words and routinely
+    # mislabels praise as criticism and vice-versa — the exact failure this
+    # path exists to avoid). We keep every bullet the model wrote (no count
+    # cap: 0 stays 0, 10 stays 10), only running the deterministic quote guard
+    # so fabricated citations are neutralized without moving anything between
+    # sections.
     if headings_ok:
-        parsed_payload = _apply_quote_guard(_parse_end_feedback_text_to_payload(text_value))
-        is_valid_payload, _, normalized_payload = validate_end_feedback_payload(parsed_payload)
-        if is_valid_payload and normalized_payload:
-            return format_end_feedback_payload(normalized_payload)
+        parsed_payload = _parse_end_feedback_text_to_payload(text_value)
+        guarded_payload = _apply_quote_guard(parsed_payload)
+        # validate_end_feedback_payload is advisory here: we log its issues
+        # for observability but do not let a soft rule (e.g. a bullet running
+        # to 5 sentences) trigger a destructive re-classification of correctly
+        # placed content.
+        is_valid_payload, payload_issues, normalized_payload = validate_end_feedback_payload(guarded_payload)
+        if not is_valid_payload:
+            logger.info(
+                "End feedback: model output kept despite advisory validation notes: %s",
+                payload_issues
+            )
+        final_payload = normalized_payload if normalized_payload else guarded_payload
+        if not (final_payload.get("next_step") or "").strip():
+            final_payload["next_step"] = (
+                "In your next session, use one reflective statement plus one targeted open-ended question before advancing to advice."
+            )
+        return format_end_feedback_payload(final_payload)
 
-    sentences = _extract_actionable_sentences(text_value)
-    strengths_candidates, area_candidates, next_candidates = _classify_end_feedback_sentences(sentences)
+    # FALLBACK PATH: the model did NOT emit the required headings, so there is
+    # no author-supplied section placement to preserve. Only here do we fall
+    # back to lexical routing — and even then we route whole bullets, never
+    # shredding them into single sentences, and we impose no count cap.
+    bullet_items = _split_into_bullets(text_value)
+    strengths_candidates, area_candidates, next_candidates = _classify_end_feedback_bullets(bullet_items)
 
     fallback_payload = {
-        "strengths": strengths_candidates[:3],
-        "area_of_development": area_candidates[:3],
+        "strengths": strengths_candidates,
+        "area_of_development": area_candidates,
         "next_step": (
             next_candidates[0]
             if next_candidates else
@@ -658,11 +812,6 @@ def enforce_end_response_tone(
             fallback_payload.get("area_of_development") or []
         )
     )
-
-    if not fallback_payload.get("area_of_development"):
-        fallback_payload["area_of_development"] = [
-            "Strengthen consistency by tying each coaching move to one immediate objective in the worker's next turn."
-        ]
     if not (fallback_payload.get("next_step") or "").strip():
         fallback_payload["next_step"] = (
             "In your next session, use one reflective statement plus one targeted open-ended question before advancing to advice."
@@ -793,15 +942,11 @@ def validate_end_feedback_payload(payload):
         "next_step": next_step
     }
 
-    # Empty sections are VALID (0 bullets). Forcing a minimum of 1 made the
-    # validation/repair loop structurally demand a strength (or criticism)
-    # even when the session contained none - observed in pilot testing as a
-    # fully fabricated user quote invented to satisfy the count. An honest
-    # empty section always beats invented evidence.
-    if not (0 <= len(strengths) <= 3):
-        issues.append("strengths must contain 0-3 bullets")
-    if not (0 <= len(area) <= 3):
-        issues.append("area_of_development must contain 0-3 bullets")
+    # No count cap. An empty section is valid (honest emptiness beats invented
+    # evidence), and there is no upper bound either: if the session genuinely
+    # evidenced ten distinct strengths, all ten are kept. Bullet count is
+    # driven entirely by how many points are actually supported, never by a
+    # fixed ceiling.
     if not next_step:
         issues.append("next_step must be non-empty")
 
@@ -905,15 +1050,39 @@ def _replace_long_quotes_with_placeholder(text_value, placeholder="that statemen
     single_quote_pattern = (
         r"'((?:[^']|'(?=[a-zA-Z])){%d,}?)'(?=[^a-zA-Z]|$)" % MIN_VERIFIABLE_QUOTE_CHARS
     )
-    text = re.sub(double_quote_pattern, placeholder, text)
-    text = re.sub(single_quote_pattern, placeholder, text)
+
+    def _make_replacer(source_text):
+        # A removed quote often carries its OWN terminal punctuation (a
+        # quoted question ending in '?', a quoted statement ending in '.').
+        # If that punctuation was also ending the surrounding sentence - i.e.
+        # the very next visible character after the quote starts a new
+        # sentence (uppercase) - simply swapping the quote for a bare
+        # placeholder deletes that boundary and glues two sentences into a
+        # run-on (observed: '...by asking, "...?" This forced...' ->
+        # '...by asking, that statement This forced...', no period). When
+        # that pattern is detected, a period is appended to the placeholder
+        # so the sentence boundary survives the quote's removal.
+        def _sub(match):
+            rest = source_text[match.end():].lstrip()
+            if rest and rest[0].isupper():
+                return " %s. " % placeholder
+            return " %s " % placeholder
+        return _sub
+
+    # Pad the placeholder with spaces so a quote sitting flush against an
+    # adjacent word (e.g. connect the "..." to) never fuses into it
+    # ("connect the that statement to"), which produced mangled output like
+    # "Ramirezthat statementjust". Surrounding whitespace is collapsed by the
+    # caller (_sanitize_feedback_item_after_quote_removal).
+    text = re.sub(double_quote_pattern, _make_replacer(text), text)
+    text = re.sub(single_quote_pattern, _make_replacer(text), text)
     return text
 
 
 def _sanitize_feedback_item_after_quote_removal(item_text):
     sanitized = _replace_long_quotes_with_placeholder(item_text, placeholder="that statement")
     sanitized = re.sub(
-        r"\bthat statement(?:\s+that statement)+\b",
+        r"\bthat statement\.?(?:\s+that statement\.?)+\b",
         "that statement",
         sanitized,
         flags=re.IGNORECASE
@@ -3021,23 +3190,20 @@ def set_program(program):
         return redirect(url_for('program_select'))
 
 # Helper: fetch chat history for a user and program and calculate remaining questions
-def get_chat_history_and_remaining(user_id, program_code, limit=None):
+def get_chat_history_and_remaining(user_id, program_code, limit=50):
     db = get_db()
     try:
         # Get the most recent exchanges, then display in chronological order.
         # The previous ASC+LIMIT query returned the oldest rows, which caused
         # newly saved messages to disappear after refresh once history grew.
-        history_query = db.query(ChatHistory).filter(
+        history = db.query(ChatHistory).filter(
             ChatHistory.user_id == user_id,
             ChatHistory.program_code == program_code,
             ChatHistory.is_visible == True
         ).order_by(
             ChatHistory.timestamp.desc(),
             ChatHistory.id.desc()
-        )
-        if isinstance(limit, int) and limit > 0:
-            history_query = history_query.limit(limit)
-        history = history_query.all()
+        ).limit(limit).all()
         history.reverse()
         
         result = []
@@ -3891,8 +4057,8 @@ def chat():
                     "5. Evidence + Content Connection rule: every evaluative point must explicitly link (a) one concrete observed user move (short quote or concise paraphrase) with (b) one relevant concept/target skill/framework from the training content. Never evaluate without evidence, and never invent, misquote, or misattribute what the user said - only cite a quote or paraphrase that accurately reflects something the user actually typed earlier in this session. If you cannot find a genuine, specific user move to cite for a potential point, drop that point rather than fabricate evidence for it.\n"
                     "6. Length rule: keep each bullet concise and highly readable, about 2 to 4 sentences; avoid long paragraphs and excessive sub-bullets.\n"
                     "7. Use exactly these headings in this order for end-session output: Strengths, Area of Development, Next Step.\n"
-                    "8. Strengths: include 0 to 3 specific, effective behavioral patterns or dialogue choices the user applied; each bullet must weave evidence + content connection. Include a bullet ONLY when it is supported by distinct evidence from this session; if the session contains no genuinely evidenced strength, include none - an honest empty section always beats an invented one.\n"
-                    "9. Area of Development: include 0 to 3 systemic improvement areas or blind spots; each bullet must weave evidence + content connection. Include a bullet ONLY when it is supported by distinct evidence from this session; never pad to fill a count. Strictly no praise, compliments, mitigating language, or positive reinforcement in this section.\n"
+                    "8. Strengths: include EVERY genuinely evidenced effective behavioral pattern or dialogue choice the user applied - no maximum, no minimum. Each bullet must weave (a) a verbatim quote from the transcript with (b) a specific curriculum connection citing the Module and Topic by name/number. Include a bullet ONLY when it is supported by distinct evidence from this session; if the session contains no genuinely evidenced strength, include none - an honest empty section always beats an invented one, and never truncate genuine strengths to hit a number.\n"
+                    "9. Area of Development: include EVERY genuinely evidenced improvement area or blind spot - no maximum, no minimum; each bullet must weave a verbatim transcript quote with a specific Module/Topic connection. Include a bullet ONLY when it is supported by distinct evidence from this session; never pad and never truncate. Strictly no praise, compliments, mitigating language, or positive reinforcement in this section. Classify by meaning: a critique never belongs under Strengths, and a compliment never belongs here.\n"
                     "10. Next Step: recommend exactly one concrete forward-looking action/tool/framework for future practice (2 to 4 sentences). Do not evaluate, praise, or reference past performance in this section.\n"
                     "\n"
                     "F. ROLE-PLAY SESSION MARKERS (SYSTEM PROTOCOL - INVISIBLE TO THE USER)\n"
@@ -4125,13 +4291,14 @@ def chat():
                         "- Keep each bullet concise (2 to 4 sentences), readable, and not overly granular.\n"
                         "Required format and constraints:\n"
                         "Strengths:\n"
-                        "- Include 0 to 3 effective behavioral patterns/dialogue choices; an empty section is valid when nothing is genuinely evidenced.\n"
-                        "- Add a 2nd or 3rd bullet ONLY when it is supported by distinct evidence; never pad.\n"
-                        "- Each bullet must combine evidence + content connection.\n"
+                        "- Include every genuinely evidenced effective behavioral pattern/dialogue choice - no cap, no floor; an empty section is valid when nothing is genuinely evidenced.\n"
+                        "- Add each additional bullet ONLY when it is supported by distinct evidence; never pad, and never truncate genuine strengths to hit a number.\n"
+                        "- Each bullet must combine a verbatim transcript quote + a specific curriculum connection (cite the Module and Topic by name/number).\n"
                         "Area of Development:\n"
-                        "- Include 0 to 3 systemic improvement areas/blind spots; an empty section is valid when nothing is genuinely evidenced.\n"
-                        "- Add a 2nd or 3rd bullet ONLY when it is supported by distinct evidence; never pad.\n"
-                        "- Each bullet must combine evidence + content connection.\n"
+                        "- Include every genuinely evidenced improvement area/blind spot - no cap, no floor; an empty section is valid when nothing is genuinely evidenced.\n"
+                        "- Add each additional bullet ONLY when it is supported by distinct evidence; never pad, and never truncate genuine development areas to hit a number.\n"
+                        "- Each bullet must combine a verbatim transcript quote + a specific curriculum connection (cite the Module and Topic by name/number).\n"
+                        "- Classify strictly by meaning: a critique never goes under Strengths and a compliment never goes here.\n"
                         "- Strictly no praise, compliments, mitigating words, or positive reinforcement.\n"
                         "Next Step:\n"
                         "- Recommend exactly 1 concrete forward-looking action/tool/framework.\n"
@@ -4340,6 +4507,15 @@ def chat():
                     user_turns_for_verification = "\n".join(
                         (record.user_message or "") for record in recent_history
                     )
+                    # Full-session corpus (user AND character/bot turns). End
+                    # feedback legitimately quotes in-scene character lines, so
+                    # quote verification must check the whole transcript, not
+                    # just user messages - otherwise real character quotes are
+                    # flagged as fabricated and their bullets get mangled.
+                    transcript_for_verification = "\n".join(
+                        "%s\n%s" % ((record.user_message or ""), (record.bot_message or ""))
+                        for record in recent_history
+                    )
                     roleplay_session_for_record = (
                         None if resolved_end_session_id == "__session_fallback__"
                         else resolved_end_session_id
@@ -4359,17 +4535,19 @@ def chat():
                                 "  \"next_step\": \"...\"\n"
                                 "}\n\n"
                                 "Rules:\n"
-                                "- strengths: 0-3 bullets, each 2-4 sentences, each must include (a) a VERBATIM quote copied exactly from a 'User:' line of the SESSION TRANSCRIPT and "
-                                "(b) explicit content/framework connection. If the transcript contains no genuinely praiseworthy user move, return an empty array [] - "
-                                "an empty array is a fully valid, preferred answer over inventing anything.\n"
-                                "- area_of_development: 0-3 bullets, each 2-4 sentences, same evidence requirement, no praise/compliments. "
-                                "If nothing is genuinely evidenced, return [].\n"
-                                "- NEVER fabricate, alter, or paraphrase-as-quote: every quoted phrase must appear verbatim in a 'User:' line of the transcript. "
+                                "- strengths: include EVERY genuinely evidenced effective move - there is no maximum and no minimum. "
+                                "Do not stop at three; if the session shows seven distinct strengths, return seven. If it shows none, return []. "
+                                "Never pad and never truncate: the count equals the number of points actually supported by evidence. "
+                                "Each bullet must include (a) a VERBATIM quote copied exactly from a line of the SESSION TRANSCRIPT - this may be a 'User:' line OR an in-character line the worker/parent spoke, whichever the point is about - and "
+                                "(b) an explicit connection to the curriculum content, citing the specific Module and Topic by name and number where applicable (e.g., 'Principles of Partnership, Module 2 - Topic 4' or 'the Coaching Process, Module 2 - Topic 3').\n"
+                                "- area_of_development: same rules - include EVERY genuinely evidenced development area, no cap, no floor, each with a verbatim transcript quote plus the specific Module/Topic reference. No praise, compliments, or mitigating language. If nothing is evidenced, return [].\n"
+                                "- CLASSIFY BY MEANING: a strength is something the user did well; a development area is something the user could have done better or missed. Put each point in the section its MEANING belongs to. Never place a critique under Strengths or a compliment under Area of Development.\n"
+                                "- NEVER fabricate, alter, or paraphrase-as-quote: every quoted phrase must appear verbatim somewhere in the transcript. "
                                 "A fabricated quote is the single worst failure mode of this task; quoted spans are verified against the transcript by code and fabricated ones are discarded.\n"
-                                "- next_step: exactly 1 action-focused item, 1-4 sentences, future-oriented only, no past-performance evaluation.\n"
+                                "- next_step: exactly 1 action-focused item, future-oriented only, no past-performance evaluation. Reference a specific tool, job aid, or Module/Topic where applicable.\n"
                                 "- Use only evidence from THIS current role-play session transcript.\n"
                                 "- ATTRIBUTION CHECK: before crediting the user with a strength, verify the user's OWN literal words in the transcript actually performed that move - this applies whatever role the user is playing. Do not credit the user for restraint, sound judgment, or boundary-holding that was actually shown by the AI-PLAYED CHARACTER (e.g., the user pressured for a premature verdict and the character was the one who resisted giving one) - evaluate what the user's own message actually did, even when that belongs in area_of_development rather than strengths.\n"
-                                "- Keep wording concise and readable.\n"
+                                "- Keep each bullet concise (about 2-4 sentences) and readable.\n"
                                 f"SESSION TRANSCRIPT:\n{history_text}User: {effective_user_message}\n"
                             )
 
@@ -4384,11 +4562,11 @@ def chat():
                             # evidence does not appear verbatim in the user's
                             # actual messages from this session.
                             structured_payload, dropped_bullets = drop_feedback_bullets_with_unverifiable_quotes(
-                                structured_payload, user_turns_for_verification
+                                structured_payload, transcript_for_verification
                             )
                             if dropped_bullets:
                                 logger.warning(
-                                    "End feedback: dropped %d bullet(s) citing quotes absent from the user's actual messages.",
+                                    "End feedback: dropped %d bullet(s) citing quotes absent from the session transcript.",
                                     dropped_bullets
                                 )
                             is_valid_payload, payload_issues, normalized_payload = validate_end_feedback_payload(structured_payload)
@@ -4411,7 +4589,7 @@ def chat():
                                 )
                                 repaired_payload = _extract_json_object(getattr(repaired_response, "text", ""))
                                 repaired_payload, dropped_repaired = drop_feedback_bullets_with_unverifiable_quotes(
-                                    repaired_payload, user_turns_for_verification
+                                    repaired_payload, transcript_for_verification
                                 )
                                 if dropped_repaired:
                                     logger.warning(
@@ -4438,7 +4616,8 @@ def chat():
                         has_substantive_user_turn=has_substantive_user_turn,
                         pause_feedback_text=roleplay_last_pause_feedback,
                         immediate_after_pause=is_end_immediately_after_pause,
-                        user_turns_text=user_turns_for_verification
+                        user_turns_text=user_turns_for_verification,
+                        transcript_text=transcript_for_verification
                     )
                 elif is_pause_command and active_roleplay_session_id:
                     roleplay_session_for_record = (

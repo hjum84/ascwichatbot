@@ -150,6 +150,13 @@ CONTENT_FIDELITY_PROMPT = (
 # Ordinary dialogue keeps the default 0.7.
 END_FEEDBACK_TEMPERATURE = 0.2
 
+# Single canonical fallback for a missing/blank next_step so the field is
+# never rendered empty. Kept as a constant so every path uses identical text.
+DEFAULT_END_NEXT_STEP = (
+    "In your next session, use one explicit reflective statement plus one "
+    "targeted open-ended question before advancing to advice."
+)
+
 ROLEPLAY_START_MARKER = "[[RP:START]]"
 ROLEPLAY_END_MARKER = "[[RP:END]]"
 # Character budget for the full role-play transcript in the dynamic prompt.
@@ -619,6 +626,44 @@ def _drop_misplaced_generic_feedback_items(strengths, area):
     return strengths, area
 
 
+def _is_generic_strength_item(item_text):
+    text = (item_text or "").strip()
+    if not text:
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(no clearly evidenced strength|no evidenced strength emerged|no clear strength)\b",
+            text
+        )
+    )
+
+
+def _is_generic_area_item(item_text):
+    text = (item_text or "").strip()
+    if not text:
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(no specific development area was evidenced|no development area was evidenced|no specific area of development)\b",
+            text
+        )
+    )
+
+
+def _end_feedback_is_low_information(payload):
+    """
+    True when both Strengths and Area are empty/generic placeholders.
+    Used to trigger a one-shot rescue generation pass for substantive sessions.
+    """
+    if not isinstance(payload, dict):
+        return True
+    strengths = _normalize_feedback_items(payload.get("strengths"))
+    area = _normalize_feedback_items(payload.get("area_of_development"))
+    has_non_generic_strength = any(not _is_generic_strength_item(item) for item in strengths)
+    has_non_generic_area = any(not _is_generic_area_item(item) for item in area)
+    return not has_non_generic_strength and not has_non_generic_area
+
+
 def enforce_pause_response_tone(reply_text, has_substantive_user_turn=False):
     """
     Pause feedback must be tactical (3-5 lines), not a final evaluation.
@@ -731,31 +776,29 @@ def enforce_end_response_tone(
         }
         if not (verification_text or "").strip():
             return guarded_payload
-        guarded_payload, dropped = drop_feedback_bullets_with_unverifiable_quotes(
+        guarded_payload, unverified = drop_feedback_bullets_with_unverifiable_quotes(
             guarded_payload, verification_text
         )
-        # Apply the same deterministic quote check to next_step as well.
-        # Without this, a fabricated quote can survive if it appears only in
-        # next_step while strengths/area bullets are dropped.
+        # Quote verification is observability-only (see
+        # drop_feedback_bullets_with_unverifiable_quotes docstring): content
+        # is never removed or edited because of it, including next_step.
+        # We still check next_step here purely to fold it into the same
+        # logged count.
         next_step_text = (guarded_payload.get("next_step") or "").strip()
         next_spans = _extract_quoted_spans(next_step_text)
         if next_spans:
             normalized_corpus = _normalize_quote_text(verification_text)
-            has_verified_next_quote = False
-            for span in next_spans:
-                candidate = span.strip(" .!?,;:")
-                if candidate and candidate in normalized_corpus:
-                    has_verified_next_quote = True
-                    break
+            has_verified_next_quote = any(
+                (span.strip(" .!?,;:") and span.strip(" .!?,;:") in normalized_corpus)
+                for span in next_spans
+            )
             if not has_verified_next_quote:
-                guarded_payload["next_step"] = _sanitize_feedback_item_after_quote_removal(next_step_text)
-                logger.warning(
-                    "End feedback fallback: sanitized next_step by removing unverifiable quoted evidence."
-                )
-        if dropped:
-            logger.warning(
-                "End feedback fallback: dropped %d bullet(s) with unverifiable quotes.",
-                dropped
+                unverified += 1
+        if unverified:
+            logger.info(
+                "End feedback: %d bullet(s)/next_step had a quote that did not verify verbatim "
+                "against the transcript (kept as-is; verification is observability-only).",
+                unverified
             )
         return guarded_payload
 
@@ -877,13 +920,77 @@ def _sentence_count(text_value):
     return 1
 
 
+# The model occasionally writes a section label (Strengths / Area of
+# Development / Next Step) INSIDE a JSON array item or the next_step string -
+# e.g. "**Strengths**" as its own bullet, or "... active listening skills.
+# **Area of Development**" glued to the end of a real bullet. The JSON keys are
+# the only structure we want; these helpers strip any such stray label so it
+# never renders as a garbage bullet or a heading welded mid-sentence. They are
+# deterministic and only remove label text - they never move content between
+# sections and never invent content.
+_SECTION_LABEL_CORE = r"(?:strengths?|areas?\s+of\s+development|development\s+areas?|next\s+steps?)"
+
+# A whole item that is nothing but a label (optionally bold / marked / colon'd).
+_SECTION_LABEL_ONLY_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*|__|#+)?\s*" + _SECTION_LABEL_CORE + r"\s*(?:\*\*|__)?\s*:?\s*$",
+    re.IGNORECASE,
+)
+# A label sitting at the START of an item (possibly repeated), with wrapper.
+_SECTION_LABEL_LEADING_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*|__|#+)?\s*" + _SECTION_LABEL_CORE + r"\s*(?:\*\*|__)?\s*:?\s*",
+    re.IGNORECASE,
+)
+# A BOLDED label embedded mid-item (the only mid-string form actually observed;
+# we deliberately do NOT strip unbolded mid-sentence "next step" prose, which
+# would corrupt legitimate sentences like "the next step is ...").
+_SECTION_LABEL_EMBEDDED_RE = re.compile(
+    r"\s*(?:\*\*|__)\s*" + _SECTION_LABEL_CORE + r"\s*(?:\*\*|__)\s*",
+    re.IGNORECASE,
+)
+
+
+def _is_section_label_only(text_value):
+    text = (text_value or "").strip()
+    return bool(text) and bool(_SECTION_LABEL_ONLY_RE.match(text))
+
+
+def _strip_section_labels(text_value):
+    """Remove stray section labels from a single feedback item / next_step.
+
+    Strips leading labels (even repeated) and bolded mid-item labels, then a
+    leading list marker, then collapses whitespace. Content is only removed
+    when it IS a label; ordinary prose is untouched.
+    """
+    text = (text_value or "").strip()
+    if not text:
+        return ""
+    # Peel leading labels until none remain (handles "**Strengths** Strengths:").
+    while True:
+        stripped = _SECTION_LABEL_LEADING_RE.sub("", text, count=1).strip()
+        if stripped == text:
+            break
+        text = stripped
+    text = _SECTION_LABEL_EMBEDDED_RE.sub(" ", text)
+    text = re.sub(r"^\s*[-*]\s+", "", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
 def _normalize_feedback_items(value):
     if isinstance(value, list):
-        return [str(v).strip() for v in value if str(v).strip()]
-    if isinstance(value, str):
-        lines = [line.strip(" -*\t") for line in value.splitlines() if line.strip()]
-        return [line for line in lines if line]
-    return []
+        raw = [str(v) for v in value]
+    elif isinstance(value, str):
+        raw = value.splitlines()
+    else:
+        return []
+    items = []
+    for entry in raw:
+        s = (entry or "").strip()
+        if not s or _is_section_label_only(s):
+            continue
+        cleaned = _strip_section_labels(s)
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
 def _parse_end_feedback_text_to_payload(text_value):
@@ -906,13 +1013,19 @@ def _parse_end_feedback_text_to_payload(text_value):
             stripped = raw.strip()
             if not stripped:
                 continue
+            # A standalone section label must never be glued onto the previous
+            # bullet (that welds "**Area of Development**" to the end of a
+            # sentence). Skip it outright.
+            if _is_section_label_only(stripped):
+                continue
             if stripped.startswith(("-", "*")):
                 lines.append(stripped[1:].strip())
             elif lines:
                 lines[-1] = f"{lines[-1]} {stripped}".strip()
             else:
                 lines.append(stripped)
-        return [line for line in lines if line]
+        cleaned = [_strip_section_labels(line) for line in lines]
+        return [line for line in cleaned if line]
 
     next_items = block_to_items(next_block)
     next_step = next_items[0] if next_items else (next_block or "").strip()
@@ -1039,119 +1152,53 @@ def _extract_quoted_spans(bullet_text):
     return spans
 
 
-def _replace_long_quotes_with_placeholder(text_value, placeholder="that statement"):
-    """
-    Replace substantial quoted spans with a neutral placeholder.
-    Used to salvage otherwise-useful bullets when quoted evidence fails
-    deterministic verification.
-    """
-    text = text_value or ""
-    double_quote_pattern = r'["\u201c][^"\u201d]{%d,}["\u201d]' % MIN_VERIFIABLE_QUOTE_CHARS
-    single_quote_pattern = (
-        r"'((?:[^']|'(?=[a-zA-Z])){%d,}?)'(?=[^a-zA-Z]|$)" % MIN_VERIFIABLE_QUOTE_CHARS
-    )
-
-    def _make_replacer(source_text):
-        # A removed quote often carries its OWN terminal punctuation (a
-        # quoted question ending in '?', a quoted statement ending in '.').
-        # If that punctuation was also ending the surrounding sentence - i.e.
-        # the very next visible character after the quote starts a new
-        # sentence (uppercase) - simply swapping the quote for a bare
-        # placeholder deletes that boundary and glues two sentences into a
-        # run-on (observed: '...by asking, "...?" This forced...' ->
-        # '...by asking, that statement This forced...', no period). When
-        # that pattern is detected, a period is appended to the placeholder
-        # so the sentence boundary survives the quote's removal.
-        def _sub(match):
-            rest = source_text[match.end():].lstrip()
-            if rest and rest[0].isupper():
-                return " %s. " % placeholder
-            return " %s " % placeholder
-        return _sub
-
-    # Pad the placeholder with spaces so a quote sitting flush against an
-    # adjacent word (e.g. connect the "..." to) never fuses into it
-    # ("connect the that statement to"), which produced mangled output like
-    # "Ramirezthat statementjust". Surrounding whitespace is collapsed by the
-    # caller (_sanitize_feedback_item_after_quote_removal).
-    text = re.sub(double_quote_pattern, _make_replacer(text), text)
-    text = re.sub(single_quote_pattern, _make_replacer(text), text)
-    return text
-
-
-def _sanitize_feedback_item_after_quote_removal(item_text):
-    sanitized = _replace_long_quotes_with_placeholder(item_text, placeholder="that statement")
-    sanitized = re.sub(
-        r"\bthat statement\.?(?:\s+that statement\.?)+\b",
-        "that statement",
-        sanitized,
-        flags=re.IGNORECASE
-    )
-    sanitized = re.sub(r"\s+([,.;:])", r"\1", sanitized)
-    sanitized = re.sub(r"\s{2,}", " ", sanitized).strip(" -\t")
-    return sanitized
-
-
 def drop_feedback_bullets_with_unverifiable_quotes(payload, user_turns_text):
     """
-    Deterministic anti-hallucination guard for session feedback.
+    Observability-only quote check for session feedback (NOT a content
+    filter as of this revision).
 
-    Prompt instructions alone cannot prevent fabricated evidence when a
-    structural constraint pushes the other way, so this guard verifies
-    IN CODE: every substantial quoted span inside a feedback bullet is
-    checked for verbatim presence in the user's ACTUAL messages from this
-    session. A bullet whose quoted spans are all absent from the user's
-    real messages is citing evidence the user never provided (observed
-    failure mode: a fully invented user quote) and is dropped. Bullets
-    without extractable quotes are kept, since paraphrase evidence cannot
-    be checked deterministically. Substring containment also keeps this
-    robust to imprecise span extraction: any genuinely copied fragment of
-    a real user line still matches.
+    History: this started as a hard anti-hallucination guard that dropped
+    any bullet whose quoted evidence didn't verify verbatim against the
+    session transcript. In practice that traded away too much: nested
+    scare-quotes around a skill/framework name (e.g. 'Questioning') routinely
+    made the span extractor misread quote boundaries and flag a perfectly
+    real bullet as "unverifiable," and on at least one real session the drop
+    policy removed every single bullet from an otherwise strong evaluation.
+    Per explicit product direction, completeness and classification accuracy
+    matter more than a deterministic per-quote verbatim check, so this
+    function NO LONGER REMOVES ANYTHING. It only counts bullets whose quoted
+    spans fail to verify and returns that count for logging, so the failure
+    mode is visible in the logs without being invisible to the person using
+    the tool. The payload passed in is returned unchanged.
 
-    Returns (payload, dropped_count).
+    Returns (payload, unverified_count).
     """
     if not isinstance(payload, dict):
         return payload, 0
-    normalized_user_text = _normalize_quote_text(user_turns_text)
-    dropped_count = 0
-    salvaged_count = 0
+    normalized_corpus = _normalize_quote_text(user_turns_text)
+    unverified_count = 0
     for section_key in ("strengths", "area_of_development"):
         items = _normalize_feedback_items(payload.get(section_key))
-        kept_items = []
         for item in items:
             spans = _extract_quoted_spans(item)
-            if spans:
-                any_verified = False
-                for span in spans:
-                    candidate = span.strip(" .!?,;:")
-                    if candidate and candidate in normalized_user_text:
-                        any_verified = True
-                        break
-                if not any_verified:
-                    # Preserve useful analytical content while removing
-                    # unverifiable quoted evidence instead of hard-dropping
-                    # the full bullet.
-                    sanitized_item = _sanitize_feedback_item_after_quote_removal(item)
-                    if sanitized_item:
-                        kept_items.append(sanitized_item)
-                        salvaged_count += 1
-                        continue
-                    dropped_count += 1
-                    continue
-            kept_items.append(item)
-        payload[section_key] = kept_items
-    if salvaged_count:
-        logger.warning(
-            "End feedback quote guard: salvaged %d bullet(s) by removing unverifiable quoted spans.",
-            salvaged_count
-        )
-    return payload, dropped_count
+            if not spans:
+                continue
+            any_verified = any(
+                (span.strip(" .!?,;:") and span.strip(" .!?,;:") in normalized_corpus)
+                for span in spans
+            )
+            if not any_verified:
+                unverified_count += 1
+    return payload, unverified_count
 
 
 def format_end_feedback_payload(payload):
-    strengths = payload.get("strengths") or []
-    area = payload.get("area_of_development") or []
-    next_step = (payload.get("next_step") or "").strip()
+    # Normalize (which strips stray section labels and drops label-only items)
+    # at the render boundary so the displayed feedback is always clean no
+    # matter which upstream path produced the payload.
+    strengths = _normalize_feedback_items(payload.get("strengths"))
+    area = _normalize_feedback_items(payload.get("area_of_development"))
+    next_step = _strip_section_labels(payload.get("next_step") or "")
     strengths, area = _drop_misplaced_generic_feedback_items(strengths, area)
 
     strengths_block = "\n".join([f"- {item}" for item in strengths]) if strengths else "- No clearly evidenced strength emerged from your turns in this session."
@@ -4060,6 +4107,7 @@ def chat():
                     "8. Strengths: include EVERY genuinely evidenced effective behavioral pattern or dialogue choice the user applied - no maximum, no minimum. Each bullet must weave (a) a verbatim quote from the transcript with (b) a specific curriculum connection citing the Module and Topic by name/number. Include a bullet ONLY when it is supported by distinct evidence from this session; if the session contains no genuinely evidenced strength, include none - an honest empty section always beats an invented one, and never truncate genuine strengths to hit a number.\n"
                     "9. Area of Development: include EVERY genuinely evidenced improvement area or blind spot - no maximum, no minimum; each bullet must weave a verbatim transcript quote with a specific Module/Topic connection. Include a bullet ONLY when it is supported by distinct evidence from this session; never pad and never truncate. Strictly no praise, compliments, mitigating language, or positive reinforcement in this section. Classify by meaning: a critique never belongs under Strengths, and a compliment never belongs here.\n"
                     "10. Next Step: recommend exactly one concrete forward-looking action/tool/framework for future practice (2 to 4 sentences). Do not evaluate, praise, or reference past performance in this section.\n"
+                    "11. QUOTING STYLE: use double quotation marks ONLY around a verbatim line copied from the transcript. NEVER put a skill, framework, principle, or Module/Topic name in quotation marks of any kind (single or double) - write it in plain text instead (e.g. write the Coaching Process, not 'the Coaching Process'). Mixing scare-quotes for terminology with quotation marks for dialogue in the same bullet is not allowed, since it makes the citation ambiguous and breaks downstream verification.\n"
                     "\n"
                     "F. ROLE-PLAY SESSION MARKERS (SYSTEM PROTOCOL - INVISIBLE TO THE USER)\n"
                     "1. When your reply begins a NEW role-play scenario (your first in-character turn), output the exact token [[RP:START]] at the very beginning of your reply, before any other text.\n"
@@ -4289,6 +4337,7 @@ def chat():
                         "- Never evaluate without referencing what the user actually did/said.\n"
                         "- ATTRIBUTION CHECK: before crediting the user with any strength, verify the user's OWN literal words actually performed that move - this applies whatever role the user is playing. If a good outcome in the scene (restraint, sound judgment, resisting a premature conclusion) was actually produced by the AI-PLAYED CHARACTER despite the user's message pushing the opposite direction, do not credit the user for it - instead, evaluate what the user's own message actually did, even if that means it belongs in Area of Development rather than Strengths.\n"
                         "- Keep each bullet concise (2 to 4 sentences), readable, and not overly granular.\n"
+                        "- QUOTING STYLE: use double quotation marks ONLY around a verbatim line copied from the transcript. NEVER put a skill, framework, principle, or Module/Topic name in quotation marks of any kind (single or double) - write it in plain text instead (e.g. write the Coaching Process, not 'the Coaching Process' or \"the Coaching Process\"). Mixing scare-quotes for terminology with quotation marks for dialogue in the same bullet is not allowed, since it makes the citation ambiguous.\n"
                         "Required format and constraints:\n"
                         "Strengths:\n"
                         "- Include every genuinely evidenced effective behavioral pattern/dialogue choice - no cap, no floor; an empty section is valid when nothing is genuinely evidenced.\n"
@@ -4500,6 +4549,22 @@ def chat():
                     roleplay_state_for_record = "start"
                     roleplay_active_after = True
                     chatbot_reply = normalize_roleplay_start_reply(chatbot_reply)
+                elif (
+                    is_end_command and
+                    not roleplay_event and
+                    not (active_roleplay_session_id or roleplay_session_id_from_session)
+                ):
+                    # Prevent cross-session contamination: an END command with
+                    # no active role-play must not generate feedback from the
+                    # generic recent-history window.
+                    roleplay_event = None
+                    roleplay_session_for_record = None
+                    roleplay_state_for_record = None
+                    roleplay_active_after = False
+                    chatbot_reply = (
+                        "No active role-play session is in progress to end.\n"
+                        "Start a role-play, then use end role-play to receive final feedback for that same session."
+                    )
                 elif (roleplay_event == "end" or is_end_command):
                     resolved_end_session_id = (
                         active_roleplay_session_id or roleplay_session_id_from_session
@@ -4525,6 +4590,22 @@ def chat():
                     if roleplay_event != "end":
                         roleplay_event = "end"
 
+                    # ------------------------------------------------------------------
+                    # End-of-role-play feedback (structured).
+                    #
+                    # Design: the model's JSON is the SINGLE SOURCE OF TRUTH. We
+                    # trust its own placement of each point (strengths vs. area)
+                    # because it read the whole session; we do NOT re-classify by
+                    # surface keywords (that lexical router is what mislabeled
+                    # praise as critique and welded stray headings onto bullets in
+                    # prior versions). Post-processing is defensive only: strip any
+                    # section labels the model embedded in its strings; never
+                    # invent, drop, or move content. Validation is advisory
+                    # (logged, not enforced) so a soft style miss (e.g. a
+                    # 5-sentence bullet) never discards a correct payload. No
+                    # bullet-count floor or cap: 0 stays 0, 10 stays 10.
+                    # ------------------------------------------------------------------
+                    structured_feedback_ready = False
                     if has_substantive_user_turn:
                         try:
                             structured_end_prompt = (
@@ -4535,90 +4616,131 @@ def chat():
                                 "  \"next_step\": \"...\"\n"
                                 "}\n\n"
                                 "Rules:\n"
-                                "- strengths: include EVERY genuinely evidenced effective move - there is no maximum and no minimum. "
-                                "Do not stop at three; if the session shows seven distinct strengths, return seven. If it shows none, return []. "
-                                "Never pad and never truncate: the count equals the number of points actually supported by evidence. "
-                                "Each bullet must include (a) a VERBATIM quote copied exactly from a line of the SESSION TRANSCRIPT - this may be a 'User:' line OR an in-character line the worker/parent spoke, whichever the point is about - and "
-                                "(b) an explicit connection to the curriculum content, citing the specific Module and Topic by name and number where applicable (e.g., 'Principles of Partnership, Module 2 - Topic 4' or 'the Coaching Process, Module 2 - Topic 3').\n"
-                                "- area_of_development: same rules - include EVERY genuinely evidenced development area, no cap, no floor, each with a verbatim transcript quote plus the specific Module/Topic reference. No praise, compliments, or mitigating language. If nothing is evidenced, return [].\n"
-                                "- CLASSIFY BY MEANING: a strength is something the user did well; a development area is something the user could have done better or missed. Put each point in the section its MEANING belongs to. Never place a critique under Strengths or a compliment under Area of Development.\n"
-                                "- NEVER fabricate, alter, or paraphrase-as-quote: every quoted phrase must appear verbatim somewhere in the transcript. "
-                                "A fabricated quote is the single worst failure mode of this task; quoted spans are verified against the transcript by code and fabricated ones are discarded.\n"
-                                "- next_step: exactly 1 action-focused item, future-oriented only, no past-performance evaluation. Reference a specific tool, job aid, or Module/Topic where applicable.\n"
-                                "- Use only evidence from THIS current role-play session transcript.\n"
-                                "- ATTRIBUTION CHECK: before crediting the user with a strength, verify the user's OWN literal words in the transcript actually performed that move - this applies whatever role the user is playing. Do not credit the user for restraint, sound judgment, or boundary-holding that was actually shown by the AI-PLAYED CHARACTER (e.g., the user pressured for a premature verdict and the character was the one who resisted giving one) - evaluate what the user's own message actually did, even when that belongs in area_of_development rather than strengths.\n"
+                                "- STRUCTURE: the three JSON keys are the ONLY structure. Do NOT write the words Strengths, Area of Development, or Next Step (with or without asterisks, bold, hashes, or a colon) anywhere inside an array item or inside the next_step string. Each array item is ONE self-contained bullet of plain prose. Do not number the bullets or add your own headings.\n"
+                                "- WHO IS GRADED: you are assessing what the USER (the human, whatever role they play) demonstrated. Every strengths and area_of_development bullet MUST quote the USER's OWN words verbatim - a line the user actually typed in the transcript - as the evidence for that point. You may briefly reference what the in-character AI said only for context, but the graded evidence and the quote must be the user's own words. Never credit the user for restraint, judgment, or skill that the AI-played character actually showed (e.g., the user pushed for a premature verdict and the character was the one who held back) - grade what the user's own message did, placing it in area_of_development when appropriate.\n"
+                                "- QUOTING STYLE: use double-quote marks ONLY around the verbatim user line you copied. NEVER wrap a skill, framework, principle, or Module/Topic name in quotation marks - write those in plain text (e.g. write Principles of Partnership, Module 2 - Topic 4, not \\\"Principles of Partnership\\\"). Do not mix scare-quotes for terminology with quotation marks for dialogue in the same bullet.\n"
+                                "- strengths: include EVERY genuinely evidenced effective move by the user - no maximum, no minimum. If the session shows seven distinct strengths, return seven; if it shows none, return []. Never pad and never truncate. Each bullet: (a) a verbatim quote of the user's own words, and (b) an explicit connection to the curriculum content, citing the specific Module and Topic by name and number in plain text (e.g., the Coaching Process, Module 2 - Topic 3).\n"
+                                "- area_of_development: same rules - include EVERY genuinely evidenced development area, no cap, no floor, each with a verbatim quote of the user's own words plus the specific Module/Topic reference. No praise or mitigating language. If nothing is evidenced, return [].\n"
+                                "- CLASSIFY BY MEANING: a strength is something the user did well; a development area is something the user could have done better or missed. Put each point in the section its meaning belongs to. Never place a critique under strengths or a compliment under area_of_development.\n"
+                                "- NEVER fabricate, alter, or paraphrase-as-quote: every quoted phrase must appear verbatim in the transcript. A fabricated quote is the worst failure mode here and will NOT be auto-corrected.\n"
+                                "- next_step: exactly one action-focused item, future-oriented only, no past-performance evaluation. Reference a specific tool, job aid, or Module/Topic where applicable.\n"
+                                "- Use ONLY evidence from THIS current role-play session transcript below. Ignore any earlier or unrelated sessions.\n"
                                 "- Keep each bullet concise (about 2-4 sentences) and readable.\n"
                                 f"SESSION TRANSCRIPT:\n{history_text}User: {effective_user_message}\n"
                             )
 
-                            structured_response = call_agent_model_with_retry(
-                                structured_end_prompt,
-                                model_name,
-                                max_attempts=2,
-                                temperature=END_FEEDBACK_TEMPERATURE
-                            )
-                            structured_payload = _extract_json_object(getattr(structured_response, "text", ""))
-                            # Deterministic guard: drop any bullet whose quoted
-                            # evidence does not appear verbatim in the user's
-                            # actual messages from this session.
-                            structured_payload, dropped_bullets = drop_feedback_bullets_with_unverifiable_quotes(
-                                structured_payload, transcript_for_verification
-                            )
-                            if dropped_bullets:
-                                logger.warning(
-                                    "End feedback: dropped %d bullet(s) citing quotes absent from the session transcript.",
-                                    dropped_bullets
-                                )
-                            is_valid_payload, payload_issues, normalized_payload = validate_end_feedback_payload(structured_payload)
-
-                            if not is_valid_payload:
-                                repair_prompt = (
-                                    "Fix the JSON payload below to satisfy ALL validation errors. "
-                                    "Return ONLY corrected JSON object, no prose. "
-                                    "Empty arrays for strengths or area_of_development are VALID - "
-                                    "NEVER invent quotes, moves, or evidence to satisfy a count; "
-                                    "removing an unsupported bullet is always the correct fix.\n\n"
-                                    f"Validation errors: {', '.join(payload_issues)}\n"
-                                    f"Original payload: {json.dumps(structured_payload or {}, ensure_ascii=False)}\n"
-                                )
-                                repaired_response = call_agent_model_with_retry(
-                                    repair_prompt,
+                            def _request_end_feedback_json(prompt_text):
+                                response = call_agent_model_with_retry(
+                                    prompt_text,
                                     model_name,
-                                    max_attempts=1,
+                                    max_attempts=2,
                                     temperature=END_FEEDBACK_TEMPERATURE
                                 )
-                                repaired_payload = _extract_json_object(getattr(repaired_response, "text", ""))
-                                repaired_payload, dropped_repaired = drop_feedback_bullets_with_unverifiable_quotes(
-                                    repaired_payload, transcript_for_verification
-                                )
-                                if dropped_repaired:
-                                    logger.warning(
-                                        "End feedback (repair pass): dropped %d bullet(s) with unverifiable quotes.",
-                                        dropped_repaired
-                                    )
-                                is_valid_payload, payload_issues, normalized_payload = validate_end_feedback_payload(repaired_payload)
+                                return _extract_json_object(getattr(response, "text", ""))
 
-                            if is_valid_payload and normalized_payload:
-                                chatbot_reply = format_end_feedback_payload(normalized_payload)
+                            structured_payload = _request_end_feedback_json(structured_end_prompt)
+                            # One clean retry ONLY when the model returned nothing
+                            # parseable as JSON (never for a soft-rule miss).
+                            if not isinstance(structured_payload, dict):
+                                structured_payload = _request_end_feedback_json(
+                                    structured_end_prompt
+                                    + "\nIMPORTANT: your previous reply was not valid JSON. "
+                                      "Return ONLY the JSON object, nothing before or after it.\n"
+                                )
+
+                            if isinstance(structured_payload, dict):
+                                # Observability-only quote check (logs, never drops).
+                                _, unverified_bullets = drop_feedback_bullets_with_unverifiable_quotes(
+                                    structured_payload, transcript_for_verification
+                                )
+                                if unverified_bullets:
+                                    logger.info(
+                                        "End feedback: %d bullet(s) had a quote that did not verify "
+                                        "verbatim against the transcript (kept as-is).",
+                                        unverified_bullets
+                                    )
+                                # Advisory validation: log any style notes, never discard.
+                                is_valid_payload, payload_issues, _ = validate_end_feedback_payload(
+                                    structured_payload
+                                )
+                                if not is_valid_payload:
+                                    logger.info(
+                                        "End feedback: model JSON kept despite advisory validation notes: %s",
+                                        payload_issues
+                                    )
+                                # One rescue pass ONLY when BOTH sections came back
+                                # empty/generic for a substantive session.
+                                if _end_feedback_is_low_information(structured_payload):
+                                    logger.warning(
+                                        "End feedback low-information; running one rescue pass."
+                                    )
+                                    rescue_prompt = (
+                                        structured_end_prompt
+                                        + "\nThe first attempt returned no usable strengths or "
+                                          "development areas. Re-examine the transcript carefully: if "
+                                          "the user made ANY substantive coaching move, surface it with "
+                                          "its verbatim quote. Only return empty arrays if the transcript "
+                                          "truly contains no gradable user move.\n"
+                                    )
+                                    rescue_payload = _request_end_feedback_json(rescue_prompt)
+                                    if (
+                                        isinstance(rescue_payload, dict)
+                                        and not _end_feedback_is_low_information(rescue_payload)
+                                    ):
+                                        drop_feedback_bullets_with_unverifiable_quotes(
+                                            rescue_payload, transcript_for_verification
+                                        )
+                                        structured_payload = rescue_payload
+                                    else:
+                                        logger.warning(
+                                            "End feedback rescue pass still low-information; keeping first pass."
+                                        )
+                                # TRUST the model's section placement; only ensure
+                                # next_step is present. format_end_feedback_payload
+                                # strips stray labels and keeps every bullet as-is.
+                                if not (structured_payload.get("next_step") or "").strip():
+                                    structured_payload["next_step"] = DEFAULT_END_NEXT_STEP
+                                chatbot_reply = format_end_feedback_payload(structured_payload)
+                                structured_feedback_ready = True
                             else:
                                 logger.warning(
-                                    "Structured end feedback validation failed; using fallback formatter. Issues: %s",
-                                    payload_issues
+                                    "End feedback: model returned no parseable JSON after retry; "
+                                    "rendering honest empty feedback."
                                 )
+                                chatbot_reply = format_end_feedback_payload({
+                                    "strengths": [],
+                                    "area_of_development": [],
+                                    "next_step": DEFAULT_END_NEXT_STEP,
+                                })
+                                structured_feedback_ready = True
                         except Exception as structured_end_error:
                             logger.warning(
-                                "Structured end feedback generation failed; falling back. Error: %s",
+                                "Structured end feedback generation failed; rendering honest "
+                                "empty feedback. Error: %s",
                                 str(structured_end_error)
                             )
+                            chatbot_reply = format_end_feedback_payload({
+                                "strengths": [],
+                                "area_of_development": [],
+                                "next_step": DEFAULT_END_NEXT_STEP,
+                            })
+                            structured_feedback_ready = True
 
-                    chatbot_reply = enforce_end_response_tone(
-                        chatbot_reply,
-                        has_substantive_user_turn=has_substantive_user_turn,
-                        pause_feedback_text=roleplay_last_pause_feedback,
-                        immediate_after_pause=is_end_immediately_after_pause,
-                        user_turns_text=user_turns_for_verification,
-                        transcript_text=transcript_for_verification
-                    )
+                    # Non-substantive sessions still get the canned template from
+                    # enforce_end_response_tone. Substantive sessions were already
+                    # rendered above as trusted, clean JSON - do NOT re-run the
+                    # tone enforcer on them (its lexical fallback is exactly what
+                    # mangled correctly-placed content and welded headings onto
+                    # bullets in prior versions).
+                    if not structured_feedback_ready:
+                        chatbot_reply = enforce_end_response_tone(
+                            chatbot_reply,
+                            has_substantive_user_turn=has_substantive_user_turn,
+                            pause_feedback_text=roleplay_last_pause_feedback,
+                            immediate_after_pause=is_end_immediately_after_pause,
+                            user_turns_text=user_turns_for_verification,
+                            transcript_text=transcript_for_verification
+                        )
                 elif is_pause_command and active_roleplay_session_id:
                     roleplay_session_for_record = (
                         None if active_roleplay_session_id == "__session_fallback__"

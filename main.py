@@ -3263,8 +3263,11 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
             # been applied.
             rp_state = getattr(h, 'roleplay_state', None)
 
-            # Add user message
+            # Add user message. 'id' is the DB row id, carried on both the
+            # user and bot dict of a row so the frontend can use the oldest
+            # loaded row id as the cursor for "Load older messages".
             user_msg = {
+                'id': h.id,
                 'message': h.user_message,
                 'sender': 'user',
                 'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M'),
@@ -3276,6 +3279,7 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
             
             # Add bot message
             bot_msg = {
+                'id': h.id,
                 'message': h.bot_message,
                 'sender': 'bot',
                 'timestamp': h.timestamp.strftime('%Y-%m-%d %H:%M'),
@@ -3327,6 +3331,101 @@ def get_chat_history_and_remaining(user_id, program_code, limit=50):
         return result, remaining_questions, quota
     finally:
         close_db(db)
+
+
+# Page size for the "Load older messages" control (see loadOlderMessages() in
+# index.html). Kept equal to the initial-load limit above (50) so paging is
+# uniform. This is a display-only concern; it does not touch quota or role-play.
+OLDER_MESSAGES_PAGE_SIZE = 50
+
+
+@app.route('/older_messages')
+@login_required
+def older_messages():
+    """
+    Return one page of chat history OLDER than a cursor row id, for the
+    "Load older messages" control in the chat UI.
+
+    Read-only and self-contained: scoped to the logged-in user and the given
+    program, using the exact same visibility filter and per-message shape as
+    get_chat_history_and_remaining (each DB row -> a 'user' dict + a 'bot'
+    dict, both tagged with the row id). It never touches quota accounting,
+    role-play session state, or any other feature.
+
+    Query args:
+      - program_code : the chatbot program (e.g. 'BCC').
+      - before_id    : return only rows with a smaller id (older) than this.
+    Response JSON:
+      - messages : list of message dicts in chronological order (oldest first),
+                   ready to be prepended above the current oldest message.
+      - has_more : True if even older messages exist beyond this page.
+    """
+    user_id = current_user.id
+    program_code = (request.args.get('program_code') or '').strip()
+    before_id_raw = (request.args.get('before_id') or '').strip()
+    if not program_code or not before_id_raw:
+        return jsonify({'error': 'program_code and before_id are required'}), 400
+    try:
+        before_id = int(before_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'before_id must be an integer'}), 400
+
+    db = get_db()
+    try:
+        rows = db.query(ChatHistory).filter(
+            ChatHistory.user_id == user_id,
+            ChatHistory.program_code == program_code,
+            ChatHistory.is_visible == True,
+            ChatHistory.id < before_id
+        ).order_by(
+            ChatHistory.timestamp.desc(),
+            ChatHistory.id.desc()
+        ).limit(OLDER_MESSAGES_PAGE_SIZE).all()
+        # Reverse to chronological (oldest -> newest) so the frontend can
+        # prepend the block above the current oldest message in natural order.
+        rows.reverse()
+
+        messages = []
+        oldest_id = None
+        for h in rows:
+            if oldest_id is None or h.id < oldest_id:
+                oldest_id = h.id
+            deletion_info = get_chat_deletion_info(h.timestamp, program_code)
+            rp_state = getattr(h, 'roleplay_state', None)
+            ts = h.timestamp.strftime('%Y-%m-%d %H:%M')
+            user_msg = {
+                'id': h.id,
+                'message': h.user_message,
+                'sender': 'user',
+                'timestamp': ts,
+                'roleplay_state': rp_state
+            }
+            bot_msg = {
+                'id': h.id,
+                'message': h.bot_message,
+                'sender': 'bot',
+                'timestamp': ts,
+                'roleplay_state': rp_state
+            }
+            if deletion_info:
+                user_msg['deletion_info'] = deletion_info
+                bot_msg['deletion_info'] = deletion_info
+            messages.append(user_msg)
+            messages.append(bot_msg)
+
+        has_more = False
+        if oldest_id is not None:
+            has_more = db.query(ChatHistory.id).filter(
+                ChatHistory.user_id == user_id,
+                ChatHistory.program_code == program_code,
+                ChatHistory.is_visible == True,
+                ChatHistory.id < oldest_id
+            ).first() is not None
+
+        return jsonify({'messages': messages, 'has_more': has_more})
+    finally:
+        close_db(db)
+
 
 # BCC Chatbot interface
 @app.route('/index_bcc')

@@ -515,6 +515,28 @@
 
     .roleplay-divider.start { color: #64748b; }
     .roleplay-divider.pause { color: #0f766e; }
+
+    /* "Load older messages" control: a quiet centered pill at the top of the
+       chat history. Styled to blend with the existing command chips. */
+    .load-older-container {
+      display: flex;
+      justify-content: center;
+      margin: 8px auto 14px;
+    }
+    .load-older-container[hidden] { display: none; }
+    .load-older-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 14px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .load-older-btn:hover:not(:disabled) { background: #e2e8f0; color: #334155; }
+    .load-older-btn:disabled { opacity: 0.6; cursor: default; }
     .roleplay-divider.end { color: #334155; }
 
     @media (max-width: 760px) {
@@ -625,12 +647,19 @@
         </div>
       </div>
       {% endif %}
+      {# "Load older messages" control. Hidden by default; JS reveals it when
+         the initial window is full (i.e. older messages likely exist), and
+         hides it again once the server reports no more older messages. #}
+      <div id="loadOlderContainer" class="load-older-container" hidden>
+        <button type="button" id="loadOlderBtn" class="load-older-btn">Load older messages</button>
+      </div>
       {# Placeholder for chat history messages - will be populated by JS #}
       {% if chat_history %}
         {% for chat in chat_history %}
           <div class="message {{ chat.sender }}{% if chat.sender == 'bot' and chat.roleplay_state in ['start', 'active', 'pause', 'end'] %} roleplay{% endif %}{% if chat.sender == 'bot' and chat.roleplay_state == 'pause' %} roleplay-feedback{% endif %}{% if chat.sender == 'bot' and chat.roleplay_state == 'end' %} roleplay-feedback-end{% endif %}" 
                data-sender="{{ chat.sender }}" 
                data-raw='{{ chat.message|tojson|safe }}'
+               {% if chat.id is defined %}data-row-id="{{ chat.id }}"{% endif %}
                {% if chat.roleplay_state %}data-roleplay-state="{{ chat.roleplay_state }}"{% endif %}
                {% if chat.deletion_info %}data-deletion-info='{{ chat.deletion_info|tojson|safe }}'{% endif %}></div>
         {% endfor %}
@@ -1382,26 +1411,17 @@
     })();
     
     // Initial scroll to bottom and rendering of existing messages
-    document.addEventListener('DOMContentLoaded', () => {
-        // Process intro message with Markdown
-        const introMessageElement = document.getElementById('intro-message');
-        const introContent = introMessageElement.getAttribute('data-content');
-        if (typeof marked !== 'undefined') {
-            introMessageElement.innerHTML = DOMPurify.sanitize(marked.parse(introContent));
-        } else {
-            introMessageElement.textContent = introContent;
-        }
-
-        // Process existing messages on page load
-        const existingMessages = document.querySelectorAll('.message[data-raw]');
-        // Running role-play state while walking history in DOM order, used to
-        // decide whether a user message that matches a command string should
-        // render as a control chip instead of a speech bubble. A command
-        // bubble always precedes the bot reply that carries the state tag, so
-        // the state seen so far is the state the command was issued under.
+    // Hydrate a set of server-rendered (or JS-built) message shells: render
+    // markdown, turn role-play control commands into chips, infer skins, and
+    // attach deletion notices. Extracted verbatim from the original page-load
+    // loop so initial load and "Load older messages" share ONE render path.
+    // A local role-play state machine (seeded inactive) decides chip vs bubble
+    // as it walks the shells in DOM order; callers must pass shells in
+    // chronological order.
+    function hydrateMessageShells(shellList) {
         let historyRpActive = false;
         let historyRpPaused = false;
-        existingMessages.forEach(messageDiv => {
+        shellList.forEach(messageDiv => {
             const rawData = messageDiv.getAttribute('data-raw');
             const deletionData = messageDiv.getAttribute('data-deletion-info');
 
@@ -1448,16 +1468,16 @@
                 try {
                     const messageText = JSON.parse(rawData);
                     const p = messageDiv.querySelector('p') || document.createElement('p');
-                    
-            if (typeof marked !== 'undefined') {
+
+                    if (typeof marked !== 'undefined') {
                         const parsedContent = marked.parse(messageText);
-                        p.innerHTML = typeof DOMPurify !== 'undefined' ? 
-                                      DOMPurify.sanitize(parsedContent) : 
+                        p.innerHTML = typeof DOMPurify !== 'undefined' ?
+                                      DOMPurify.sanitize(parsedContent) :
                                       parsedContent;
-            } else {
+                    } else {
                         p.textContent = messageText;
-            }
-                    
+                    }
+
                     if (!messageDiv.querySelector('p')) {
                         messageDiv.appendChild(p);
                     }
@@ -1470,7 +1490,7 @@
                     console.error('Error parsing message data:', e);
                 }
             }
-            
+
             // Add deletion notice if available
             if (deletionData && !messageDiv.querySelector('.deletion-notice')) {
                 try {
@@ -1484,6 +1504,140 @@
                 }
             }
         });
+    }
+
+    // --- "Load older messages" -------------------------------------------------
+    // The initial page load shows only the most recent window of history (see
+    // INITIAL_HISTORY_LIMIT / get_chat_history_and_remaining in main.py). This
+    // control fetches older messages on demand and prepends them, reusing the
+    // exact hydration + skin path so the role-play styling stays identical.
+    const PROGRAM_CODE = "{{ program_code }}";
+    // Keep in sync with the initial-load limit in main.py
+    // (get_chat_history_and_remaining default). Used only to decide whether the
+    // "Load older" button should appear on first load.
+    const INITIAL_HISTORY_LIMIT = 50;
+    let loadOlderInFlight = false;
+
+    // Build a history shell div matching the server-rendered markup. Only the
+    // base class + data attributes are set here; applyRoleplayStylesFromStateTags
+    // re-derives the role-play skin classes afterwards, so they are not needed.
+    function buildHistoryShell(chat) {
+        const div = document.createElement('div');
+        div.className = 'message ' + chat.sender;
+        div.setAttribute('data-sender', chat.sender);
+        div.setAttribute('data-raw', JSON.stringify(chat.message));
+        if (chat.id !== undefined && chat.id !== null) {
+            div.setAttribute('data-row-id', String(chat.id));
+        }
+        if (chat.roleplay_state) {
+            div.setAttribute('data-roleplay-state', chat.roleplay_state);
+        }
+        if (chat.deletion_info) {
+            div.setAttribute('data-deletion-info', JSON.stringify(chat.deletion_info));
+        }
+        return div;
+    }
+
+    // Smallest loaded row id = the cursor for the next older page.
+    function getOldestLoadedRowId() {
+        let oldest = null;
+        chatBox.querySelectorAll('.message[data-row-id]').forEach((el) => {
+            const idVal = parseInt(el.getAttribute('data-row-id'), 10);
+            if (!Number.isNaN(idVal) && (oldest === null || idVal < oldest)) {
+                oldest = idVal;
+            }
+        });
+        return oldest;
+    }
+
+    // Number of distinct history rows currently loaded (each row -> 2 shells
+    // sharing one id).
+    function countLoadedHistoryRows() {
+        const ids = new Set();
+        chatBox.querySelectorAll('.message[data-row-id]').forEach((el) => {
+            ids.add(el.getAttribute('data-row-id'));
+        });
+        return ids.size;
+    }
+
+    function setLoadOlderVisible(visible) {
+        const container = document.getElementById('loadOlderContainer');
+        if (container) container.hidden = !visible;
+    }
+
+    function loadOlderMessages() {
+        if (loadOlderInFlight) return;
+        const beforeId = getOldestLoadedRowId();
+        const btn = document.getElementById('loadOlderBtn');
+        if (beforeId === null) { setLoadOlderVisible(false); return; }
+
+        loadOlderInFlight = true;
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading\u2026'; }
+
+        // Anchor the viewport so prepending content does not make it jump.
+        const prevScrollHeight = chatBox.scrollHeight;
+        const prevScrollTop = chatBox.scrollTop;
+
+        const url = '/older_messages?program_code=' + encodeURIComponent(PROGRAM_CODE) +
+                    '&before_id=' + encodeURIComponent(beforeId);
+
+        return fetch(url, { headers: { 'Accept': 'application/json' } })
+            .then((res) => res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)))
+            .then((data) => {
+                const messages = (data && data.messages) || [];
+                if (messages.length) {
+                    // Build shells in chronological order and prepend them above
+                    // the current oldest history message.
+                    const fragment = document.createDocumentFragment();
+                    const newShells = [];
+                    messages.forEach((chat) => {
+                        const shell = buildHistoryShell(chat);
+                        fragment.appendChild(shell);
+                        newShells.push(shell);
+                    });
+                    const firstHistory = chatBox.querySelector('.message[data-raw]');
+                    if (firstHistory) {
+                        chatBox.insertBefore(fragment, firstHistory);
+                    } else {
+                        chatBox.appendChild(fragment);
+                    }
+                    // Render just the new block, then re-derive skins/dividers
+                    // across the whole history (both functions rebuild from
+                    // scratch, so re-running them is safe and idempotent).
+                    hydrateMessageShells(newShells);
+                    applyRoleplayStylesFromStateTags();
+                    applyHistoricalStartBlockDecoration();
+                    rebuildRoleplayDividersFromHistory();
+                    // Keep the same message under the user's eye.
+                    chatBox.scrollTop = prevScrollTop + (chatBox.scrollHeight - prevScrollHeight);
+                }
+                setLoadOlderVisible(!!(data && data.has_more));
+            })
+            .catch((err) => {
+                console.error('Failed to load older messages:', err);
+                // Leave the button available so the user can retry.
+            })
+            .finally(() => {
+                loadOlderInFlight = false;
+                if (btn) { btn.disabled = false; btn.textContent = 'Load older messages'; }
+            });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Process intro message with Markdown
+        const introMessageElement = document.getElementById('intro-message');
+        const introContent = introMessageElement.getAttribute('data-content');
+        if (typeof marked !== 'undefined') {
+            introMessageElement.innerHTML = DOMPurify.sanitize(marked.parse(introContent));
+        } else {
+            introMessageElement.textContent = introContent;
+        }
+
+        // Process existing messages on page load. The per-message rendering,
+        // chip detection, and skin inference all live in hydrateMessageShells
+        // so the exact same path can be reused when prepending older messages.
+        const existingMessages = document.querySelectorAll('.message[data-raw]');
+        hydrateMessageShells(existingMessages);
         const inferredRoleplayActive = applyRoleplayStylesFromStateTags();
         applyHistoricalStartBlockDecoration();
         rebuildRoleplayDividersFromHistory();
@@ -1500,7 +1654,16 @@
         const initialQuota = parseInt('{{ quota }}');
         updateRemainingQuestions(initialRemaining, initialQuota);
         bindSuggestedQuestionChips(document);
-        
+
+        // "Load older messages": wire the button, and show it only when the
+        // initial window came back full (i.e. older messages likely exist).
+        // A page that loaded fewer than the limit has nothing older to fetch.
+        const loadOlderBtn = document.getElementById('loadOlderBtn');
+        if (loadOlderBtn) {
+            loadOlderBtn.addEventListener('click', loadOlderMessages);
+        }
+        setLoadOlderVisible(countLoadedHistoryRows() >= INITIAL_HISTORY_LIMIT);
+
         scrollToBottom();
     });
 

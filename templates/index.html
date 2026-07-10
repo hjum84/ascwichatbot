@@ -1288,7 +1288,12 @@
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: message }),
+        // Send this page's own program code with every message. The server
+        // previously resolved the chatbot from the browser-wide session,
+        // which a second chatbot tab silently overwrites (cross-chatbot
+        // history leak). The Jinja value is rendered per chatbot page, so
+        // every current and future chatbot is covered automatically.
+        body: JSON.stringify({ message: message, program: '{{ program_code }}' }),
       })
       .then(response => response.json())
       .then(data => {

@@ -1480,6 +1480,32 @@ load_dotenv()
 # 로컬은 API 키, Render는 Vertex AI로 분기.
 USE_VERTEX = os.getenv("USE_VERTEX_AI", "").lower() in ("1", "true", "yes")
 
+# Model IDs that Google has retired (shut down), mapped to their official
+# replacements. Chatbot rows in the DB may still carry a retired name; we
+# resolve it at read time so every chatbot keeps working without requiring a
+# manual admin-page update. Google announces replacements on
+# https://ai.google.dev/gemini-api/docs/deprecations
+RETIRED_MODEL_ALIASES = {
+    # Shut down 2026-05-25; official replacement per Google docs.
+    "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite",
+    # Shut down 2026-03-09; official replacement per Google docs.
+    "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+}
+
+
+def resolve_model_name(model_name):
+    """Map a retired model ID to its live replacement; pass others through."""
+    requested = (model_name or "").strip()
+    resolved = RETIRED_MODEL_ALIASES.get(requested, requested)
+    if resolved != requested:
+        logger.warning(
+            "Model '%s' has been retired by Google; using replacement '%s'. "
+            "Update the chatbot's AI Model setting in the admin page to clear "
+            "this warning.",
+            requested, resolved
+        )
+    return resolved
+
 if USE_VERTEX:
     gemini_client = genai.Client(
         vertexai=True,
@@ -1700,6 +1726,13 @@ def internal_set_program(program):
         # Set workstream mode flag to bypass LO Root ID checks
         session['current_program'] = program.upper()
         session['workstream_mode'] = True
+        # Record that this user legitimately opened this chatbot in this
+        # session, so /chat can accept the page's own program code even when
+        # another tab has since overwritten 'current_program' (multi-tab).
+        _authorized = session.get('authorized_programs') or []
+        if program.upper() not in _authorized:
+            _authorized.append(program.upper())
+            session['authorized_programs'] = _authorized[-20:]
         db.commit()
         
         program_upper = program.upper()
@@ -3206,6 +3239,13 @@ def set_program(program):
         
         # Set in session for current view
         session['current_program'] = program.upper()
+        # Record that this user legitimately opened this chatbot in this
+        # session, so /chat can accept the page's own program code even when
+        # another tab has since overwritten 'current_program' (multi-tab).
+        _authorized = session.get('authorized_programs') or []
+        if program.upper() not in _authorized:
+            _authorized.append(program.upper())
+            session['authorized_programs'] = _authorized[-20:]
         
         # Commit changes
         db.commit()
@@ -3692,7 +3732,35 @@ def parse_markdown(text):
 def chat():
     user_id = current_user.id
     user_message = request.json.get('message')
-    current_program = session.get('current_program')
+    # Chatbot identity for this message. The page now sends its own program
+    # code with every request because the Flask session's 'current_program'
+    # is browser-wide, not tab-wide: opening a second chatbot in another tab
+    # overwrites it, silently rerouting messages (and their saved history)
+    # to the other chatbot (reproduced in QA, 2026-07). The payload value
+    # wins; the session value remains only as a fallback for pages rendered
+    # before this change was deployed. Same payload-first pattern as
+    # /clear_chat_history and /older_messages.
+    requested_program = ((request.json or {}).get('program') or '').strip().upper()
+    session_program = (session.get('current_program') or '').strip().upper()
+    if requested_program and requested_program != session_program:
+        # Client-supplied and different from the access-checked session
+        # value. Accept it only if the user actually opened that chatbot's
+        # page in this session (the page-access routes record this) -- the
+        # legitimate multi-tab case. Anything else is refused instead of
+        # silently falling back, which is exactly the cross-chatbot leak.
+        authorized_programs = session.get('authorized_programs') or []
+        if requested_program not in authorized_programs:
+            logger.warning(
+                f"User {user_id} sent a chat message for program "
+                f"'{requested_program}' without an authorized page visit in "
+                f"this session (session program: '{session_program or 'none'}'). "
+                f"Refusing rather than rerouting."
+            )
+            return jsonify({
+                "error": "Your session for this chatbot has expired. "
+                         "Please reload the page and try again."
+            }), 403
+    current_program = requested_program or session_program or None
     roleplay_session_key = f"roleplay_active_{(current_program or '').upper()}"
     roleplay_session_id_key = f"roleplay_session_id_{(current_program or '').upper()}"
     roleplay_started_at_key = f"roleplay_started_at_{(current_program or '').upper()}"
@@ -3721,7 +3789,10 @@ def chat():
     try:
         # Get the chatbot's quota from database
         chatbot = ChatbotContent.get_by_code(db, current_program)
-        if not chatbot:
+        if not chatbot or not getattr(chatbot, 'is_active', True):
+            # Covers deleted/deactivated chatbots too: a tab left open after
+            # an admin removes the chatbot gets a clear error instead of
+            # continuing to chat with retired content.
             return jsonify({"error": "Program not found."}), 404
 
         if not user_has_accepted_disclaimer(db, user_id, chatbot):
@@ -4475,7 +4546,9 @@ def chat():
                     f"User: {effective_user_message}"
                 )
 
-                model_name = (getattr(chatbot, 'ai_model', None) or 'gemini-2.5-flash').strip()
+                model_name = resolve_model_name(
+                    getattr(chatbot, 'ai_model', None) or 'gemini-2.5-flash'
+                )
                 fallback_model_name = 'gemini-2.5-flash'
 
                 def is_transient_model_error(error_text):

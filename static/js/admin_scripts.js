@@ -696,7 +696,14 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         const editAiModel = document.getElementById('editAiModel');
                         if (editAiModel) {
-                            const selectedModel = data.ai_model || 'gemini-2.5-flash';
+                            // Retired model IDs mapped to their live replacements.
+                            // Kept in sync with RETIRED_MODEL_ALIASES in main.py.
+                            const retiredModelAliases = {
+                                'gemini-3.1-flash-lite-preview': 'gemini-3.1-flash-lite',
+                                'gemini-3-pro-preview': 'gemini-3.1-pro-preview'
+                            };
+                            const storedModel = data.ai_model || 'gemini-2.5-flash';
+                            const selectedModel = retiredModelAliases[storedModel] || storedModel;
                             const hasOption = Array.from(editAiModel.options).some(option => option.value === selectedModel);
                             if (!hasOption && selectedModel) {
                                 const customOption = document.createElement('option');
